@@ -30,6 +30,20 @@ let previewTimer = 0;
 let dirty = false;
 const postsCollapsedKey = "postizer.editor.postsCollapsed";
 
+function tr(key, fallback) {
+  if (window.postizerMessage) return window.postizerMessage(key, fallback);
+  return fallback;
+}
+
+function formatMessage(key, fallback, replacements = {}) {
+  if (window.postizerFormatMessage) return window.postizerFormatMessage(key, fallback, replacements);
+  let text = tr(key, fallback);
+  Object.entries(replacements).forEach(([name, value]) => {
+    text = text.replaceAll(`{${name}}`, String(value));
+  });
+  return text;
+}
+
 function apiURL(path) {
   const token = new URLSearchParams(window.location.search).get("token");
   if (!token) return path;
@@ -44,14 +58,14 @@ function setStatus(message) {
 
 function setDirty(value) {
   dirty = value;
-  if (saveState) saveState.textContent = dirty ? "Unsaved" : "Saved";
+  if (saveState) saveState.textContent = dirty ? tr("editor.unsaved", "Unsaved") : tr("editor.saved", "Saved");
 }
 
 function setPostLibraryCollapsed(collapsed) {
   if (!root || !postLibraryToggle) return;
   root.dataset.library = collapsed ? "collapsed" : "expanded";
   postLibraryToggle.setAttribute("aria-expanded", String(!collapsed));
-  postLibraryToggle.title = collapsed ? "Expand posts" : "Collapse posts";
+  postLibraryToggle.title = collapsed ? tr("editor.library.expand", "Expand posts") : tr("editor.library.collapse", "Collapse posts");
   postLibraryToggle.textContent = collapsed ? ">" : "<";
   try {
     localStorage.setItem(postsCollapsedKey, collapsed ? "1" : "0");
@@ -109,11 +123,11 @@ function insertDisplayEquation() {
 }
 
 function markdownImageAlt(value) {
-  return String(value || "Image").replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+  return String(value || tr("editor.image.default_alt", "Image")).replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
 }
 
 function latexBraceText(value) {
-  return String(value || "Image").replace(/\\/g, "\\\\").replace(/[{}]/g, "");
+  return String(value || tr("editor.image.default_alt", "Image")).replace(/\\/g, "\\\\").replace(/[{}]/g, "");
 }
 
 function nextFigureLabel(path = "") {
@@ -125,7 +139,7 @@ function nextFigureLabel(path = "") {
 
 function figureMarkdown(item = {}) {
   const path = item.path || item.Path || "";
-  const alt = item.alt || item.Alt || "Image";
+  const alt = item.alt || item.Alt || tr("editor.image.default_alt", "Image");
   const caption = item.caption || item.Caption || alt;
   const label = nextFigureLabel(path);
   return `\n\n\\begin{figure}\n![${markdownImageAlt(alt)}](${path})\n\\caption{${latexBraceText(caption)}}\n\\label{${label}}\n\\end{figure}\n\n`;
@@ -145,7 +159,7 @@ function selectionWrap(before, after = before, fallback = "") {
 function prefixSelection(prefix) {
   const start = editor.selectionStart || 0;
   const end = editor.selectionEnd || 0;
-  const selected = editor.value.slice(start, end) || "Text";
+  const selected = editor.value.slice(start, end) || tr("editor.selection.default_text", "Text");
   const next = selected.split("\n").map((line) => `${prefix}${line}`).join("\n");
   editor.value = editor.value.slice(0, start) + next + editor.value.slice(end);
   editor.selectionStart = start;
@@ -204,14 +218,14 @@ function fillForm(post) {
 }
 
 async function loadPost(slug) {
-  setStatus("Loading");
+  setStatus(tr("editor.status.loading", "Loading"));
   const response = await fetch(apiURL(`/admin/api/posts/${slug}`));
   if (!response.ok) throw new Error(await response.text());
   fillForm(await response.json());
   postLibrary.querySelectorAll("button").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.slug === slug);
   });
-  setStatus("Ready");
+  setStatus(tr("editor.status.ready", "Ready"));
 }
 
 function newPost() {
@@ -230,7 +244,7 @@ function newPost() {
   slugTouched = false;
   postLibrary.querySelectorAll("button").forEach((button) => button.classList.remove("is-active"));
   fields.title.focus();
-  setStatus("New");
+  setStatus(tr("editor.status.new", "New"));
   setDirty(true);
 }
 
@@ -238,10 +252,10 @@ async function savePost(draft) {
   const data = payload(draft);
   if (!data.title) {
     fields.title.focus();
-    setStatus("Title required");
+    setStatus(tr("editor.status.title_required", "Title required"));
     return;
   }
-  setStatus(draft ? "Saving draft" : "Publishing");
+  setStatus(draft ? tr("editor.status.saving_draft", "Saving draft") : tr("editor.status.publishing", "Publishing"));
   const response = await fetch(apiURL("/admin/api/posts"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -258,7 +272,7 @@ async function savePost(draft) {
   updateViewLink();
   await refreshPostLibrary(result.slug);
   setDirty(false);
-  setStatus(result.draft ? "Draft saved" : "Published");
+  setStatus(result.draft ? tr("editor.status.draft_saved", "Draft saved") : tr("editor.status.published", "Published"));
 }
 
 async function refreshPostLibrary(activeSlug) {
@@ -275,7 +289,7 @@ async function refreshPostLibrary(activeSlug) {
     button.classList.toggle("is-active", post.slug === activeSlug);
     button.innerHTML = "<strong></strong><span></span>";
     button.querySelector("strong").textContent = post.title;
-    button.querySelector("span").textContent = `${post.date || ""} ${post.draft ? "Draft" : "Published"}`;
+    button.querySelector("span").textContent = `${post.date || ""} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`;
     li.appendChild(button);
     postLibrary.appendChild(li);
   });
@@ -313,7 +327,7 @@ function schedulePreview(now = false) {
 
 function updateCounts() {
   const matches = editor.value.match(/[\p{L}\p{N}_]+/gu);
-  if (wordCount) wordCount.textContent = `${matches ? matches.length : 0} words`;
+  if (wordCount) wordCount.textContent = formatMessage("editor.word_count", "{count} words", { count: matches ? matches.length : 0 });
 }
 
 function updateViewLink() {
@@ -330,11 +344,11 @@ function afterEdit() {
 async function uploadFile(file, endpoint = "/admin/api/media") {
   const data = new FormData();
   data.append("file", file, file.name || "pasted-image.png");
-  setStatus("Uploading");
+  setStatus(tr("editor.status.uploading", "Uploading"));
   const response = await fetch(apiURL(endpoint), { method: "POST", body: data });
   if (!response.ok) throw new Error(await response.text());
   const result = await response.json();
-  setStatus("Uploaded");
+  setStatus(tr("editor.status.uploaded", "Uploaded"));
   await refreshMedia();
   return figureMarkdown(result.item || {});
 }
@@ -349,7 +363,7 @@ async function refreshMedia() {
     button.type = "button";
     button.className = "ui-media-button";
     button.dataset.path = item.path;
-    button.dataset.alt = item.alt || "Image";
+    button.dataset.alt = item.alt || tr("editor.image.default_alt", "Image");
     button.dataset.caption = item.caption || "";
     button.title = item.original_name;
     const img = document.createElement("img");
@@ -461,26 +475,26 @@ if (homeImageUpload && homeImageInput) {
     if (!file) return;
     const data = new FormData();
     data.append("file", file, file.name || "home-image.webp");
-    setStatus("Setting home image");
+    setStatus(tr("editor.status.setting_home_image", "Setting home image"));
     const response = await fetch(apiURL("/admin/api/home-image"), { method: "POST", body: data });
     if (!response.ok) {
       setStatus((await response.text()).trim());
       return;
     }
-    setStatus("Home image set");
+    setStatus(tr("editor.status.home_image_set", "Home image set"));
     window.location.reload();
   });
 }
 
 if (clearHomeImageButton) {
   clearHomeImageButton.addEventListener("click", async () => {
-    setStatus("Clearing home image");
+    setStatus(tr("editor.status.clearing_home_image", "Clearing home image"));
     const response = await fetch(apiURL("/admin/api/home-image"), { method: "DELETE" });
     if (!response.ok) {
       setStatus((await response.text()).trim());
       return;
     }
-    setStatus("Home image cleared");
+    setStatus(tr("editor.status.home_image_cleared", "Home image cleared"));
     window.location.reload();
   });
 }

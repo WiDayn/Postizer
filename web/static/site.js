@@ -1,3 +1,31 @@
+function readPostizerMessages() {
+  const node = document.querySelector("#postizerMessages");
+  if (!node) return {};
+  try {
+    return JSON.parse(node.textContent || "{}");
+  } catch (_) {
+    return {};
+  }
+}
+
+const postizerMessages = readPostizerMessages();
+
+function postizerMessage(key, fallback) {
+  const value = postizerMessages[key];
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function postizerFormatMessage(key, fallback, replacements = {}) {
+  let text = postizerMessage(key, fallback);
+  Object.entries(replacements).forEach(([name, value]) => {
+    text = text.replaceAll(`{${name}}`, String(value));
+  });
+  return text;
+}
+
+window.postizerMessage = postizerMessage;
+window.postizerFormatMessage = postizerFormatMessage;
+
 const mathDelimiters = [
   { left: "$$", right: "$$", display: true },
   { left: "\\[", right: "\\]", display: true },
@@ -44,7 +72,7 @@ function enhanceArticleFigures(root) {
   root.querySelectorAll(".article-figure img").forEach((image) => {
     image.tabIndex = 0;
     image.setAttribute("role", "button");
-    if (!image.title) image.title = "Open image";
+    if (!image.title) image.title = postizerMessage("site.image.open", "Open image");
   });
 }
 
@@ -69,12 +97,21 @@ function setupArticleLightbox() {
   lightbox.setAttribute("role", "dialog");
   lightbox.setAttribute("aria-modal", "true");
   lightbox.setAttribute("aria-hidden", "true");
-  lightbox.innerHTML = '<button type="button" class="image-lightbox__close">Close</button><img class="image-lightbox__image" alt=""><p class="image-lightbox__caption"></p>';
-  document.body.appendChild(lightbox);
 
-  const closeButton = lightbox.querySelector(".image-lightbox__close");
-  const image = lightbox.querySelector(".image-lightbox__image");
-  const caption = lightbox.querySelector(".image-lightbox__caption");
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "image-lightbox__close";
+  closeButton.textContent = postizerMessage("site.lightbox.close", "Close");
+
+  const image = document.createElement("img");
+  image.className = "image-lightbox__image";
+  image.alt = "";
+
+  const caption = document.createElement("p");
+  caption.className = "image-lightbox__caption";
+
+  lightbox.append(closeButton, image, caption);
+  document.body.appendChild(lightbox);
 
   const close = () => {
     lightbox.classList.remove("is-open");
@@ -139,6 +176,7 @@ document.addEventListener("DOMContentLoaded", () => {
             .forEach((doc) => {
               const li = document.createElement("li");
               li.innerHTML = `<time>index</time><a class="post-list-title" href="${doc.url}"></a><span class="post-list-summary"></span><span class="post-list-tags"></span>`;
+              li.querySelector("time").textContent = postizerMessage("site.search.index_label", "index");
               li.querySelector("a").textContent = doc.title;
               li.querySelector(".post-list-summary").textContent = doc.summary || "";
               li.querySelector(".post-list-tags").textContent = (doc.tags || []).map((tag) => `#${tag}`).join(" ");

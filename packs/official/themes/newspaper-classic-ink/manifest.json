@@ -1,0 +1,16 @@
+{
+  "id": "newspaper-classic-ink",
+  "type": "theme",
+  "name": "Newspaper Classic Ink",
+  "sort_name": "Newspaper Classic Ink",
+  "version": "1.0.0",
+  "description": "Official ink-negative Newspaper Classic: same dense editorial layout, now black paper, white type, and a press with too much ink.",
+  "default_locale": "en",
+  "styles": [
+    "ink.css"
+  ],
+  "translations_dir": "translations",
+  "tags": [
+    "official"
+  ]
+}

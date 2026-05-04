@@ -3,23 +3,23 @@
 <main class="login-page">
   <form class="login-card" method="post" action="/admin/login">
     <header>
-      <p class="kicker">Postizer Admin</p>
-      <h1>Login</h1>
+      <p class="kicker">{{msg . "login.kicker"}}</p>
+      <h1>{{msg . "common.login"}}</h1>
     </header>
-    {{if .Error}}<p class="login-error">{{.Error}}</p>{{end}}
+    {{if .Error}}<p class="login-error">{{msg . "login.error.invalid" .Error}}</p>{{end}}
     <label class="ui-field">
-      <span>Username</span>
+      <span>{{msg . "common.username"}}</span>
       <input class="ui-input" name="username" autocomplete="username" autofocus>
     </label>
     <label class="ui-field">
-      <span>Password</span>
+      <span>{{msg . "common.password"}}</span>
       <input class="ui-input" name="password" type="password" autocomplete="current-password">
     </label>
     <label class="ui-check">
       <input name="remember" type="checkbox" {{if .Remember}}checked{{end}}>
-      <span>Remember me</span>
+      <span>{{msg . "common.remember_me"}}</span>
     </label>
-    <button class="ui-button ui-button--primary" type="submit">Login</button>
+    <button class="ui-button ui-button--primary" type="submit">{{msg . "common.login"}}</button>
   </form>
 </main>
 </body>

@@ -1,12 +1,12 @@
 {{define "tags.html"}}
 {{template "chromeStart" .}}
 <header class="page-header compact">
-  <p class="kicker">Topic Index</p>
-  <h1>Tags</h1>
+  <p class="kicker">{{msg . "tags.kicker"}}</p>
+  <h1>{{msg . "tags.heading"}}</h1>
 </header>
 <ul class="dense-list">
   {{range .Tags}}
-  <li><a href="{{tagURL .}}">{{.Title}}</a><span>{{len .Posts}} posts</span>{{if .Summary}}<em>{{.Summary}}</em>{{end}}</li>
+  <li><a href="{{tagURL .}}">{{.Title}}</a><span>{{len .Posts}} {{msg $ "tags.count_suffix"}}</span>{{if .Summary}}<em>{{.Summary}}</em>{{end}}</li>
   {{end}}
 </ul>
 {{template "chromeEnd" .}}

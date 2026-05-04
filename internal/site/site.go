@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"postizer/internal/appearance"
+
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
@@ -34,7 +36,14 @@ type Store struct {
 }
 
 type Settings struct {
-	HomeImage HomeImage `json:"home_image"`
+	HomeImage   HomeImage            `json:"home_image"`
+	ThemePack   appearance.Selection `json:"theme_pack"`
+	ThemeLocale string               `json:"theme_locale"`
+	PluginOrder []string             `json:"plugin_order"`
+
+	// Theme / TextPack 仅用于兼容读取旧版配置，保存时会被清空。
+	TextPack appearance.Selection `json:"text_pack,omitempty"`
+	Theme    string               `json:"theme,omitempty"`
 }
 
 type HomeImage struct {
@@ -145,7 +154,8 @@ func LoadSettings(root string) (Settings, error) {
 	path := filepath.Join(root, "settings.json")
 	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return Settings{}, nil
+		settings := defaultSettings()
+		return settings, nil
 	}
 	if err != nil {
 		return Settings{}, err
@@ -154,16 +164,21 @@ func LoadSettings(root string) (Settings, error) {
 	if err := json.Unmarshal(body, &settings); err != nil {
 		return Settings{}, err
 	}
+	normalizeSettings(&settings)
 	return settings, nil
 }
 
 func SaveSettings(root string, settings Settings) error {
+	normalizeSettings(&settings)
 	if settings.HomeImage.Src != "" && !strings.HasPrefix(settings.HomeImage.Src, "/media/") && !strings.HasPrefix(settings.HomeImage.Src, "/static/") {
 		return fmt.Errorf("home image must use a public /media or /static path")
 	}
 	if settings.HomeImage.Alt == "" {
 		settings.HomeImage.Alt = "Home page image"
 	}
+	// 避免新格式保存时继续写出旧版遗留字段。
+	settings.Theme = ""
+	settings.TextPack = appearance.Selection{}
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return err
 	}
@@ -172,6 +187,113 @@ func SaveSettings(root string, settings Settings) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(root, "settings.json"), body, 0644)
+}
+
+// defaultSettings 返回系统启动时应采用的默认设置。
+func defaultSettings() Settings {
+	return Settings{
+		ThemePack: appearance.Selection{
+			Enabled: false,
+			PackID:  appearance.DefaultThemePackID,
+		},
+		ThemeLocale: "en",
+	}
+}
+
+// normalizeSettings 负责兼容旧字段，并补全新的默认值。
+//
+// 兼容策略：
+// 1. 如果旧版 `theme` 字段存在而新版主题包还没写入，则把它迁移到主题包选择。
+// 2. 如果旧版 `text_pack` 存在，则迁移成主题语言或插件顺序。
+// 3. 无论来源如何，都会补上默认主题包 ID，并清洗插件顺序里的空值和重复值。
+func normalizeSettings(settings *Settings) {
+	defaults := defaultSettings()
+
+	if strings.TrimSpace(settings.ThemePack.PackID) == "" {
+		switch strings.TrimSpace(settings.Theme) {
+		case "", "newspaper":
+			settings.ThemePack = defaults.ThemePack
+		default:
+			settings.ThemePack = appearance.Selection{
+				Enabled: true,
+				PackID:  strings.TrimSpace(settings.Theme),
+			}
+		}
+	}
+
+	settings.ThemePack = normalizePackSelection(settings.ThemePack, appearance.DefaultThemePackID)
+	settings.ThemeLocale = normalizeThemeLocaleValue(settings.ThemeLocale)
+	settings.PluginOrder = normalizePluginOrder(settings.PluginOrder)
+
+	// 旧版文字包迁移：
+	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。
+	// - 官方英文/中文包迁移成主题语言。
+	// - 其他旧版文字包迁移成插件包顺序中的首位。
+	legacyTextPackID := strings.TrimSpace(settings.TextPack.PackID)
+	if settings.TextPack.Enabled && legacyTextPackID != "" {
+		switch legacyTextPackID {
+		case appearance.LegacyDefaultTextPackID:
+			if strings.TrimSpace(settings.ThemeLocale) == "" || settings.ThemeLocale == defaults.ThemeLocale {
+				settings.ThemeLocale = "en"
+			}
+		case appearance.LegacyChineseTextPackID:
+			settings.ThemeLocale = "zh-CN"
+		default:
+			settings.PluginOrder = prependPluginID(settings.PluginOrder, legacyTextPackID)
+		}
+	}
+
+	if strings.TrimSpace(settings.ThemeLocale) == "" {
+		settings.ThemeLocale = defaults.ThemeLocale
+	}
+}
+
+// normalizePackSelection 把资源包选择归一成当前设置页使用的新语义：
+// 1. 选择默认包 => 视为恢复默认，因此 Enabled=false
+// 2. 选择非默认包 => 视为启用该资源包，因此 Enabled=true
+func normalizePackSelection(selection appearance.Selection, defaultID string) appearance.Selection {
+	if strings.TrimSpace(selection.PackID) == "" {
+		selection.PackID = defaultID
+	}
+	selection.Enabled = strings.TrimSpace(selection.PackID) != defaultID
+	return selection
+}
+
+func normalizeThemeLocaleValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	switch strings.ToLower(value) {
+	case "zh-cn", "zh_cn":
+		return "zh-CN"
+	default:
+		return value
+	}
+}
+
+func normalizePluginOrder(values []string) []string {
+	var normalized []string
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		normalized = append(normalized, value)
+		seen[value] = true
+	}
+	return normalized
+}
+
+func prependPluginID(values []string, id string) []string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return normalizePluginOrder(values)
+	}
+	reordered := []string{id}
+	reordered = append(reordered, values...)
+	return normalizePluginOrder(reordered)
 }
 
 func loadPosts(dir string, md goldmark.Markdown, store *Store) error {

@@ -23,10 +23,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("open media store: %v", err)
 	}
+	handler, err := apphttp.New(store, mediaStore, "content")
+	if err != nil {
+		log.Fatalf("create server: %v", err)
+	}
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           apphttp.New(store, mediaStore, "content"),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

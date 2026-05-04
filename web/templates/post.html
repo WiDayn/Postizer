@@ -2,11 +2,11 @@
 {{template "chromeStart" .}}
 <article class="article">
   <header class="article-header">
-    <p class="kicker">Article</p>
+    <p class="kicker">{{msg . "post.kicker"}}</p>
     <h1>{{.Post.Title}}</h1>
     <div class="post-meta">
       <time>{{date .Post.Date}}</time>
-      <span>{{.Post.ReadingTime}} min</span>
+      <span>{{.Post.ReadingTime}} {{msg . "common.minute_suffix"}}</span>
       {{range .Post.Tags}}<a href="/tags/{{.}}">#{{.}}</a>{{end}}
     </div>
   </header>

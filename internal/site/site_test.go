@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"postizer/internal/appearance"
 )
 
 func TestSavePostAndLoadDraft(t *testing.T) {
@@ -208,5 +210,81 @@ func TestRenderMarkdownDoesNotRenderFiguresInCode(t *testing.T) {
 	rendered := string(html)
 	if strings.Contains(rendered, `article-figure`) || !strings.Contains(rendered, `\figref{fig:code}`) {
 		t.Fatalf("figure syntax inside code was modified:\n%s", rendered)
+	}
+}
+
+func TestLoadSettingsMigratesLegacyThemeField(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "theme": "newspaper"
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ThemePack.Enabled {
+		t.Fatal("legacy newspaper theme should fall back to default pack without forcing enabled=true")
+	}
+	if got, want := settings.ThemePack.PackID, appearance.DefaultThemePackID; got != want {
+		t.Fatalf("theme pack id = %q, want %q", got, want)
+	}
+	if got, want := settings.ThemeLocale, "en"; got != want {
+		t.Fatalf("theme locale = %q, want %q", got, want)
+	}
+}
+
+func TestLoadSettingsMigratesLegacyTextPackIntoThemeLocaleAndPluginOrder(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "text_pack": {
+    "enabled": true,
+    "pack_id": "custom-copy"
+  },
+  "theme_locale": "zh_cn",
+  "plugin_order": ["custom-copy", "extra-copy", "custom-copy"]
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.ThemeLocale, "zh-CN"; got != want {
+		t.Fatalf("theme locale = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(settings.PluginOrder, ","), "custom-copy,extra-copy"; got != want {
+		t.Fatalf("plugin order = %q, want %q", got, want)
+	}
+}
+
+func TestLoadSettingsIgnoresDisabledLegacyTextPack(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "text_pack": {
+    "enabled": false,
+    "pack_id": "custom-copy"
+  },
+  "theme_locale": "zh_cn",
+  "plugin_order": ["extra-copy"]
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.ThemeLocale, "zh-CN"; got != want {
+		t.Fatalf("theme locale = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(settings.PluginOrder, ","), "extra-copy"; got != want {
+		t.Fatalf("plugin order = %q, want %q", got, want)
 	}
 }

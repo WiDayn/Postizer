@@ -3,64 +3,64 @@
 <section class="editor-shell" data-mode="split" data-library="expanded">
   <header class="editor-topbar">
     <div>
-      <p class="kicker">Admin</p>
-      <h1>Editor</h1>
+      <p class="kicker">{{msg . "admin.kicker"}}</p>
+      <h1>{{msg . "editor.heading"}}</h1>
     </div>
     <div class="editor-actions">
-      <span id="editorStatus" class="ui-status">Ready</span>
-      <button type="button" id="newPostButton" class="ui-button">New</button>
-      <button type="button" id="saveDraftButton" class="ui-button">Save Draft</button>
-      <button type="button" id="publishButton" class="ui-button ui-button--primary">Publish</button>
-      <a id="viewPostLink" class="ui-button ui-button--ghost" href="/" target="_blank">View</a>
+      <span id="editorStatus" class="ui-status">{{msg . "editor.status.ready"}}</span>
+      <button type="button" id="newPostButton" class="ui-button">{{msg . "editor.new"}}</button>
+      <button type="button" id="saveDraftButton" class="ui-button">{{msg . "editor.save_draft"}}</button>
+      <button type="button" id="publishButton" class="ui-button ui-button--primary">{{msg . "editor.publish"}}</button>
+      <a id="viewPostLink" class="ui-button ui-button--ghost" href="/" target="_blank">{{msg . "editor.view"}}</a>
     </div>
   </header>
 
   <div class="editor-workbench">
-    <aside id="editorLibrary" class="editor-library ui-panel" aria-label="Posts">
+    <aside id="editorLibrary" class="editor-library ui-panel" aria-label="{{msg . "editor.library.posts"}}">
       <div class="ui-panel__head">
         <div class="editor-library-title">
-          <h2>Posts</h2>
+          <h2>{{msg . "editor.library.posts"}}</h2>
           <span>{{len .Store.AllPosts}}</span>
         </div>
-        <button id="togglePostLibrary" class="ui-button ui-button--ghost editor-collapse-button" type="button" aria-controls="postLibrary" aria-expanded="true" title="Collapse posts">&lt;</button>
+        <button id="togglePostLibrary" class="ui-button ui-button--ghost editor-collapse-button" type="button" aria-controls="postLibrary" aria-expanded="true" title="{{msg . "editor.library.collapse"}}">&lt;</button>
       </div>
       <ol id="postLibrary" class="editor-post-list">
         {{range .Store.AllPosts}}
         <li>
           <button type="button" class="ui-list-button" data-slug="{{.Slug}}">
             <strong>{{.Title}}</strong>
-            <span>{{date .Date}} {{if .Draft}}Draft{{else}}Published{{end}}</span>
+            <span>{{date .Date}} {{if .Draft}}{{msg $ "common.draft"}}{{else}}{{msg $ "common.published"}}{{end}}</span>
           </button>
         </li>
         {{else}}
-        <li class="empty">No posts</li>
+        <li class="empty">{{msg . "editor.library.empty"}}</li>
         {{end}}
       </ol>
     </aside>
 
     <div class="editor-main">
-      <input id="postTitle" class="title-field ui-input" type="text" placeholder="Title">
+      <input id="postTitle" class="title-field ui-input" type="text" placeholder="{{msg . "editor.title_placeholder"}}">
       <div class="permalink-row">
         <span>/posts/</span>
         <input id="postSlug" class="ui-input" type="text" inputmode="latin" autocomplete="off">
       </div>
 
       <div class="editor-toolbar ui-toolbar" aria-label="Markdown toolbar">
-        <button type="button" class="ui-button" data-command="bold" title="Bold"><strong>B</strong></button>
-        <button type="button" class="ui-button" data-command="italic" title="Italic"><em>I</em></button>
-        <button type="button" class="ui-button" data-command="heading" title="Heading">H2</button>
-        <button type="button" class="ui-button" data-command="quote" title="Quote">"</button>
-        <button type="button" class="ui-button" data-command="code" title="Code">{ }</button>
-        <button type="button" class="ui-button" data-command="link" title="Link">[]</button>
-        <button type="button" class="ui-button" data-command="math" title="Math">MATH</button>
-        <button type="button" class="ui-button" data-command="equation" title="Labelled display equation">EQ</button>
-        <button type="button" class="ui-button" data-command="eqref" title="Equation reference">REF</button>
-        <button type="button" class="ui-button" data-command="image" title="Upload figure">FIG</button>
-        <button type="button" class="ui-button" data-command="figref" title="Figure reference">FREF</button>
+        <button type="button" class="ui-button" data-command="bold" title="{{msg . "editor.toolbar.bold"}}"><strong>B</strong></button>
+        <button type="button" class="ui-button" data-command="italic" title="{{msg . "editor.toolbar.italic"}}"><em>I</em></button>
+        <button type="button" class="ui-button" data-command="heading" title="{{msg . "editor.toolbar.heading"}}">H2</button>
+        <button type="button" class="ui-button" data-command="quote" title="{{msg . "editor.toolbar.quote"}}">"</button>
+        <button type="button" class="ui-button" data-command="code" title="{{msg . "editor.toolbar.code"}}">{ }</button>
+        <button type="button" class="ui-button" data-command="link" title="{{msg . "editor.toolbar.link"}}">[]</button>
+        <button type="button" class="ui-button" data-command="math" title="{{msg . "editor.toolbar.math"}}">MATH</button>
+        <button type="button" class="ui-button" data-command="equation" title="{{msg . "editor.toolbar.equation"}}">EQ</button>
+        <button type="button" class="ui-button" data-command="eqref" title="{{msg . "editor.toolbar.eqref"}}">REF</button>
+        <button type="button" class="ui-button" data-command="image" title="{{msg . "editor.toolbar.image"}}">FIG</button>
+        <button type="button" class="ui-button" data-command="figref" title="{{msg . "editor.toolbar.figref"}}">FREF</button>
         <span class="ui-separator"></span>
-        <button type="button" class="ui-button" data-mode-button="edit">Edit</button>
-        <button type="button" class="ui-button is-active" data-mode-button="split">Split</button>
-        <button type="button" class="ui-button" data-mode-button="preview">Preview</button>
+        <button type="button" class="ui-button" data-mode-button="edit">{{msg . "editor.mode.edit"}}</button>
+        <button type="button" class="ui-button is-active" data-mode-button="split">{{msg . "editor.mode.split"}}</button>
+        <button type="button" class="ui-button" data-mode-button="preview">{{msg . "editor.mode.preview"}}</button>
       </div>
 
       <div class="editor-stage">
@@ -69,50 +69,50 @@
       </div>
 
       <footer class="editor-footer">
-        <span id="wordCount">0 words</span>
-        <span id="saveState">Unsaved</span>
+        <span id="wordCount">0</span>
+        <span id="saveState">{{msg . "editor.unsaved"}}</span>
       </footer>
     </div>
 
-    <aside class="editor-sidebar" aria-label="Settings">
+    <aside class="editor-sidebar" aria-label="{{msg . "nav.settings"}}">
       <section class="settings-panel ui-panel">
         <div class="ui-panel__head">
-          <h2>Document</h2>
+          <h2>{{msg . "editor.settings.document"}}</h2>
         </div>
         <label class="ui-field">
-          <span>Date</span>
+          <span>{{msg . "editor.settings.date"}}</span>
           <input id="postDate" class="ui-input" type="date">
         </label>
         <label class="ui-field">
-          <span>Updated</span>
+          <span>{{msg . "editor.settings.updated"}}</span>
           <input id="postUpdated" class="ui-input" type="date">
         </label>
         <label class="ui-field">
-          <span>Tags</span>
-          <input id="postTags" class="ui-input" type="text" placeholder="go, markdown, math">
+          <span>{{msg . "editor.settings.tags"}}</span>
+          <input id="postTags" class="ui-input" type="text" placeholder="{{msg . "editor.settings.tags_placeholder"}}">
         </label>
         <label class="ui-field">
-          <span>Summary</span>
+          <span>{{msg . "editor.settings.summary"}}</span>
           <textarea id="postSummary" class="ui-textarea" rows="5"></textarea>
         </label>
         <label class="ui-check">
           <input id="postDraft" type="checkbox">
-          <span>Draft</span>
+          <span>{{msg . "editor.settings.draft"}}</span>
         </label>
         <label class="ui-check">
           <input id="postTOC" type="checkbox" checked>
-          <span>Table of contents</span>
+          <span>{{msg . "editor.settings.toc"}}</span>
         </label>
       </section>
 
       <section class="settings-panel ui-panel">
         <div class="ui-panel__head">
-          <h2>Media</h2>
-          <a href="/admin/media">Library</a>
+          <h2>{{msg . "editor.settings.media"}}</h2>
+          <a href="/admin/media">{{msg . "editor.settings.library"}}</a>
         </div>
         <form id="mediaUpload" class="compact-upload">
           <input id="fileInput" class="ui-input" name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
-          <button type="submit" class="ui-button">Upload</button>
+          <button type="submit" class="ui-button">{{msg . "common.upload"}}</button>
         </form>
         <div id="mediaStrip" class="media-strip">
           {{range .Media}}
@@ -120,13 +120,13 @@
             <img src="{{.Path}}" alt="{{.Alt}}">
           </button>
           {{else}}
-          <p>No media</p>
+          <p>{{msg . "editor.settings.no_media"}}</p>
           {{end}}
         </div>
       </section>
     </aside>
   </div>
 </section>
-<script defer src="/static/admin.js?v=9"></script>
+<script defer src="/static/admin.js?v=10"></script>
 {{template "adminEnd" .}}
 {{end}}
