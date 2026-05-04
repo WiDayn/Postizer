@@ -1,0 +1,29 @@
+{{define "admin_settings.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">Admin</p>
+  <h1>Settings</h1>
+</header>
+<section class="ui-panel admin-panel">
+  <div class="ui-panel__head">
+    <h2>Home Image</h2>
+    {{if .Store.Settings.HomeImage.Enabled}}<span>Enabled</span>{{else}}<span>Not set</span>{{end}}
+  </div>
+  <form id="homeImageUpload" class="settings-form">
+    {{if .Store.Settings.HomeImage.Enabled}}
+    <img class="settings-home-image" src="{{.Store.Settings.HomeImage.Src}}" alt="{{.Store.Settings.HomeImage.Alt}}">
+    {{end}}
+    <label class="ui-field">
+      <span>Upload image</span>
+      <input id="homeImageInput" class="ui-input" name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
+    </label>
+    <div class="settings-actions">
+      <button type="submit" class="ui-button ui-button--primary">Set Home Image</button>
+      <button type="button" id="clearHomeImageButton" class="ui-button ui-button--ghost">Clear</button>
+      <span id="settingsStatus" class="ui-status">Ready</span>
+    </div>
+  </form>
+</section>
+<script defer src="/static/admin-settings.js?v=1"></script>
+{{template "adminEnd" .}}
+{{end}}

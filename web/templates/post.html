@@ -1,0 +1,16 @@
+{{define "post.html"}}
+{{template "chromeStart" .}}
+<article class="article">
+  <header class="article-header">
+    <p class="kicker">Article</p>
+    <h1>{{.Post.Title}}</h1>
+    <div class="post-meta">
+      <time>{{date .Post.Date}}</time>
+      <span>{{.Post.ReadingTime}} min</span>
+      {{range .Post.Tags}}<a href="/tags/{{.}}">#{{.}}</a>{{end}}
+    </div>
+  </header>
+  <div class="article-body js-math">{{.Post.HTML}}</div>
+</article>
+{{template "chromeEnd" .}}
+{{end}}

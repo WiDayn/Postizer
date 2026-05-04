@@ -1,0 +1,106 @@
+{{define "head"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/site.css?v=32">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+  <script defer src="/static/site.js?v=4"></script>
+</head>
+<body>
+{{end}}
+
+{{define "chromeStart"}}
+{{template "head" .}}
+<div class="site-shell">
+  <header class="newspaper-header">
+    <a class="brand compact-brand" href="/">Postizer</a>
+    <div class="edition-line">
+      <span>Markdown · Math · Go</span>
+    </div>
+  </header>
+  {{if and .Home .Store.Settings.HomeImage.Enabled}}
+  <figure class="home-image-band">
+    <img src="{{.Store.Settings.HomeImage.Src}}" alt="{{.Store.Settings.HomeImage.Alt}}">
+  </figure>
+  {{end}}
+  <nav class="section-nav" aria-label="Primary">
+    <a href="/">Front Page</a>
+    <a href="/archive">Archive</a>
+    <a href="/tags">Topics</a>
+    <a href="/search">Search</a>
+    {{range .Store.Pages}}<a href="{{pageURL .}}">{{.Title}}</a>{{end}}
+    <a href="/admin">Admin</a>
+  </nav>
+  <main class="main-column">
+{{end}}
+
+{{define "adminStart"}}
+{{template "head" .}}
+<div class="admin-shell">
+  <aside class="admin-sidebar">
+    <a class="admin-brand" href="/admin">Postizer</a>
+    <nav class="admin-nav" aria-label="Admin">
+      <a class="{{if eq .ActiveAdmin "dashboard"}}is-active{{end}}" href="/admin">Dashboard</a>
+      <a class="{{if eq .ActiveAdmin "posts"}}is-active{{end}}" href="/admin/posts">Posts</a>
+      <a class="{{if eq .ActiveAdmin "editor"}}is-active{{end}}" href="/admin/editor">Editor</a>
+      <a class="{{if eq .ActiveAdmin "media"}}is-active{{end}}" href="/admin/media">Media</a>
+      <a class="{{if eq .ActiveAdmin "settings"}}is-active{{end}}" href="/admin/settings">Settings</a>
+    </nav>
+    <div class="admin-sidebar-footer">
+      <a href="/">View Site</a>
+      <a href="/admin/logout">Logout</a>
+    </div>
+  </aside>
+  <main class="admin-main">
+{{end}}
+
+{{define "adminEnd"}}
+  </main>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "chromeEnd"}}
+  </main>
+  <aside class="right-rail">
+    <div class="rail-section">
+      <h2>Topics</h2>
+      <div class="tag-list">
+        {{range .Store.Tags}}<a href="{{tagURL .}}">{{.Title}} <span>{{len .Posts}}</span></a>{{end}}
+      </div>
+    </div>
+    <div class="rail-section">
+      <h2>Pages</h2>
+      {{range .Store.Pages}}<a href="{{pageURL .}}">{{.Title}}</a>{{end}}
+    </div>
+    <div class="rail-section">
+      <h2>Feeds</h2>
+      <a href="/feed.xml">RSS</a>
+      <a href="/sitemap.xml">Sitemap</a>
+    </div>
+  </aside>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "postList"}}
+<ol class="post-list">
+  {{range .}}
+  <li>
+    <time>{{date .Date}}</time>
+    <a class="post-list-title" href="{{postURL .}}">{{.Title}}</a>
+    <span class="post-list-summary">{{.Summary}}</span>
+    <span class="post-list-tags">{{range .Tags}}#{{.}} {{end}}</span>
+  </li>
+  {{else}}
+  <li class="empty">No posts yet.</li>
+  {{end}}
+</ol>
+{{end}}

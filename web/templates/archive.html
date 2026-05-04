@@ -1,0 +1,9 @@
+{{define "archive.html"}}
+{{template "chromeStart" .}}
+<header class="page-header compact">
+  <p class="kicker">Archive Desk</p>
+  <h1>Chronological index</h1>
+</header>
+{{template "postList" .Posts}}
+{{template "chromeEnd" .}}
+{{end}}

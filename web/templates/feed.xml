@@ -1,0 +1,17 @@
+{{define "feed.xml"}}<rss version="2.0">
+  <channel>
+    <title>Postizer</title>
+    <link>/</link>
+    <description>Postizer feed</description>
+    {{range .Posts}}
+    <item>
+      <title>{{.Title}}</title>
+      <link>/posts/{{.Slug}}</link>
+      <guid>/posts/{{.Slug}}</guid>
+      <pubDate>{{date .Date}}</pubDate>
+      <description>{{.Summary}}</description>
+    </item>
+    {{end}}
+  </channel>
+</rss>
+{{end}}

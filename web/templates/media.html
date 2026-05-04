@@ -1,0 +1,55 @@
+{{define "media.html"}}
+{{template "adminStart" .}}
+<header class="page-header compact">
+  <p class="kicker">Admin</p>
+  <h1>Media library</h1>
+</header>
+
+<section class="media-manager">
+  <form id="mediaLibraryUpload" class="media-upload-panel ui-panel">
+    <div class="ui-panel__head">
+      <h2>Upload</h2>
+      <span id="mediaLibraryStatus">Ready</span>
+    </div>
+    <div class="media-upload-row">
+      <input id="mediaLibraryFile" class="ui-input" name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
+      <button class="ui-button ui-button--primary" type="submit">Upload</button>
+    </div>
+  </form>
+
+  <div id="mediaLibraryGrid" class="media-grid">
+    {{range .Media}}
+    <figure class="media-item" data-id="{{.ID}}">
+      <img src="{{.Path}}" alt="{{.Alt}}">
+      <figcaption>
+        <form class="media-edit-form" data-id="{{.ID}}">
+          <label class="ui-field">
+            <span>Name</span>
+            <input class="ui-input" name="original_name" value="{{.OriginalName}}">
+          </label>
+          <label class="ui-field">
+            <span>Alt</span>
+            <input class="ui-input" name="alt" value="{{.Alt}}">
+          </label>
+          <label class="ui-field">
+            <span>Caption</span>
+            <textarea class="ui-textarea" name="caption" rows="3">{{.Caption}}</textarea>
+          </label>
+          <p class="media-meta">{{.Width}}x{{.Height}} / {{.MIMEType}}</p>
+          <textarea class="media-snippet ui-textarea" rows="5" readonly>{{mediaFigure .}}</textarea>
+          <div class="media-actions">
+            <button class="ui-button ui-button--primary" type="submit">Save</button>
+            <button class="ui-button" data-media-copy type="button">Copy figure</button>
+            <button class="ui-button ui-button--danger" data-media-delete type="button">Delete</button>
+          </div>
+        </form>
+      </figcaption>
+    </figure>
+    {{else}}
+    <p>No media uploaded yet.</p>
+    {{end}}
+  </div>
+</section>
+<script defer src="/static/media-library.js?v=1"></script>
+{{template "adminEnd" .}}
+{{end}}

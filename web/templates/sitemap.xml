@@ -1,0 +1,9 @@
+{{define "sitemap.xml"}}<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>/</loc></url>
+  <url><loc>/archive</loc></url>
+  <url><loc>/tags</loc></url>
+  {{range .Posts}}<url><loc>/posts/{{.Slug}}</loc></url>{{end}}
+  {{range .Pages}}<url><loc>/pages/{{.Slug}}</loc></url>{{end}}
+  {{range .Tags}}<url><loc>/tags/{{.Slug}}</loc></url>{{end}}
+</urlset>
+{{end}}

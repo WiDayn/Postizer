@@ -1,0 +1,44 @@
+{{define "home.html"}}
+{{template "chromeStart" .}}
+<section class="front-page">
+  <div class="front-grid">
+    {{range $i, $post := .Posts}}
+      {{if eq $i 0}}
+      <article class="lead-story">
+        <p class="kicker">Lead Article</p>
+        <h2><a href="{{postURL $post}}">{{$post.Title}}</a></h2>
+        <p>{{$post.Summary}}</p>
+        <div class="post-meta">
+          <time>{{date $post.Date}}</time>
+          <span>{{$post.ReadingTime}} min</span>
+          {{range $post.Tags}}<span>#{{.}}</span>{{end}}
+        </div>
+      </article>
+      {{end}}
+    {{else}}
+      <article class="lead-story">
+        <p class="kicker">Lead Article</p>
+        <h2>No posts yet</h2>
+        <p>Create the first article from the editor.</p>
+      </article>
+    {{end}}
+
+    {{if gt (len .Posts) 1}}
+      <section class="front-briefs">
+        <ol class="brief-list">
+          {{range $i, $post := .Posts}}
+            {{if ne $i 0}}
+            <li>
+              <time>{{date $post.Date}}</time>
+              <a href="{{postURL $post}}">{{$post.Title}}</a>
+              <span>{{$post.Summary}}</span>
+            </li>
+            {{end}}
+          {{end}}
+        </ol>
+      </section>
+    {{end}}
+  </div>
+</section>
+{{template "chromeEnd" .}}
+{{end}}

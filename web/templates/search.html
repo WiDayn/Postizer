@@ -1,0 +1,13 @@
+{{define "search.html"}}
+{{template "chromeStart" .}}
+<header class="page-header compact">
+  <p class="kicker">Search</p>
+  <h1>Search index</h1>
+</header>
+<label class="search-box">
+  <span>Query</span>
+  <input id="searchInput" type="search" autocomplete="off" autofocus>
+</label>
+<ol id="searchResults" class="post-list"></ol>
+{{template "chromeEnd" .}}
+{{end}}

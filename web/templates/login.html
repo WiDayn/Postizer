@@ -1,0 +1,27 @@
+{{define "login.html"}}
+{{template "head" .}}
+<main class="login-page">
+  <form class="login-card" method="post" action="/admin/login">
+    <header>
+      <p class="kicker">Postizer Admin</p>
+      <h1>Login</h1>
+    </header>
+    {{if .Error}}<p class="login-error">{{.Error}}</p>{{end}}
+    <label class="ui-field">
+      <span>Username</span>
+      <input class="ui-input" name="username" autocomplete="username" autofocus>
+    </label>
+    <label class="ui-field">
+      <span>Password</span>
+      <input class="ui-input" name="password" type="password" autocomplete="current-password">
+    </label>
+    <label class="ui-check">
+      <input name="remember" type="checkbox" {{if .Remember}}checked{{end}}>
+      <span>Remember me</span>
+    </label>
+    <button class="ui-button ui-button--primary" type="submit">Login</button>
+  </form>
+</main>
+</body>
+</html>
+{{end}}

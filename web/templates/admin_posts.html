@@ -1,0 +1,27 @@
+{{define "admin_posts.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">Admin</p>
+  <h1>Posts</h1>
+  <a class="ui-button ui-button--primary" href="/admin/editor">Open Editor</a>
+</header>
+<section class="ui-panel admin-panel">
+  <div class="ui-panel__head">
+    <h2>All Posts</h2>
+    <span>{{len .Posts}}</span>
+  </div>
+  <ol class="admin-table-list">
+    {{range .Posts}}
+    <li>
+      <a href="/admin/editor">{{.Title}}</a>
+      <span>{{.Slug}}</span>
+      <span>{{date .Date}}</span>
+      <span>{{if .Draft}}Draft{{else}}Published{{end}}</span>
+    </li>
+    {{else}}
+    <li>No posts yet.</li>
+    {{end}}
+  </ol>
+</section>
+{{template "adminEnd" .}}
+{{end}}

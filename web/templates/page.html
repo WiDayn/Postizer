@@ -1,0 +1,12 @@
+{{define "page.html"}}
+{{template "chromeStart" .}}
+<article class="article">
+  <header class="article-header">
+    <p class="kicker">Page</p>
+    <h1>{{.Page.Title}}</h1>
+    {{if date .Page.Updated}}<div class="post-meta">Updated <time>{{date .Page.Updated}}</time></div>{{end}}
+  </header>
+  <div class="article-body js-math">{{.Page.HTML}}</div>
+</article>
+{{template "chromeEnd" .}}
+{{end}}

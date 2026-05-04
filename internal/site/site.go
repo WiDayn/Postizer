@@ -1,0 +1,1035 @@
+package site
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer/html"
+)
+
+var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+type Store struct {
+	Posts          []*Post
+	AllPosts       []*Post
+	Pages          []*Page
+	Tags           []*Tag
+	Settings       Settings
+	PostsBySlug    map[string]*Post
+	AllPostsBySlug map[string]*Post
+	PagesBySlug    map[string]*Page
+	TagsBySlug     map[string]*Tag
+}
+
+type Settings struct {
+	HomeImage HomeImage `json:"home_image"`
+}
+
+type HomeImage struct {
+	Enabled bool   `json:"enabled"`
+	Src     string `json:"src"`
+	Alt     string `json:"alt"`
+}
+
+type Post struct {
+	Title       string
+	Slug        string
+	Date        time.Time
+	Updated     time.Time
+	Tags        []string
+	Summary     string
+	Draft       bool
+	TOC         bool
+	HTML        template.HTML
+	Source      string
+	FilePath    string
+	ReadingTime int
+}
+
+type Page struct {
+	Title    string
+	Slug     string
+	Updated  time.Time
+	Summary  string
+	TOC      bool
+	HTML     template.HTML
+	Source   string
+	FilePath string
+}
+
+type Tag struct {
+	Name    string
+	Title   string
+	Slug    string
+	Summary string
+	Posts   []*Post
+}
+
+type frontMatter map[string]string
+
+type PostDraft struct {
+	Title   string   `json:"title"`
+	Slug    string   `json:"slug"`
+	Date    string   `json:"date"`
+	Updated string   `json:"updated"`
+	Tags    []string `json:"tags"`
+	Summary string   `json:"summary"`
+	Draft   bool     `json:"draft"`
+	TOC     bool     `json:"toc"`
+	Body    string   `json:"body"`
+}
+
+func Load(root string) (*Store, error) {
+	md := newMarkdown()
+	settings, err := LoadSettings(root)
+	if err != nil {
+		return nil, err
+	}
+
+	store := &Store{
+		Settings:       settings,
+		PostsBySlug:    map[string]*Post{},
+		AllPostsBySlug: map[string]*Post{},
+		PagesBySlug:    map[string]*Page{},
+		TagsBySlug:     map[string]*Tag{},
+	}
+
+	if err := loadPosts(filepath.Join(root, "posts"), md, store); err != nil {
+		return nil, err
+	}
+	if err := loadPages(filepath.Join(root, "pages"), md, store); err != nil {
+		return nil, err
+	}
+	if err := loadTagMetadata(filepath.Join(root, "tags"), store); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(store.Posts, func(i, j int) bool {
+		return store.Posts[i].Date.After(store.Posts[j].Date)
+	})
+	sort.Slice(store.AllPosts, func(i, j int) bool {
+		return store.AllPosts[i].Date.After(store.AllPosts[j].Date)
+	})
+	sort.Slice(store.Pages, func(i, j int) bool {
+		return store.Pages[i].Title < store.Pages[j].Title
+	})
+	for _, tag := range store.TagsBySlug {
+		sort.Slice(tag.Posts, func(i, j int) bool {
+			return tag.Posts[i].Date.After(tag.Posts[j].Date)
+		})
+		store.Tags = append(store.Tags, tag)
+	}
+	sort.Slice(store.Tags, func(i, j int) bool {
+		if len(store.Tags[i].Posts) == len(store.Tags[j].Posts) {
+			return store.Tags[i].Slug < store.Tags[j].Slug
+		}
+		return len(store.Tags[i].Posts) > len(store.Tags[j].Posts)
+	})
+
+	return store, nil
+}
+
+func LoadSettings(root string) (Settings, error) {
+	path := filepath.Join(root, "settings.json")
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return Settings{}, nil
+	}
+	if err != nil {
+		return Settings{}, err
+	}
+	var settings Settings
+	if err := json.Unmarshal(body, &settings); err != nil {
+		return Settings{}, err
+	}
+	return settings, nil
+}
+
+func SaveSettings(root string, settings Settings) error {
+	if settings.HomeImage.Src != "" && !strings.HasPrefix(settings.HomeImage.Src, "/media/") && !strings.HasPrefix(settings.HomeImage.Src, "/static/") {
+		return fmt.Errorf("home image must use a public /media or /static path")
+	}
+	if settings.HomeImage.Alt == "" {
+		settings.HomeImage.Alt = "Home page image"
+	}
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, "settings.json"), body, 0644)
+}
+
+func loadPosts(dir string, md goldmark.Markdown, store *Store) error {
+	return walkMarkdown(dir, func(path string, body []byte) error {
+		fm, markdown := splitFrontMatter(body)
+		slug := fm.get("slug", slugFromPath(path))
+		if !slugPattern.MatchString(slug) {
+			return fmt.Errorf("invalid post slug %q in %s", slug, path)
+		}
+		htmlBody, err := renderMarkdown(md, markdown)
+		if err != nil {
+			return err
+		}
+		post := &Post{
+			Title:       fm.get("title", slug),
+			Slug:        slug,
+			Date:        parseDate(fm.get("date", "")),
+			Updated:     parseDate(fm.get("updated", "")),
+			Tags:        parseList(fm.get("tags", "")),
+			Summary:     fm.get("summary", ""),
+			Draft:       fm.get("draft", "false") == "true",
+			TOC:         fm.get("toc", "true") != "false",
+			HTML:        htmlBody,
+			Source:      string(markdown),
+			FilePath:    path,
+			ReadingTime: readingTime(markdown),
+		}
+		store.AllPosts = append(store.AllPosts, post)
+		store.AllPostsBySlug[post.Slug] = post
+		if post.Draft {
+			return nil
+		}
+		store.Posts = append(store.Posts, post)
+		store.PostsBySlug[post.Slug] = post
+		for _, tagName := range post.Tags {
+			tagSlug := normalizeSlug(tagName)
+			tag := store.TagsBySlug[tagSlug]
+			if tag == nil {
+				tag = &Tag{Name: tagName, Title: tagName, Slug: tagSlug}
+				store.TagsBySlug[tagSlug] = tag
+			}
+			tag.Posts = append(tag.Posts, post)
+		}
+		return nil
+	})
+}
+
+func loadPages(dir string, md goldmark.Markdown, store *Store) error {
+	return walkMarkdown(dir, func(path string, body []byte) error {
+		fm, markdown := splitFrontMatter(body)
+		slug := fm.get("slug", slugFromPath(path))
+		if !slugPattern.MatchString(slug) {
+			return fmt.Errorf("invalid page slug %q in %s", slug, path)
+		}
+		htmlBody, err := renderMarkdown(md, markdown)
+		if err != nil {
+			return err
+		}
+		page := &Page{
+			Title:    fm.get("title", slug),
+			Slug:     slug,
+			Updated:  parseDate(fm.get("updated", "")),
+			Summary:  fm.get("summary", ""),
+			TOC:      fm.get("toc", "false") == "true",
+			HTML:     htmlBody,
+			Source:   string(markdown),
+			FilePath: path,
+		}
+		store.Pages = append(store.Pages, page)
+		store.PagesBySlug[page.Slug] = page
+		return nil
+	})
+}
+
+func loadTagMetadata(dir string, store *Store) error {
+	return walkMarkdown(dir, func(path string, body []byte) error {
+		fm, _ := splitFrontMatter(body)
+		slug := fm.get("slug", slugFromPath(path))
+		if !slugPattern.MatchString(slug) {
+			return fmt.Errorf("invalid tag slug %q in %s", slug, path)
+		}
+		tag := store.TagsBySlug[slug]
+		if tag == nil {
+			tag = &Tag{Slug: slug}
+			store.TagsBySlug[slug] = tag
+		}
+		tag.Name = fm.get("name", slug)
+		tag.Title = fm.get("title", tag.Name)
+		tag.Summary = fm.get("summary", "")
+		return nil
+	})
+}
+
+func walkMarkdown(dir string, fn func(string, []byte) error) error {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return fn(path, body)
+	})
+}
+
+func renderMarkdown(md goldmark.Markdown, source []byte) (template.HTML, error) {
+	var out bytes.Buffer
+	preparedFigures, figureHTML := prepareFigureReferences(source)
+	prepared, equationAnchors := prepareEquationReferences(preparedFigures)
+	protected := protectMathDelimiters(prepared)
+	if err := md.Convert(protected, &out); err != nil {
+		return "", err
+	}
+	html := out.String()
+	for token, value := range mathTokens {
+		html = strings.ReplaceAll(html, token, value)
+	}
+	for token, value := range figureHTML {
+		html = strings.ReplaceAll(html, "<p>"+token+"</p>", value)
+		html = strings.ReplaceAll(html, token, value)
+	}
+	for token, value := range equationAnchors {
+		html = strings.ReplaceAll(html, "<p>"+token+"</p>", value)
+		html = strings.ReplaceAll(html, token, value)
+	}
+	return template.HTML(html), nil
+}
+
+type figureReference struct {
+	Number string
+	Anchor string
+}
+
+type equationReference struct {
+	Number string
+	Anchor string
+}
+
+var (
+	equationLabelPattern = regexp.MustCompile(`\\label\{([^}]+)\}`)
+	equationTagPattern   = regexp.MustCompile(`\\tag\*?\{([^}]+)\}`)
+	equationEqrefPattern = regexp.MustCompile(`\\eqref\{([^}]+)\}`)
+	equationRefPattern   = regexp.MustCompile(`\\ref\{([^}]+)\}`)
+	figureCaptionPattern = regexp.MustCompile(`(?s)\\caption\{([^}]*)\}`)
+	figureImagePattern   = regexp.MustCompile(`(?m)!\[([^\]]*)\]\(([^)]+)\)`)
+	figureLinePattern    = regexp.MustCompile(`^!\[([^\]]*)\]\(([^)]+)\)$`)
+	figureRefPattern     = regexp.MustCompile(`\\figref\{([^}]+)\}`)
+)
+
+func prepareFigureReferences(source []byte) ([]byte, map[string]string) {
+	text := strings.ReplaceAll(string(source), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	prepared, references, figures := collectFigureReferences(text)
+	if len(references) == 0 {
+		return []byte(prepared), figures
+	}
+	return []byte(replaceFigureReferences(prepared, references)), figures
+}
+
+func collectFigureReferences(text string) (string, map[string]figureReference, map[string]string) {
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	references := map[string]figureReference{}
+	figures := map[string]string{}
+	figureNumber := 0
+	inFence := false
+	fenceMarker := ""
+	inEquation := false
+	equationEnd := ""
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		if marker := markdownFenceMarker(trimmed); marker != "" {
+			if inFence {
+				if closesMarkdownFence(trimmed, fenceMarker) {
+					inFence = false
+					fenceMarker = ""
+				}
+			} else {
+				inFence = true
+				fenceMarker = marker
+			}
+			out = append(out, line)
+			continue
+		}
+		if inFence {
+			out = append(out, line)
+			continue
+		}
+		if inEquation {
+			out = append(out, line)
+			if trimmed == equationEnd {
+				inEquation = false
+				equationEnd = ""
+			}
+			continue
+		}
+		if _, endDelimiter, ok := equationBlockDelimiters(trimmed); ok {
+			inEquation = true
+			equationEnd = endDelimiter
+			out = append(out, line)
+			continue
+		}
+
+		if trimmed == `\begin{figure}` {
+			end := findLine(lines, i+1, `\end{figure}`)
+			if end == -1 {
+				out = append(out, line)
+				continue
+			}
+			figure, ok := parseFigureBody(strings.Join(lines[i+1:end], "\n"))
+			if !ok {
+				out = append(out, lines[i:end+1]...)
+				i = end
+				continue
+			}
+			figureNumber++
+			appendFigureToken(&out, references, figures, figure, figureNumber)
+			i = end
+			continue
+		}
+
+		if figure, ok := parseStandaloneFigureLine(trimmed); ok {
+			figureNumber++
+			appendFigureToken(&out, references, figures, figure, figureNumber)
+			continue
+		}
+
+		out = append(out, line)
+	}
+
+	return strings.Join(out, "\n"), references, figures
+}
+
+type articleFigure struct {
+	Alt     string
+	Src     string
+	Caption string
+	Label   string
+}
+
+func parseFigureBody(body string) (articleFigure, bool) {
+	imageMatch := figureImagePattern.FindStringSubmatch(body)
+	if len(imageMatch) == 0 {
+		return articleFigure{}, false
+	}
+	figure := articleFigure{
+		Alt: strings.TrimSpace(imageMatch[1]),
+		Src: markdownImageDestination(imageMatch[2]),
+	}
+	captionMatch := figureCaptionPattern.FindStringSubmatch(body)
+	if len(captionMatch) > 0 {
+		figure.Caption = strings.TrimSpace(captionMatch[1])
+	}
+	if figure.Caption == "" {
+		figure.Caption = figure.Alt
+	}
+	labelMatch := equationLabelPattern.FindStringSubmatch(body)
+	if len(labelMatch) > 0 {
+		figure.Label = strings.TrimSpace(labelMatch[1])
+	}
+	return figure, figure.Src != ""
+}
+
+func parseStandaloneFigureLine(line string) (articleFigure, bool) {
+	match := figureLinePattern.FindStringSubmatch(line)
+	if len(match) == 0 {
+		return articleFigure{}, false
+	}
+	alt := strings.TrimSpace(match[1])
+	src := markdownImageDestination(match[2])
+	if src == "" {
+		return articleFigure{}, false
+	}
+	return articleFigure{Alt: alt, Src: src, Caption: alt}, true
+}
+
+func markdownImageDestination(raw string) string {
+	value := strings.TrimSpace(raw)
+	if before, _, found := strings.Cut(value, " "); found {
+		value = before
+	}
+	return strings.Trim(value, "<>")
+}
+
+func appendFigureToken(out *[]string, references map[string]figureReference, figures map[string]string, figure articleFigure, number int) {
+	if len(*out) > 0 && strings.TrimSpace((*out)[len(*out)-1]) != "" {
+		*out = append(*out, "")
+	}
+	anchor := ""
+	if figure.Label != "" {
+		anchor = figureAnchorID(figure.Label)
+		if _, exists := references[figure.Label]; !exists {
+			references[figure.Label] = figureReference{Number: fmt.Sprintf("%d", number), Anchor: anchor}
+		} else {
+			anchor = fmt.Sprintf("%s-%d", anchor, len(figures)+1)
+		}
+	}
+	token := fmt.Sprintf("POSTIZER_FIGURE_%d", len(figures))
+	figures[token] = renderFigureHTML(figure, number, anchor)
+	*out = append(*out, token, "")
+}
+
+func renderFigureHTML(figure articleFigure, number int, anchor string) string {
+	var b strings.Builder
+	id := ""
+	if anchor != "" {
+		id = fmt.Sprintf(` id="%s"`, template.HTMLEscapeString(anchor))
+	}
+	fmt.Fprintf(&b, `<figure%s class="article-figure">`, id)
+	fmt.Fprintf(
+		&b,
+		`<img src="%s" alt="%s" loading="lazy">`,
+		template.HTMLEscapeString(figure.Src),
+		template.HTMLEscapeString(figure.Alt),
+	)
+	b.WriteString(`<figcaption><span class="figure-number">Figure `)
+	b.WriteString(fmt.Sprintf("%d", number))
+	b.WriteString(`.</span>`)
+	if strings.TrimSpace(figure.Caption) != "" {
+		b.WriteByte(' ')
+		b.WriteString(template.HTMLEscapeString(figure.Caption))
+	}
+	b.WriteString(`</figcaption></figure>`)
+	return b.String()
+}
+
+func replaceFigureReferences(text string, references map[string]figureReference) string {
+	lines := strings.Split(text, "\n")
+	inFence := false
+	fenceMarker := ""
+	inEquation := false
+	equationEnd := ""
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if marker := markdownFenceMarker(trimmed); marker != "" {
+			if inFence {
+				if closesMarkdownFence(trimmed, fenceMarker) {
+					inFence = false
+					fenceMarker = ""
+				}
+			} else {
+				inFence = true
+				fenceMarker = marker
+			}
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if inEquation {
+			if trimmed == equationEnd {
+				inEquation = false
+				equationEnd = ""
+			}
+			continue
+		}
+		if _, endDelimiter, ok := equationBlockDelimiters(trimmed); ok {
+			inEquation = true
+			equationEnd = endDelimiter
+			continue
+		}
+
+		line = figureRefPattern.ReplaceAllStringFunc(line, func(raw string) string {
+			return figureReferenceMarkdown(raw, figureRefPattern, references, true)
+		})
+		line = equationRefPattern.ReplaceAllStringFunc(line, func(raw string) string {
+			return figureReferenceMarkdown(raw, equationRefPattern, references, false)
+		})
+		lines[i] = line
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func figureReferenceMarkdown(raw string, pattern *regexp.Regexp, references map[string]figureReference, named bool) string {
+	match := pattern.FindStringSubmatch(raw)
+	if len(match) == 0 {
+		return raw
+	}
+	label := strings.TrimSpace(match[1])
+	reference, ok := references[label]
+	if !ok {
+		if named || strings.HasPrefix(label, "fig:") {
+			if named {
+				return "Figure ??"
+			}
+			return "??"
+		}
+		return raw
+	}
+	text := reference.Number
+	if named {
+		text = "Figure " + text
+	}
+	return fmt.Sprintf("[%s](#%s)", escapeMarkdownLinkText(text), reference.Anchor)
+}
+
+func prepareEquationReferences(source []byte) ([]byte, map[string]string) {
+	text := strings.ReplaceAll(string(source), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	prepared, references, anchors := collectEquationReferences(text)
+	if len(references) == 0 {
+		return []byte(prepared), anchors
+	}
+	return []byte(replaceEquationReferences(prepared, references)), anchors
+}
+
+func collectEquationReferences(text string) (string, map[string]equationReference, map[string]string) {
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	references := map[string]equationReference{}
+	anchors := map[string]string{}
+	equationNumber := 0
+	inFence := false
+	fenceMarker := ""
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		if marker := markdownFenceMarker(trimmed); marker != "" {
+			if inFence {
+				if closesMarkdownFence(trimmed, fenceMarker) {
+					inFence = false
+					fenceMarker = ""
+				}
+			} else {
+				inFence = true
+				fenceMarker = marker
+			}
+			out = append(out, line)
+			continue
+		}
+		if inFence {
+			out = append(out, line)
+			continue
+		}
+
+		startDelimiter, endDelimiter, ok := equationBlockDelimiters(trimmed)
+		if !ok {
+			out = append(out, line)
+			continue
+		}
+
+		end := findEquationBlockEnd(lines, i+1, endDelimiter)
+		if end == -1 {
+			out = append(out, line)
+			continue
+		}
+
+		body := strings.Join(lines[i+1:end], "\n")
+		labelMatch := equationLabelPattern.FindStringSubmatch(body)
+		label := ""
+		if len(labelMatch) > 0 {
+			label = strings.TrimSpace(labelMatch[1])
+			body = equationLabelPattern.ReplaceAllString(body, "")
+		}
+		tagMatch := equationTagPattern.FindStringSubmatch(body)
+		number := ""
+		if len(tagMatch) > 0 {
+			number = strings.TrimSpace(tagMatch[1])
+		} else {
+			equationNumber++
+			number = fmt.Sprintf("%d", equationNumber)
+			body = strings.TrimRight(body, "\n")
+			if strings.TrimSpace(body) != "" {
+				body += "\n"
+			}
+			body += `\tag{` + number + `}`
+		}
+
+		if len(out) > 0 && strings.TrimSpace(out[len(out)-1]) != "" {
+			out = append(out, "")
+		}
+		if label != "" {
+			anchor := equationAnchorID(label)
+			if _, exists := references[label]; !exists {
+				references[label] = equationReference{Number: number, Anchor: anchor}
+			} else {
+				anchor = fmt.Sprintf("%s-%d", anchor, len(anchors)+1)
+			}
+			token := fmt.Sprintf("POSTIZER_EQ_ANCHOR_%d", len(anchors))
+			anchors[token] = fmt.Sprintf(`<span id="%s" class="equation-anchor"></span>`, anchor)
+			out = append(out, token, "")
+		}
+		out = append(out, startDelimiter)
+		if body != "" {
+			out = append(out, strings.Split(body, "\n")...)
+		}
+		out = append(out, endDelimiter)
+		i = end
+	}
+
+	return strings.Join(out, "\n"), references, anchors
+}
+
+func replaceEquationReferences(text string, references map[string]equationReference) string {
+	lines := strings.Split(text, "\n")
+	inFence := false
+	fenceMarker := ""
+	inEquation := false
+	equationEnd := ""
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if marker := markdownFenceMarker(trimmed); marker != "" {
+			if inFence {
+				if closesMarkdownFence(trimmed, fenceMarker) {
+					inFence = false
+					fenceMarker = ""
+				}
+			} else {
+				inFence = true
+				fenceMarker = marker
+			}
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if inEquation {
+			if trimmed == equationEnd {
+				inEquation = false
+				equationEnd = ""
+			}
+			continue
+		}
+		if _, endDelimiter, ok := equationBlockDelimiters(trimmed); ok {
+			inEquation = true
+			equationEnd = endDelimiter
+			continue
+		}
+
+		line = equationEqrefPattern.ReplaceAllStringFunc(line, func(raw string) string {
+			return equationReferenceMarkdown(raw, equationEqrefPattern, references, true)
+		})
+		line = equationRefPattern.ReplaceAllStringFunc(line, func(raw string) string {
+			return equationReferenceMarkdown(raw, equationRefPattern, references, false)
+		})
+		lines[i] = line
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func equationReferenceMarkdown(raw string, pattern *regexp.Regexp, references map[string]equationReference, parenthesized bool) string {
+	match := pattern.FindStringSubmatch(raw)
+	if len(match) == 0 {
+		return raw
+	}
+	reference, ok := references[strings.TrimSpace(match[1])]
+	if !ok {
+		if parenthesized {
+			return "(??)"
+		}
+		return "??"
+	}
+	text := reference.Number
+	if parenthesized {
+		text = "(" + text + ")"
+	}
+	return fmt.Sprintf("[%s](#%s)", escapeMarkdownLinkText(text), reference.Anchor)
+}
+
+func escapeMarkdownLinkText(text string) string {
+	text = strings.ReplaceAll(text, `\`, `\\`)
+	text = strings.ReplaceAll(text, `[`, `\[`)
+	text = strings.ReplaceAll(text, `]`, `\]`)
+	return text
+}
+
+func equationBlockDelimiters(trimmed string) (string, string, bool) {
+	switch trimmed {
+	case "$$":
+		return "$$", "$$", true
+	case `\[`:
+		return `\[`, `\]`, true
+	default:
+		return "", "", false
+	}
+}
+
+func findEquationBlockEnd(lines []string, start int, endDelimiter string) int {
+	for i := start; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == endDelimiter {
+			return i
+		}
+	}
+	return -1
+}
+
+func findLine(lines []string, start int, target string) int {
+	for i := start; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func equationAnchorID(label string) string {
+	return prefixedAnchorID("eq-", label)
+}
+
+func figureAnchorID(label string) string {
+	return prefixedAnchorID("fig-", label)
+}
+
+func prefixedAnchorID(prefix, label string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(label)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	id := strings.Trim(b.String(), "-")
+	if id == "" {
+		id = strings.TrimSuffix(prefix, "-")
+	}
+	return prefix + id
+}
+
+func markdownFenceMarker(trimmed string) string {
+	if len(trimmed) < 3 {
+		return ""
+	}
+	ch := trimmed[0]
+	if ch != '`' && ch != '~' {
+		return ""
+	}
+	count := 0
+	for count < len(trimmed) && trimmed[count] == ch {
+		count++
+	}
+	if count < 3 {
+		return ""
+	}
+	return strings.Repeat(string(ch), count)
+}
+
+func closesMarkdownFence(trimmed, marker string) bool {
+	if marker == "" || len(trimmed) < len(marker) {
+		return false
+	}
+	for i := range marker {
+		if trimmed[i] != marker[i] {
+			return false
+		}
+	}
+	return true
+}
+
+var mathTokens = map[string]string{
+	"POSTIZER_MATH_INLINE_OPEN":  `\(`,
+	"POSTIZER_MATH_INLINE_CLOSE": `\)`,
+	"POSTIZER_MATH_BLOCK_OPEN":   `\[`,
+	"POSTIZER_MATH_BLOCK_CLOSE":  `\]`,
+}
+
+func protectMathDelimiters(source []byte) []byte {
+	text := string(source)
+	text = strings.ReplaceAll(text, `\(`, "POSTIZER_MATH_INLINE_OPEN")
+	text = strings.ReplaceAll(text, `\)`, "POSTIZER_MATH_INLINE_CLOSE")
+	text = strings.ReplaceAll(text, `\[`, "POSTIZER_MATH_BLOCK_OPEN")
+	text = strings.ReplaceAll(text, `\]`, "POSTIZER_MATH_BLOCK_CLOSE")
+	return []byte(text)
+}
+
+func RenderMarkdown(source string) (template.HTML, error) {
+	return renderMarkdown(newMarkdown(), []byte(source))
+}
+
+func SavePost(root string, draft PostDraft) error {
+	draft.Slug = NormalizeSlug(draft.Slug)
+	if draft.Slug == "" {
+		draft.Slug = NormalizeSlug(draft.Title)
+	}
+	if !ValidSlug(draft.Slug) {
+		return fmt.Errorf("invalid post slug %q", draft.Slug)
+	}
+	if strings.TrimSpace(draft.Title) == "" {
+		return fmt.Errorf("title is required")
+	}
+	if draft.Date == "" {
+		draft.Date = time.Now().Format("2006-01-02")
+	}
+	if _, err := time.Parse("2006-01-02", draft.Date); err != nil {
+		return fmt.Errorf("invalid date %q", draft.Date)
+	}
+	if draft.Updated != "" {
+		if _, err := time.Parse("2006-01-02", draft.Updated); err != nil {
+			return fmt.Errorf("invalid updated date %q", draft.Updated)
+		}
+	}
+
+	postsDir := filepath.Join(root, "posts")
+	if err := os.MkdirAll(postsDir, 0755); err != nil {
+		return err
+	}
+	target := filepath.Join(postsDir, draft.Slug+".md")
+	cleanPostsDir, err := filepath.Abs(postsDir)
+	if err != nil {
+		return err
+	}
+	cleanTarget, err := filepath.Abs(target)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(cleanTarget, cleanPostsDir+string(os.PathSeparator)) {
+		return fmt.Errorf("post path escapes content directory")
+	}
+	return os.WriteFile(cleanTarget, []byte(serializePost(draft)), 0644)
+}
+
+func serializePost(draft PostDraft) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	writeFrontMatter(&b, "title", draft.Title)
+	writeFrontMatter(&b, "slug", draft.Slug)
+	writeFrontMatter(&b, "date", draft.Date)
+	if draft.Updated != "" {
+		writeFrontMatter(&b, "updated", draft.Updated)
+	}
+	b.WriteString("tags: [")
+	for i, tag := range draft.Tags {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(strconvQuote(strings.TrimSpace(tag)))
+	}
+	b.WriteString("]\n")
+	writeFrontMatter(&b, "summary", draft.Summary)
+	fmt.Fprintf(&b, "draft: %t\n", draft.Draft)
+	fmt.Fprintf(&b, "toc: %t\n", draft.TOC)
+	b.WriteString("---\n\n")
+	b.WriteString(strings.TrimSpace(draft.Body))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func writeFrontMatter(b *strings.Builder, key, value string) {
+	fmt.Fprintf(b, "%s: %s\n", key, strconvQuote(value))
+}
+
+func strconvQuote(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	return `"` + value + `"`
+}
+
+func newMarkdown() goldmark.Markdown {
+	return goldmark.New(
+		goldmark.WithExtensions(extension.GFM, extension.Footnote, extension.Typographer),
+		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
+		goldmark.WithRendererOptions(html.WithXHTML()),
+	)
+}
+
+func splitFrontMatter(body []byte) (frontMatter, []byte) {
+	text := strings.ReplaceAll(string(body), "\r\n", "\n")
+	if !strings.HasPrefix(text, "---\n") {
+		return frontMatter{}, body
+	}
+	rest := strings.TrimPrefix(text, "---\n")
+	parts := strings.SplitN(rest, "\n---\n", 2)
+	if len(parts) != 2 {
+		return frontMatter{}, body
+	}
+	fm := frontMatter{}
+	for _, line := range strings.Split(parts[0], "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if ok {
+			fm[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"`)
+		}
+	}
+	return fm, []byte(parts[1])
+}
+
+func (fm frontMatter) get(key, fallback string) string {
+	if value := strings.TrimSpace(fm[key]); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func parseDate(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	t, _ := time.Parse("2006-01-02", value)
+	return t
+}
+
+func parseList(value string) []string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "[")
+	value = strings.TrimSuffix(value, "]")
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.Trim(strings.TrimSpace(part), `"`)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func slugFromPath(path string) string {
+	return normalizeSlug(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+}
+
+func NormalizeSlug(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, " ", "-")
+	value = regexp.MustCompile(`[^a-z0-9-]+`).ReplaceAllString(value, "")
+	value = regexp.MustCompile(`-+`).ReplaceAllString(value, "-")
+	return strings.Trim(value, "-")
+}
+
+func ValidSlug(value string) bool {
+	return slugPattern.MatchString(value)
+}
+
+func normalizeSlug(value string) string {
+	return NormalizeSlug(value)
+}
+
+func readingTime(body []byte) int {
+	words := len(strings.Fields(string(body)))
+	minutes := words / 220
+	if words%220 != 0 || minutes == 0 {
+		minutes++
+	}
+	return minutes
+}
