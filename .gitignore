@@ -1,2 +1,5 @@
-content/
-media/
+/content/
+/media/
+/run.sh
+/stop.sh
+/attach.sh

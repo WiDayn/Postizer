@@ -1,0 +1,76 @@
+{{define "admin_appearance.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">{{msg . "admin.kicker"}}</p>
+  <h1>{{msg . "settings.theme_packs.title"}}</h1>
+</header>
+
+<form
+  id="resourcePackSettingsForm"
+  class="appearance-settings-stack"
+  data-default-theme-pack-id="{{defaultThemePackID}}"
+  data-default-theme-locale="{{defaultThemeLocale .Appearance}}"
+  data-current-theme-pack-id="{{.Appearance.ThemeSelection.PackID}}"
+  data-current-theme-locale="{{.Appearance.ThemeLocale}}"
+  data-current-plugin-order='{{toJSON .Appearance.PluginOrder}}'
+>
+  <section class="ui-panel admin-panel appearance-panel">
+    <div class="ui-panel__head">
+      <h2>{{msg . "settings.theme_packs.title"}}</h2>
+    </div>
+
+    <div class="appearance-form">
+      <section class="pack-section">
+        <div class="pack-grid">
+          {{range .Appearance.Themes}}
+          <label class="pack-card{{if eq .ID $.Appearance.ThemeSelection.PackID}} is-selected{{end}}" tabindex="0">
+            <input
+              class="pack-card__radio"
+              type="radio"
+              name="theme_pack_id"
+              value="{{.ID}}"
+              data-locales='{{toJSON .Locales}}'
+              data-default-locale="{{.DefaultLocale}}"
+              {{if eq .ID $.Appearance.ThemeSelection.PackID}}checked{{end}}
+              aria-hidden="true"
+            >
+            <span class="pack-card__content">
+              <span class="pack-card__top">
+                <strong>{{.Name}}</strong>
+                <span class="pack-card__badges">{{range .BadgeKeys}}<span class="pack-badge">{{msg $ .}}</span>{{end}}</span>
+              </span>
+              <span class="pack-card__description">{{.Description}}</span>
+            </span>
+          </label>
+          {{end}}
+        </div>
+      </section>
+
+      <section class="pack-section">
+        <div class="pack-section__head">
+          <h3>{{msg . "settings.language.title"}}</h3>
+        </div>
+        <div id="themeLocaleGrid" class="locale-grid">
+          {{range .Appearance.ThemeLocales}}
+          <label class="locale-card{{if eq .Code $.Appearance.ThemeLocale}} is-selected{{end}}" tabindex="0">
+            <input class="locale-card__radio" type="radio" name="theme_locale" value="{{.Code}}" {{if eq .Code $.Appearance.ThemeLocale}}checked{{end}} aria-hidden="true">
+            <span class="locale-card__content">
+              <strong>{{.Label}}</strong>
+              <span class="locale-card__meta">{{.Code}}</span>
+            </span>
+          </label>
+          {{end}}
+        </div>
+      </section>
+
+      <div class="settings-actions">
+        <button type="button" class="ui-button ui-button--primary apply-packs-button" data-apply-scope="theme">{{msg . "settings.theme_packs.apply"}}</button>
+        <button type="button" class="ui-button ui-button--ghost restore-default-packs-button" data-restore-scope="theme">{{msg . "settings.restore_default"}}</button>
+        <span class="ui-status pack-settings-status" aria-live="polite"></span>
+      </div>
+    </div>
+  </section>
+</form>
+<script defer src="/static/admin-settings.js?v=25"></script>
+{{template "adminEnd" .}}
+{{end}}

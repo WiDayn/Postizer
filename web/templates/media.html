@@ -1,19 +1,19 @@
 {{define "media.html"}}
 {{template "adminStart" .}}
 <header class="page-header compact">
-  <p class="kicker">Admin</p>
-  <h1>Media library</h1>
+  <p class="kicker">{{msg . "admin.kicker"}}</p>
+  <h1>{{msg . "media.heading"}}</h1>
 </header>
 
 <section class="media-manager">
   <form id="mediaLibraryUpload" class="media-upload-panel ui-panel">
     <div class="ui-panel__head">
-      <h2>Upload</h2>
-      <span id="mediaLibraryStatus">Ready</span>
+      <h2>{{msg . "media.upload.title"}}</h2>
+      <span id="mediaLibraryStatus">{{msg . "common.ready"}}</span>
     </div>
     <div class="media-upload-row">
       <input id="mediaLibraryFile" class="ui-input" name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
-      <button class="ui-button ui-button--primary" type="submit">Upload</button>
+      <button class="ui-button ui-button--primary" type="submit">{{msg . "common.upload"}}</button>
     </div>
   </form>
 
@@ -24,32 +24,32 @@
       <figcaption>
         <form class="media-edit-form" data-id="{{.ID}}">
           <label class="ui-field">
-            <span>Name</span>
+            <span>{{msg $ "media.name"}}</span>
             <input class="ui-input" name="original_name" value="{{.OriginalName}}">
           </label>
           <label class="ui-field">
-            <span>Alt</span>
+            <span>{{msg $ "media.alt"}}</span>
             <input class="ui-input" name="alt" value="{{.Alt}}">
           </label>
           <label class="ui-field">
-            <span>Caption</span>
+            <span>{{msg $ "media.caption"}}</span>
             <textarea class="ui-textarea" name="caption" rows="3">{{.Caption}}</textarea>
           </label>
           <p class="media-meta">{{.Width}}x{{.Height}} / {{.MIMEType}}</p>
           <textarea class="media-snippet ui-textarea" rows="5" readonly>{{mediaFigure .}}</textarea>
           <div class="media-actions">
-            <button class="ui-button ui-button--primary" type="submit">Save</button>
-            <button class="ui-button" data-media-copy type="button">Copy figure</button>
-            <button class="ui-button ui-button--danger" data-media-delete type="button">Delete</button>
+            <button class="ui-button ui-button--primary" type="submit">{{msg $ "common.save"}}</button>
+            <button class="ui-button" data-media-copy type="button">{{msg $ "media.copy_figure"}}</button>
+            <button class="ui-button ui-button--danger" data-media-delete type="button">{{msg $ "common.delete"}}</button>
           </div>
         </form>
       </figcaption>
     </figure>
     {{else}}
-    <p>No media uploaded yet.</p>
+    <p>{{msg . "media.no_media"}}</p>
     {{end}}
   </div>
 </section>
-<script defer src="/static/media-library.js?v=1"></script>
+<script defer src="/static/media-library.js?v=2"></script>
 {{template "adminEnd" .}}
 {{end}}

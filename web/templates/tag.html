@@ -1,7 +1,7 @@
 {{define "tag.html"}}
 {{template "chromeStart" .}}
 <header class="page-header compact">
-  <p class="kicker">Tag</p>
+  <p class="kicker">{{msg . "tag.kicker"}}</p>
   <h1>{{.Tag.Title}}</h1>
   {{if .Tag.Summary}}<p>{{.Tag.Summary}}</p>{{end}}
 </header>

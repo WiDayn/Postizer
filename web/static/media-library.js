@@ -3,6 +3,20 @@ const mediaFile = document.querySelector("#mediaLibraryFile");
 const mediaStatus = document.querySelector("#mediaLibraryStatus");
 const mediaGrid = document.querySelector("#mediaLibraryGrid");
 
+function tr(key, fallback) {
+  if (window.postizerMessage) return window.postizerMessage(key, fallback);
+  return fallback;
+}
+
+function formatMessage(key, fallback, replacements = {}) {
+  if (window.postizerFormatMessage) return window.postizerFormatMessage(key, fallback, replacements);
+  let text = tr(key, fallback);
+  Object.entries(replacements).forEach(([name, value]) => {
+    text = text.replaceAll(`{${name}}`, String(value));
+  });
+  return text;
+}
+
 function apiURL(path) {
   const token = new URLSearchParams(window.location.search).get("token");
   if (!token) return path;
@@ -44,18 +58,18 @@ if (mediaUpload && mediaFile) {
     event.preventDefault();
     const file = mediaFile.files && mediaFile.files[0];
     if (!file) {
-      setMediaStatus("Choose a file");
+      setMediaStatus(tr("media.status.choose_file", "Choose a file"));
       return;
     }
     const data = new FormData();
     data.append("file", file, file.name);
-    setMediaStatus("Uploading");
+    setMediaStatus(tr("media.status.uploading", "Uploading"));
     const response = await fetch(apiURL("/admin/api/media"), { method: "POST", body: data });
     if (!response.ok) {
       setMediaStatus((await response.text()).trim());
       return;
     }
-    setMediaStatus("Uploaded");
+    setMediaStatus(tr("media.status.uploaded", "Uploaded"));
     window.location.reload();
   });
 }
@@ -66,7 +80,7 @@ if (mediaGrid) {
     if (!form) return;
     event.preventDefault();
     const id = form.dataset.id;
-    setMediaStatus("Saving");
+    setMediaStatus(tr("media.status.saving", "Saving"));
     const response = await fetch(apiURL(`/admin/api/media/${id}`), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -83,7 +97,7 @@ if (mediaGrid) {
     const snippet = form.querySelector(".media-snippet");
     if (image) image.alt = item.alt || "";
     if (snippet) snippet.value = result.markdown || snippet.value;
-    setMediaStatus("Saved");
+    setMediaStatus(tr("media.status.saved", "Saved"));
   });
 
   mediaGrid.addEventListener("click", async (event) => {
@@ -93,7 +107,7 @@ if (mediaGrid) {
       const snippet = form && form.querySelector(".media-snippet");
       if (snippet) {
         await copyText(snippet.value);
-        setMediaStatus("Copied");
+        setMediaStatus(tr("media.status.copied", "Copied"));
       }
       return;
     }
@@ -103,14 +117,14 @@ if (mediaGrid) {
     const form = deleteButton.closest(".media-edit-form");
     const figure = deleteButton.closest(".media-item");
     const name = form && form.elements.original_name.value.trim();
-    if (!form || !window.confirm(`Delete ${name || "this image"} from the media library?`)) return;
-    setMediaStatus("Deleting");
+    if (!form || !window.confirm(formatMessage("media.confirm.delete", "Delete {name} from the media library?", { name: name || tr("editor.image.default_alt", "image") }))) return;
+    setMediaStatus(tr("media.status.deleting", "Deleting"));
     const response = await fetch(apiURL(`/admin/api/media/${form.dataset.id}`), { method: "DELETE" });
     if (!response.ok) {
       setMediaStatus((await response.text()).trim());
       return;
     }
     if (figure) figure.remove();
-    setMediaStatus("Deleted");
+    setMediaStatus(tr("media.status.deleted", "Deleted"));
   });
 }

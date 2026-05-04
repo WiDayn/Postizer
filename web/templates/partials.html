@@ -1,15 +1,19 @@
 {{define "head"}}
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{if .Appearance}}{{.Appearance.Lang}}{{else}}en{{end}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=32">
+  <title>{{pageTitle .}}</title>
+  <link rel="stylesheet" href="/static/site.css?v=67">
+  {{if .Appearance}}{{range .Appearance.ThemeStyles}}
+  <link rel="stylesheet" href="{{.}}">
+  {{end}}{{end}}
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
-  <script defer src="/static/site.js?v=4"></script>
+  <script id="postizerMessages" type="application/json">{{if .Appearance}}{{toScriptJSON .Appearance.Messages}}{{else}}{}{{end}}</script>
+  <script defer src="/static/site.js?v=5"></script>
 </head>
 <body>
 {{end}}
@@ -20,7 +24,7 @@
   <header class="newspaper-header">
     <a class="brand compact-brand" href="/">Postizer</a>
     <div class="edition-line">
-      <span>Markdown · Math · Go</span>
+      <span>{{msg . "site.edition_line"}}</span>
     </div>
   </header>
   {{if and .Home .Store.Settings.HomeImage.Enabled}}
@@ -29,12 +33,12 @@
   </figure>
   {{end}}
   <nav class="section-nav" aria-label="Primary">
-    <a href="/">Front Page</a>
-    <a href="/archive">Archive</a>
-    <a href="/tags">Topics</a>
-    <a href="/search">Search</a>
+    <a href="/">{{msg . "nav.front_page"}}</a>
+    <a href="/archive">{{msg . "nav.archive"}}</a>
+    <a href="/tags">{{msg . "nav.topics"}}</a>
+    <a href="/search">{{msg . "nav.search"}}</a>
     {{range .Store.Pages}}<a href="{{pageURL .}}">{{.Title}}</a>{{end}}
-    <a href="/admin">Admin</a>
+    <a href="/admin">{{msg . "nav.admin"}}</a>
   </nav>
   <main class="main-column">
 {{end}}
@@ -45,15 +49,17 @@
   <aside class="admin-sidebar">
     <a class="admin-brand" href="/admin">Postizer</a>
     <nav class="admin-nav" aria-label="Admin">
-      <a class="{{if eq .ActiveAdmin "dashboard"}}is-active{{end}}" href="/admin">Dashboard</a>
-      <a class="{{if eq .ActiveAdmin "posts"}}is-active{{end}}" href="/admin/posts">Posts</a>
-      <a class="{{if eq .ActiveAdmin "editor"}}is-active{{end}}" href="/admin/editor">Editor</a>
-      <a class="{{if eq .ActiveAdmin "media"}}is-active{{end}}" href="/admin/media">Media</a>
-      <a class="{{if eq .ActiveAdmin "settings"}}is-active{{end}}" href="/admin/settings">Settings</a>
+      <a class="{{if eq .ActiveAdmin "dashboard"}}is-active{{end}}" href="/admin">{{msg . "nav.dashboard"}}</a>
+      <a class="{{if eq .ActiveAdmin "posts"}}is-active{{end}}" href="/admin/posts">{{msg . "nav.posts"}}</a>
+      <a class="{{if eq .ActiveAdmin "editor"}}is-active{{end}}" href="/admin/editor">{{msg . "nav.editor"}}</a>
+      <a class="{{if eq .ActiveAdmin "media"}}is-active{{end}}" href="/admin/media">{{msg . "nav.media"}}</a>
+      <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
+      <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
+      <a class="{{if eq .ActiveAdmin "settings"}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>
     </nav>
     <div class="admin-sidebar-footer">
-      <a href="/">View Site</a>
-      <a href="/admin/logout">Logout</a>
+      <a href="/">{{msg . "nav.view_site"}}</a>
+      <a href="/admin/logout">{{msg . "nav.logout"}}</a>
     </div>
   </aside>
   <main class="admin-main">
@@ -70,19 +76,19 @@
   </main>
   <aside class="right-rail">
     <div class="rail-section">
-      <h2>Topics</h2>
+      <h2>{{msg . "site.right_rail.topics"}}</h2>
       <div class="tag-list">
         {{range .Store.Tags}}<a href="{{tagURL .}}">{{.Title}} <span>{{len .Posts}}</span></a>{{end}}
       </div>
     </div>
     <div class="rail-section">
-      <h2>Pages</h2>
+      <h2>{{msg . "site.right_rail.pages"}}</h2>
       {{range .Store.Pages}}<a href="{{pageURL .}}">{{.Title}}</a>{{end}}
     </div>
     <div class="rail-section">
-      <h2>Feeds</h2>
-      <a href="/feed.xml">RSS</a>
-      <a href="/sitemap.xml">Sitemap</a>
+      <h2>{{msg . "site.right_rail.feeds"}}</h2>
+      <a href="/feed.xml">{{msg . "site.feed.rss"}}</a>
+      <a href="/sitemap.xml">{{msg . "site.feed.sitemap"}}</a>
     </div>
   </aside>
 </div>
@@ -100,7 +106,7 @@
     <span class="post-list-tags">{{range .Tags}}#{{.}} {{end}}</span>
   </li>
   {{else}}
-  <li class="empty">No posts yet.</li>
+  <li class="empty">{{msg $ "dashboard.no_posts"}}</li>
   {{end}}
 </ol>
 {{end}}
