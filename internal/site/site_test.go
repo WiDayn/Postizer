@@ -49,6 +49,9 @@ func TestSavePostAndLoadDraft(t *testing.T) {
 	if store.PostsBySlug["editor-smoke"] != nil {
 		t.Fatal("draft post leaked into public index")
 	}
+	if got := store.AllPostsBySlug["editor-smoke"].Source; strings.HasPrefix(got, "\n") {
+		t.Fatalf("loaded editor source had a leading blank line: %q", got)
+	}
 }
 
 func TestSavePostPreservesManualUpdatedMinute(t *testing.T) {
@@ -76,6 +79,13 @@ func TestSavePostPreservesManualUpdatedMinute(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `updated: "2026-05-05T12:34"`) {
 		t.Fatalf("manual updated time was not serialized:\n%s", body)
+	}
+}
+
+func TestSplitFrontMatterRemovesSeparatorBlankLine(t *testing.T) {
+	_, markdown := splitFrontMatter([]byte("---\ntitle: \"Sample\"\n---\n\n## Heading\n\nBody."))
+	if got, want := string(markdown), "## Heading\n\nBody."; got != want {
+		t.Fatalf("markdown = %q, want %q", got, want)
 	}
 }
 

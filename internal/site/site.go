@@ -1180,7 +1180,8 @@ func splitFrontMatter(body []byte) (frontMatter, []byte) {
 			fm[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"`)
 		}
 	}
-	return fm, []byte(parts[1])
+	markdown := strings.TrimPrefix(parts[1], "\n")
+	return fm, []byte(markdown)
 }
 
 func (fm frontMatter) get(key, fallback string) string {
