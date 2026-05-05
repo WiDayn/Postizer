@@ -29,6 +29,19 @@ function setMediaStatus(message) {
   if (mediaStatus) mediaStatus.textContent = message;
 }
 
+function flashButtonLabel(button, message, duration = 1800) {
+  if (!button) return;
+  const original = button.dataset.originalLabel || button.textContent;
+  button.dataset.originalLabel = original;
+  button.textContent = message;
+  button.classList.add("is-complete");
+  window.clearTimeout(Number(button.dataset.resetTimer || 0));
+  button.dataset.resetTimer = String(window.setTimeout(() => {
+    button.textContent = original;
+    button.classList.remove("is-complete");
+  }, duration));
+}
+
 function mediaFormPayload(form) {
   return {
     original_name: form.elements.original_name.value.trim(),
@@ -107,7 +120,9 @@ if (mediaGrid) {
       const snippet = form && form.querySelector(".media-snippet");
       if (snippet) {
         await copyText(snippet.value);
-        setMediaStatus(tr("media.status.copied", "Copied"));
+        const copied = tr("media.status.copied_clipboard", "Copied to clipboard");
+        setMediaStatus(copied);
+        flashButtonLabel(copyButton, copied);
       }
       return;
     }

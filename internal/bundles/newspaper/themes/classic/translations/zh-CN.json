@@ -157,6 +157,7 @@
   "media.status.saving": "保存中",
   "media.status.saved": "已保存",
   "media.status.copied": "已复制",
+  "media.status.copied_clipboard": "已复制到剪贴板",
   "media.status.deleting": "删除中",
   "media.status.deleted": "已删除",
   "media.confirm.delete": "确定要从媒体库删除 {name} 吗？",

@@ -2043,6 +2043,11 @@
     padding: .5rem;
   }
 
+  .media-actions .ui-button.is-complete {
+    background: var(--inverse);
+    color: var(--inverse-ink);
+  }
+
   .site-shell:has(.editor-shell) {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:

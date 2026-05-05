@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	_ "github.com/deepteams/webp"
 )
 
 // Item 表示一个已经上传并可对外访问的媒体资源。
@@ -140,9 +142,9 @@ func (s *Store) SaveUpload(file io.Reader, originalName string) (Item, error) {
 	if item.MIMEType == "" {
 		item.MIMEType = "application/octet-stream"
 	}
-	if config, _, err := image.DecodeConfig(bytes.NewReader(body)); err == nil {
-		item.Width = config.Width
-		item.Height = config.Height
+	if width, height, ok := imageDimensions(body); ok {
+		item.Width = width
+		item.Height = height
 	}
 
 	s.mu.Lock()
@@ -210,7 +212,66 @@ func (s *Store) load() error {
 	if err := json.Unmarshal(body, &s.items); err != nil {
 		return err
 	}
+	changed, err := s.backfillMissingDimensions()
+	if err != nil {
+		return err
+	}
+	if changed {
+		return s.saveLocked()
+	}
 	return nil
+}
+
+func (s *Store) backfillMissingDimensions() (bool, error) {
+	changed := false
+	for index := range s.items {
+		item := &s.items[index]
+		if item.Width > 0 && item.Height > 0 {
+			continue
+		}
+		if !strings.HasPrefix(item.MIMEType, "image/") {
+			continue
+		}
+		path, ok := s.itemFilePath(*item)
+		if !ok {
+			continue
+		}
+		body, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		width, height, ok := imageDimensions(body)
+		if !ok {
+			continue
+		}
+		item.Width = width
+		item.Height = height
+		changed = true
+	}
+	return changed, nil
+}
+
+func (s *Store) itemFilePath(item Item) (string, bool) {
+	relative := strings.TrimPrefix(strings.TrimSpace(item.Path), "/media/")
+	if relative == "" || relative == item.Path {
+		return "", false
+	}
+	cleaned := filepath.Clean(filepath.FromSlash(relative))
+	if cleaned == "." || cleaned == ".." || filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.Join(s.publicDir, cleaned), true
+}
+
+func imageDimensions(body []byte) (int, int, bool) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(body))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return 0, 0, false
+	}
+	return config.Width, config.Height, true
 }
 
 func (s *Store) saveLocked() error {

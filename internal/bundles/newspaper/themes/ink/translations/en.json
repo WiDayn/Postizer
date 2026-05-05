@@ -156,6 +156,7 @@
   "media.status.saving": "Saving",
   "media.status.saved": "Saved",
   "media.status.copied": "Copied",
+  "media.status.copied_clipboard": "Copied to clipboard",
   "media.status.deleting": "Deleting",
   "media.status.deleted": "Deleted",
   "media.confirm.delete": "Delete {name} from the media library?",
