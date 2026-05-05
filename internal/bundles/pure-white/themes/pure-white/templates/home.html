@@ -1,0 +1,21 @@
+{{define "home.html"}}
+{{template "chromeStart" .}}
+<section class="front-page">
+  <div class="front-grid pure-home-posts">
+    <p class="kicker pure-home-posts__heading">{{msg . "home.lead_kicker"}}</p>
+    {{range .Posts}}
+    <article class="pure-home-post">
+      <time class="pure-home-post__date">{{date .Date}}</time>
+      <h2 class="pure-home-post__title"><a href="{{postURL .}}">{{.Title}}</a></h2>
+      <div class="pure-home-post__body">{{.HTML}}</div>
+    </article>
+    {{else}}
+    <article class="pure-home-post">
+      <h2 class="pure-home-post__title">{{msg . "home.empty.title"}}</h2>
+      <p>{{msg . "home.empty.body"}}</p>
+    </article>
+    {{end}}
+  </div>
+</section>
+{{template "chromeEnd" .}}
+{{end}}

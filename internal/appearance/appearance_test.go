@@ -262,7 +262,13 @@ func TestLoadCatalogIncludesOfficialPureWhite(t *testing.T) {
 	if len(catalog.ThemeStyles) != 1 {
 		t.Fatalf("theme styles = %d, want 1", len(catalog.ThemeStyles))
 	}
-	if got, want := catalog.ThemeStyles[0], "/packs/official/bundles/pure-white/themes/pure-white/pure-white.css?v=1.0.6"; got != want {
+	if catalog.ActiveTheme.Version == "" {
+		t.Fatal("pure-white theme version should not be empty")
+	}
+	// Pure White 主题版本来自 manifest。测试只关心样式 URL 是否使用当前版本做缓存刷新，
+	// 避免每次主题版本升级时都要同步修改 Go 测试里的硬编码版本号。
+	wantStyleURL := "/packs/official/bundles/pure-white/themes/pure-white/pure-white.css?v=" + catalog.ActiveTheme.Version
+	if got, want := catalog.ThemeStyles[0], wantStyleURL; got != want {
 		t.Fatalf("theme style URL = %q, want %q", got, want)
 	}
 	if len(catalog.ActiveTheme.MenuLocations) != 1 {

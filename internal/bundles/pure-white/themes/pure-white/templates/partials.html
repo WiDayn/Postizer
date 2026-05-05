@@ -1,14 +1,14 @@
 {{define "chromeStart"}}
 {{template "head" .}}
-<div class="site-shell">
+<div class="site-shell"{{if .Store.Settings.HomeImage.Enabled}} style="--home-image-src: url('{{.Store.Settings.HomeImage.Src}}');"{{end}}>
   <header class="newspaper-header">
     <a class="brand compact-brand" href="/">{{msg . "site.brand" "Postizer"}}</a>
     <div class="edition-line">
       <span>{{msg . "site.edition_line"}}</span>
     </div>
   </header>
-  {{if and .Home .Store.Settings.HomeImage.Enabled}}
-  <figure class="home-image-band">
+  {{if .Store.Settings.HomeImage.Enabled}}
+  <figure class="home-image-band {{if .Home}}home-image-band--home{{else}}home-image-band--page{{end}}">
     <img src="{{.Store.Settings.HomeImage.Src}}" alt="{{.Store.Settings.HomeImage.Alt}}">
   </figure>
   {{end}}
