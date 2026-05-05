@@ -26,6 +26,64 @@ function postizerFormatMessage(key, fallback, replacements = {}) {
 window.postizerMessage = postizerMessage;
 window.postizerFormatMessage = postizerFormatMessage;
 
+function bindFileDropZone(dropZone) {
+  const input = dropZone.querySelector('input[type="file"]');
+  if (!input) return;
+  const fileName = dropZone.querySelector("[data-file-name]");
+  const autoSubmit = dropZone.dataset.fileDropAutoSubmit === "true";
+
+  const updateName = () => {
+    if (!fileName) return;
+    const file = input.files && input.files[0];
+    fileName.textContent = file ? file.name : "";
+  };
+
+  const submitForm = () => {
+    if (!autoSubmit || !input.files || !input.files.length || !input.form) return;
+    if (typeof input.form.requestSubmit === "function") {
+      input.form.requestSubmit();
+    } else {
+      input.form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    }
+  };
+
+  input.addEventListener("change", () => {
+    updateName();
+    submitForm();
+  });
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropZone.classList.add("is-dragover");
+    });
+  });
+
+  ["dragleave", "drop"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, () => {
+      dropZone.classList.remove("is-dragover");
+    });
+  });
+
+  dropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const files = event.dataTransfer && event.dataTransfer.files;
+    if (!files || !files.length) return;
+    try {
+      input.files = files;
+    } catch (_) {
+      return;
+    }
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function bindFileDropZones(root = document) {
+  root.querySelectorAll("[data-file-drop]").forEach(bindFileDropZone);
+}
+
+window.postizerBindFileDropZones = bindFileDropZones;
+
 const mathDelimiters = [
   { left: "$$", right: "$$", display: true },
   { left: "\\[", right: "\\]", display: true },
@@ -158,6 +216,7 @@ function setupArticleLightbox() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  bindFileDropZones();
   setupArticleLightbox();
   document.querySelectorAll(".article-body").forEach(enhanceArticle);
 

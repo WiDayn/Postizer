@@ -12,8 +12,12 @@
       <span id="mediaLibraryStatus">{{msg . "common.ready"}}</span>
     </div>
     <div class="media-upload-row">
-      <input id="mediaLibraryFile" class="ui-input" name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
-      <button class="ui-button ui-button--primary" type="submit">{{msg . "common.upload"}}</button>
+      <label class="ui-file-drop" data-file-drop data-file-drop-auto-submit="true">
+        <input id="mediaLibraryFile" class="ui-file-drop__input" name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
+        <span class="ui-file-drop__title">{{msg . "upload.drop_file" "Drag file here to upload"}}</span>
+        <span class="ui-file-drop__meta">{{msg . "upload.image_hint" "PNG / JPEG / GIF / WEBP"}}</span>
+        <span class="ui-file-drop__name" data-file-name></span>
+      </label>
     </div>
   </form>
 
