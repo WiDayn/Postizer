@@ -604,6 +604,208 @@ func TestLoadCatalogTreatsLegacyTextPackAsPlugin(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogUsesActivePluginLocalesForTranslationPacks(t *testing.T) {
+	root := t.TempDir()
+	writePackFile(t, filepath.Join(root, "official", DirThemes, DefaultThemePackID, "manifest.json"), `{
+  "id": "newspaper-classic",
+  "type": "theme",
+  "name": "Newspaper Classic",
+  "version": "1.0.0",
+  "description": "Default theme",
+  "default_locale": "en",
+ "translations_dir": "translations"
+}`)
+	writePackFile(t, filepath.Join(root, "official", DirThemes, DefaultThemePackID, "translations", "en.json"), `{
+  "nav.front_page": "Front Page",
+  "nav.archive": "Archive"
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "japanese", "manifest.json"), `{
+  "id": "japanese",
+  "type": "bundle",
+  "name": "Japanese Translation Bundle",
+  "version": "1.0.0",
+  "description": "Bundle with a Japanese plugin translation pack",
+  "packs": [{"path": "plugins/japanese"}]
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "japanese", DirPlugins, "japanese", "manifest.json"), `{
+  "id": "japanese",
+  "type": "plugin",
+  "name": "Japanese Translation Pack",
+  "version": "1.0.0",
+  "description": "Japanese interface translation",
+  "default_locale": "ja",
+  "translations_dir": "translations"
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "japanese", DirPlugins, "japanese", "translations", "ja.json"), `{
+  "nav.front_page": "ホーム",
+  "nav.archive": "アーカイブ"
+}`)
+
+	catalog, err := LoadCatalog(
+		filepath.Join(root, "official"),
+		filepath.Join(root, "user"),
+		Selection{Enabled: false, PackID: DefaultThemePackID},
+		"ja",
+		[]string{"japanese"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := catalog.ThemeLocale, "ja"; got != want {
+		t.Fatalf("theme locale = %q, want %q", got, want)
+	}
+	if got, want := catalog.Messages["nav.front_page"], "ホーム"; got != want {
+		t.Fatalf("plugin translation = %q, want %q", got, want)
+	}
+	foundJapaneseLocale := false
+	for _, locale := range catalog.ThemeLocales {
+		if locale.Code == "ja" {
+			foundJapaneseLocale = true
+			break
+		}
+	}
+	if !foundJapaneseLocale {
+		t.Fatalf("theme locales should include active plugin locale ja: %#v", catalog.ThemeLocales)
+	}
+}
+
+func TestLoadCatalogHidesIncompletePluginLocaleFromThemeLocales(t *testing.T) {
+	root := t.TempDir()
+	writePackFile(t, filepath.Join(root, "official", DirThemes, DefaultThemePackID, "manifest.json"), `{
+  "id": "newspaper-classic",
+  "type": "theme",
+  "name": "Newspaper Classic",
+  "version": "1.0.0",
+  "description": "Default theme",
+  "default_locale": "en",
+  "translations_dir": "translations"
+}`)
+	writePackFile(t, filepath.Join(root, "official", DirThemes, DefaultThemePackID, "translations", "en.json"), `{
+  "nav.front_page": "Front Page",
+  "nav.archive": "Archive"
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "partial-japanese", "manifest.json"), `{
+  "id": "partial-japanese",
+  "type": "bundle",
+  "name": "Partial Japanese Translation Bundle",
+  "version": "1.0.0",
+  "description": "Bundle with an incomplete Japanese plugin translation pack",
+  "packs": [{"path": "plugins/partial-japanese"}]
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "partial-japanese", DirPlugins, "partial-japanese", "manifest.json"), `{
+  "id": "partial-japanese",
+  "type": "plugin",
+  "name": "Partial Japanese Translation Pack",
+  "version": "1.0.0",
+  "description": "Incomplete Japanese interface translation",
+  "default_locale": "ja",
+  "translations_dir": "translations"
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "partial-japanese", DirPlugins, "partial-japanese", "translations", "ja.json"), `{
+  "nav.front_page": "ホーム"
+}`)
+
+	catalog, err := LoadCatalog(
+		filepath.Join(root, "official"),
+		filepath.Join(root, "user"),
+		Selection{Enabled: false, PackID: DefaultThemePackID},
+		"ja",
+		[]string{"partial-japanese"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := catalog.ThemeLocale, "en"; got != want {
+		t.Fatalf("theme locale = %q, want fallback %q", got, want)
+	}
+	for _, locale := range catalog.ThemeLocales {
+		if locale.Code == "ja" {
+			t.Fatalf("incomplete plugin locale should not be selectable: %#v", catalog.ThemeLocales)
+		}
+	}
+	if got, want := catalog.Messages["nav.front_page"], "Front Page"; got != want {
+		t.Fatalf("incomplete plugin should not translate until locale is selectable: %q, want %q", got, want)
+	}
+}
+
+func TestLoadCatalogAddsPluginLocalesToEachCompatibleTheme(t *testing.T) {
+	root := t.TempDir()
+	writePackFile(t, filepath.Join(root, "official", DirThemes, DefaultThemePackID, "manifest.json"), `{
+  "id": "newspaper-classic",
+  "type": "theme",
+  "name": "Newspaper Classic",
+  "version": "1.0.0",
+  "description": "Default theme",
+  "default_locale": "en",
+  "translations_dir": "translations"
+}`)
+	writePackFile(t, filepath.Join(root, "official", DirThemes, DefaultThemePackID, "translations", "en.json"), `{
+  "nav.front_page": "Front Page",
+  "nav.archive": "Archive"
+}`)
+	writePackFile(t, filepath.Join(root, "official", DirThemes, "pure-white", "manifest.json"), `{
+  "id": "pure-white",
+  "type": "theme",
+  "name": "Pure White",
+  "version": "1.0.0",
+  "description": "Pure white theme",
+  "default_locale": "en",
+  "translations_dir": "translations"
+}`)
+	writePackFile(t, filepath.Join(root, "official", DirThemes, "pure-white", "translations", "en.json"), `{
+  "site.brand": "Postizer"
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "japanese", "manifest.json"), `{
+  "id": "japanese",
+  "type": "bundle",
+  "name": "Japanese Translation Bundle",
+  "version": "1.0.0",
+  "description": "Bundle with a Japanese plugin translation pack",
+  "packs": [{"path": "plugins/japanese"}]
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "japanese", DirPlugins, "japanese", "manifest.json"), `{
+  "id": "japanese",
+  "type": "plugin",
+  "name": "Japanese Translation Pack",
+  "version": "1.0.0",
+  "description": "Japanese interface translation",
+  "default_locale": "ja",
+  "translations_dir": "translations"
+}`)
+	writePackFile(t, filepath.Join(root, "user", DirBundles, "japanese", DirPlugins, "japanese", "translations", "ja.json"), `{
+  "nav.front_page": "ホーム",
+  "nav.archive": "アーカイブ",
+  "site.brand": "Postizer"
+}`)
+
+	catalog, err := LoadCatalog(
+		filepath.Join(root, "official"),
+		filepath.Join(root, "user"),
+		Selection{Enabled: false, PackID: DefaultThemePackID},
+		"en",
+		[]string{"japanese"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var pureWhite *Pack
+	for i := range catalog.Themes {
+		if catalog.Themes[i].ID == "pure-white" {
+			pureWhite = &catalog.Themes[i]
+			break
+		}
+	}
+	if pureWhite == nil {
+		t.Fatal("pure-white theme should be present")
+	}
+	if !containsString(pureWhite.Locales, "ja") {
+		t.Fatalf("compatible inactive theme should include plugin locale ja: %#v", pureWhite.Locales)
+	}
+}
+
 func TestLoadCatalogRejectsManifestPathEscapes(t *testing.T) {
 	root := t.TempDir()
 	writePackFile(t, filepath.Join(root, "official", DirThemes, DefaultThemePackID, "manifest.json"), `{
@@ -777,6 +979,15 @@ func buildPackZip(t *testing.T, files map[string]func(io.Writer)) []byte {
 		t.Fatal(err)
 	}
 	return body.Bytes()
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 type zeroReader struct{}

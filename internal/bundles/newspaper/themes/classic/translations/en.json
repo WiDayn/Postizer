@@ -223,6 +223,7 @@
   "settings.plugins.move_down": "Move Down",
   "settings.plugins.empty": "No plugin packs available yet.",
   "settings.apply_packs": "Apply Resource Packs",
+  "settings.cancel_changes": "Cancel Changes",
   "settings.restore_default": "Restore Default",
   "settings.upload_pack.title": "Upload Theme or Plugin Pack",
   "settings.upload_pack.help": "Upload a .zip package containing a manifest and assets.",

@@ -1,6 +1,7 @@
 const resourcePackSettingsForm = document.querySelector("#resourcePackSettingsForm");
 const packSettingsStatuses = Array.from(document.querySelectorAll(".pack-settings-status"));
 const applyPacksButtons = Array.from(document.querySelectorAll(".apply-packs-button"));
+const cancelChangesButtons = Array.from(document.querySelectorAll(".cancel-changes-button"));
 const restoreDefaultPacksButtons = Array.from(document.querySelectorAll(".restore-default-packs-button"));
 const resourcePackUploadForm = document.querySelector("#resourcePackUploadForm");
 const resourcePackFile = document.querySelector("#resourcePackFile");
@@ -125,6 +126,45 @@ function activateSelectableCard(card) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+/**
+ * 按 value 选中一组 radio 中的目标项。
+ *
+ * @param {string} name - radio 的 name，例如 theme_pack_id 或 theme_locale。
+ * @param {string} value - 需要恢复到的已应用值。
+ * @returns {boolean} 找到并选中目标项时返回 true；当前页面没有该项时返回 false。
+ */
+function checkRadioValue(name, value) {
+  const inputs = Array.from(document.querySelectorAll(`input[name="${name}"]`));
+  const found = inputs.some((input) => String(input.value || "") === String(value || ""));
+  if (!found) return false;
+  inputs.forEach((input) => {
+    const matched = String(input.value || "") === String(value || "");
+    input.checked = matched;
+  });
+  return true;
+}
+
+/**
+ * 把主题包页面上的临时选择恢复到当前已应用配置。
+ *
+ * 设计说明：
+ * - 黑色粗边框由 radio 的 checked 状态驱动，表示“准备应用”的表单选择。
+ * - 下划线由 is-current 驱动，表示服务端已经生效的主题和语言。
+ * - 点击“取消更改”只移动黑框，不提交请求，也不改变下划线代表的已应用状态。
+ */
+function cancelThemeChangesToCurrentApplied() {
+  if (!resourcePackSettingsForm) return;
+  const appliedThemePackID = String(committedAppearance.themePackID || "").trim();
+  const appliedLocale = String(committedAppearance.themeLocale || "en").trim();
+  if (!checkRadioValue("theme_pack_id", appliedThemePackID)) return;
+
+  syncSelectableCards(".pack-card:not(.plugin-card)");
+  renderThemeLocales();
+  checkRadioValue("theme_locale", appliedLocale);
+  syncSelectableCards(".locale-card");
+  setPackSettingsStatus("");
+}
+
 function localeLabel(code) {
   switch (String(code || "").trim()) {
     case "en":
@@ -150,17 +190,52 @@ function parseThemeLocales(input) {
   if (!input) return [];
   try {
     const locales = JSON.parse(input.dataset.locales || "[]");
-    return Array.isArray(locales) ? locales.map((value) => String(value || "").trim()).filter(Boolean) : [];
+    return localeCodes(locales);
   } catch (_) {
     return [];
   }
 }
 
+function localeCodes(locales) {
+  if (!Array.isArray(locales)) return [];
+  return locales
+    .map((value) => {
+      if (value && typeof value === "object") return String(value.Code || value.code || "").trim();
+      return String(value || "").trim();
+    })
+    .filter(Boolean);
+}
+
+function parseJSONDataset(value, fallback) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed == null ? fallback : parsed;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+const committedAppearance = {
+  themePackID: String((resourcePackSettingsForm && resourcePackSettingsForm.dataset.currentThemePackId) || ""),
+  themeLocale: String((resourcePackSettingsForm && resourcePackSettingsForm.dataset.currentThemeLocale) || "en"),
+  themeLocales: localeCodes(parseJSONDataset((resourcePackSettingsForm && resourcePackSettingsForm.dataset.currentThemeLocales) || "[]", [])),
+  pluginOrder: parseJSONDataset((resourcePackSettingsForm && resourcePackSettingsForm.dataset.currentPluginOrder) || "[]", [])
+};
+
+function currentThemeLocales(input) {
+  if (!input) return [];
+  if (input.value === committedAppearance.themePackID && committedAppearance.themeLocales.length) {
+    return committedAppearance.themeLocales.slice();
+  }
+  return parseThemeLocales(input);
+}
+
 function renderThemeLocales() {
   if (!themeLocaleGrid) return;
   const input = selectedThemeInput();
-  const locales = parseThemeLocales(input);
+  const locales = currentThemeLocales(input);
   const defaultLocale = String((input && input.dataset.defaultLocale) || "en");
+  const appliedLocale = String(committedAppearance.themeLocale || "").trim();
   let currentLocale = selectedValue("theme_locale");
 
   if (!locales.includes(currentLocale)) {
@@ -170,7 +245,8 @@ function renderThemeLocales() {
   themeLocaleGrid.innerHTML = "";
   locales.forEach((code) => {
     const card = document.createElement("label");
-    card.className = `locale-card${code === currentLocale ? " is-selected" : ""}`;
+    // is-selected 表示当前表单选择，is-current 表示服务端已经生效的语言。
+    card.className = `locale-card${code === currentLocale ? " is-selected" : ""}${code === appliedLocale ? " is-current" : ""}`;
     card.tabIndex = 0;
 
     const radio = document.createElement("input");
@@ -247,25 +323,10 @@ document.querySelectorAll("[data-plugin-id][data-plugin-name]").forEach((node) =
   };
 });
 
-function parseJSONDataset(value, fallback) {
-  try {
-    const parsed = JSON.parse(value);
-    return parsed == null ? fallback : parsed;
-  } catch (_) {
-    return fallback;
-  }
-}
-
-const committedAppearance = {
-  themePackID: String((resourcePackSettingsForm && resourcePackSettingsForm.dataset.currentThemePackId) || ""),
-  themeLocale: String((resourcePackSettingsForm && resourcePackSettingsForm.dataset.currentThemeLocale) || "en"),
-  pluginOrder: parseJSONDataset((resourcePackSettingsForm && resourcePackSettingsForm.dataset.currentPluginOrder) || "[]", [])
-};
-
 let pluginOrder = committedAppearance.pluginOrder.slice();
 
-let selectedCatalogPluginID = pluginCards[0] ? pluginCards[0].dataset.pluginId : "";
 let selectedQueuePluginID = pluginOrder[0] || "";
+let selectedCatalogPluginID = selectedQueuePluginID ? "" : (pluginCards[0] ? pluginCards[0].dataset.pluginId : "");
 
 function renderPluginCards() {
   if (!pluginPackGrid) return;
@@ -275,7 +336,10 @@ function renderPluginCards() {
     .map((card) => card.dataset.pluginId)
     .filter((pluginID) => !pluginOrder.includes(pluginID));
 
-  if (!availablePluginIDs.includes(selectedCatalogPluginID)) {
+  if (selectedCatalogPluginID && !availablePluginIDs.includes(selectedCatalogPluginID)) {
+    selectedCatalogPluginID = "";
+  }
+  if (!selectedCatalogPluginID && !selectedQueuePluginID) {
     selectedCatalogPluginID = availablePluginIDs[0] || "";
   }
 
@@ -309,10 +373,13 @@ function renderPluginQueue() {
 
   pluginQueueList.innerHTML = "";
   if (selectedQueuePluginID && !pluginOrder.includes(selectedQueuePluginID)) {
-    selectedQueuePluginID = pluginOrder[0] || "";
+    selectedQueuePluginID = "";
   }
   if (!pluginOrder.length) {
     return;
+  }
+  if (!selectedQueuePluginID && !selectedCatalogPluginID) {
+    selectedQueuePluginID = pluginOrder[0] || "";
   }
 
   pluginOrder.forEach((pluginID, index) => {
@@ -374,6 +441,7 @@ function updatePluginControls() {
 function addPlugin(pluginID) {
   if (!pluginID || pluginOrder.includes(pluginID)) return;
   pluginOrder.push(pluginID);
+  selectedCatalogPluginID = "";
   selectedQueuePluginID = pluginID;
   renderPluginCards();
 }
@@ -383,6 +451,10 @@ function removePlugin(pluginID) {
   pluginOrder = pluginOrder.filter((id) => id !== pluginID);
   if (selectedQueuePluginID === pluginID) {
     selectedQueuePluginID = pluginOrder[index] || pluginOrder[index - 1] || "";
+  }
+  if (!selectedQueuePluginID && !selectedCatalogPluginID) {
+    const nextAvailable = pluginCards.find((card) => !pluginOrder.includes(card.dataset.pluginId));
+    selectedCatalogPluginID = nextAvailable ? nextAvailable.dataset.pluginId : "";
   }
   renderPluginCards();
 }
@@ -395,8 +467,28 @@ function movePlugin(pluginID, direction) {
   const next = pluginOrder.slice();
   [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
   pluginOrder = next;
+  selectedCatalogPluginID = "";
   selectedQueuePluginID = pluginID;
   renderPluginCards();
+}
+
+/**
+ * 把插件包排序列表恢复到当前已应用配置。
+ *
+ * 参数：无。
+ * 返回值：无。
+ *
+ * 设计说明：
+ * 插件页的 `pluginOrder` 是尚未提交的前端队列。用户可能把插件加入队列、移出队列或调整顺序，
+ * 但在点击“应用插件包”前这些都只是临时更改；点击“取消更改”时恢复服务端下发的
+ * committedAppearance.pluginOrder，并重新渲染可用列表与排序列表。
+ */
+function cancelPluginChangesToCurrentApplied() {
+  pluginOrder = committedAppearance.pluginOrder.slice();
+  selectedQueuePluginID = pluginOrder[0] || "";
+  selectedCatalogPluginID = selectedQueuePluginID ? "" : (pluginCards[0] ? pluginCards[0].dataset.pluginId : "");
+  renderPluginCards();
+  setPackSettingsStatus("");
 }
 
 function pluginArrowButton(direction, disabled) {
@@ -418,6 +510,7 @@ if (pluginPackGrid) {
     if (!card) return;
     const pluginID = card.dataset.pluginId;
     selectedCatalogPluginID = pluginID;
+    selectedQueuePluginID = "";
     renderPluginCards();
   });
   renderPluginCards();
@@ -436,6 +529,7 @@ if (pluginQueueList) {
       movePlugin(pluginID, "down");
       return;
     }
+    selectedCatalogPluginID = "";
     selectedQueuePluginID = pluginID;
     renderPluginCards();
   });
@@ -470,6 +564,21 @@ if (applyPacksButtons.length) {
         return;
       }
       await submitAppearancePayload(buildAppearancePayload());
+    });
+  });
+}
+
+if (cancelChangesButtons.length) {
+  cancelChangesButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const scope = button.dataset.cancelScope || "theme";
+      if (scope === "theme") {
+        cancelThemeChangesToCurrentApplied();
+        return;
+      }
+      if (scope === "plugin") {
+        cancelPluginChangesToCurrentApplied();
+      }
     });
   });
 }

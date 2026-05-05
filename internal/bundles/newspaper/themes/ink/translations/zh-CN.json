@@ -222,6 +222,7 @@
   "settings.plugins.move_down": "下移",
   "settings.plugins.empty": "暂时还没有插件包。",
   "settings.apply_packs": "应用资源包",
+  "settings.cancel_changes": "取消更改",
   "settings.restore_default": "恢复默认",
   "settings.upload_pack.title": "上传主题包或插件包",
   "settings.upload_pack.help": "上传一个包含 manifest 和资源文件的 .zip 包。",

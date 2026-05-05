@@ -81,6 +81,54 @@ func TestMediaFigureMarkdownHasNoOuterBlankLines(t *testing.T) {
 	}
 }
 
+func TestResolvedThemeLocaleDoesNotSwitchToPluginLocaleWhenRequestedEmpty(t *testing.T) {
+	themes := []appearance.Pack{
+		{
+			Manifest: appearance.Manifest{
+				ID:            appearance.DefaultThemePackID,
+				DefaultLocale: "en",
+			},
+			Locales: []string{"en", "zh-CN"},
+		},
+	}
+
+	if got, want := resolvedThemeLocale("", appearance.DefaultThemePackID, themes), "en"; got != want {
+		t.Fatalf("theme locale = %q, want %q", got, want)
+	}
+}
+
+func TestResolvedThemeLocaleAcceptsExplicitThemeLocaleFromMergedLocales(t *testing.T) {
+	themes := []appearance.Pack{
+		{
+			Manifest: appearance.Manifest{
+				ID:            appearance.DefaultThemePackID,
+				DefaultLocale: "en",
+			},
+			Locales: []string{"en", "zh-CN", "ja"},
+		},
+	}
+
+	if got, want := resolvedThemeLocale("ja", appearance.DefaultThemePackID, themes), "ja"; got != want {
+		t.Fatalf("theme locale = %q, want %q", got, want)
+	}
+}
+
+func TestResolvedThemeLocaleKeepsExplicitThemeLocaleOverPluginDefault(t *testing.T) {
+	themes := []appearance.Pack{
+		{
+			Manifest: appearance.Manifest{
+				ID:            appearance.DefaultThemePackID,
+				DefaultLocale: "en",
+			},
+			Locales: []string{"en", "zh-CN"},
+		},
+	}
+
+	if got, want := resolvedThemeLocale("zh-CN", appearance.DefaultThemePackID, themes), "zh-CN"; got != want {
+		t.Fatalf("theme locale = %q, want %q", got, want)
+	}
+}
+
 func TestSettingsAfterDeletingActiveThemeRestoresDefault(t *testing.T) {
 	settings := site.Settings{
 		ThemePack: appearance.Selection{

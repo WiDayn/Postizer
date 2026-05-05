@@ -12,6 +12,7 @@
   data-default-theme-locale="{{defaultThemeLocale .Appearance}}"
   data-current-theme-pack-id="{{.Appearance.ThemeSelection.PackID}}"
   data-current-theme-locale="{{.Appearance.ThemeLocale}}"
+  data-current-theme-locales='{{toJSON .Appearance.ThemeLocales}}'
   data-current-plugin-order='{{toJSON .Appearance.PluginOrder}}'
 >
   <section class="ui-panel admin-panel appearance-panel">
@@ -23,7 +24,7 @@
       <section class="pack-section">
         <div class="pack-grid">
           {{range .Appearance.Themes}}
-          <label class="pack-card{{if eq .ID $.Appearance.ThemeSelection.PackID}} is-selected{{end}}" tabindex="0">
+          <label class="pack-card{{if eq .ID $.Appearance.ThemeSelection.PackID}} is-selected is-current{{end}}" tabindex="0">
             <input
               class="pack-card__radio"
               type="radio"
@@ -55,7 +56,7 @@
         </div>
         <div id="themeLocaleGrid" class="locale-grid">
           {{range .Appearance.ThemeLocales}}
-          <label class="locale-card{{if eq .Code $.Appearance.ThemeLocale}} is-selected{{end}}" tabindex="0">
+          <label class="locale-card{{if eq .Code $.Appearance.ThemeLocale}} is-selected is-current{{end}}" tabindex="0">
             <input class="locale-card__radio" type="radio" name="theme_locale" value="{{.Code}}" {{if eq .Code $.Appearance.ThemeLocale}}checked{{end}} aria-hidden="true">
             <span class="locale-card__content">
               <strong>{{.Label}}</strong>
@@ -68,12 +69,13 @@
 
       <div class="settings-actions">
         <button type="button" class="ui-button ui-button--primary apply-packs-button" data-apply-scope="theme">{{msg . "settings.theme_packs.apply"}}</button>
+        <button type="button" class="ui-button ui-button--ghost cancel-changes-button" data-cancel-scope="theme">{{msg . "settings.cancel_changes"}}</button>
         <button type="button" class="ui-button ui-button--ghost restore-default-packs-button" data-restore-scope="theme">{{msg . "settings.restore_default"}}</button>
         <span class="ui-status pack-settings-status" aria-live="polite"></span>
       </div>
     </div>
   </section>
 </form>
-<script defer src="/static/admin-settings.js?v=25"></script>
+<script defer src="/static/admin-settings.js?v=37"></script>
 {{template "adminEnd" .}}
 {{end}}
