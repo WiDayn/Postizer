@@ -226,6 +226,15 @@ func LoadCatalog(officialRoot, userRoot string, themeSelection Selection, themeL
 	}
 
 	activePlugins, inactivePlugins, normalizedPluginOrder := resolvePluginOrder(plugins, pluginMap, pluginOrder)
+	themes = themesWithActivePluginLocales(defaultTheme, themes, activePlugins)
+	for _, theme := range themes {
+		if theme.ID == defaultTheme.ID {
+			defaultTheme = theme
+		}
+		if theme.ID == activeTheme.ID {
+			activeTheme = theme
+		}
+	}
 	defaultLocale := effectiveDefaultLocale(activeTheme)
 	themeLocale = normalizeThemeLocale(themeLocale, activeTheme.Locales, defaultLocale)
 	themeLocales := buildLocaleOptions(activeTheme.Locales, themeLocale)
@@ -1196,6 +1205,120 @@ func buildLocaleOptions(locales []string, selected string) []LocaleOption {
 		})
 	}
 	return options
+}
+
+// themesWithActivePluginLocales 为每个主题计算已启用语言插件可提供的额外语言。
+//
+// 参数：
+// - defaultTheme: 系统默认主题，用于补齐所有主题共同依赖的基础文案 key。
+// - themes: 当前扫描到的全部主题包。
+// - activePlugins: 当前已加入排序并启用的插件包。
+//
+// 返回值：
+// - []Pack: 每个主题的 Locales 都追加了“完整匹配该主题”的插件语言。
+//
+// 设计说明：
+// 语言选择列表是跟着用户当前点选的主题变化的，而不是只跟着已经应用的主题变化。
+// 因此每个主题卡片都需要提前带上自己的可选语言集合，前端切换主题卡片时直接读取
+// data-locales 就能显示正确结果。
+func themesWithActivePluginLocales(defaultTheme Pack, themes []Pack, activePlugins []Pack) []Pack {
+	mergedThemes := make([]Pack, 0, len(themes))
+	for _, theme := range themes {
+		requiredMessages := requiredThemeMessages(defaultTheme, theme)
+		theme.Locales = mergeActiveLocaleCodes(theme.Locales, activePlugins, requiredMessages)
+		mergedThemes = append(mergedThemes, theme)
+	}
+	return mergedThemes
+}
+
+// requiredThemeMessages 计算当前主题需要完整翻译的文案全集。
+//
+// 参数：
+// - defaultTheme: 系统默认主题，承担全站基础文案基线。
+// - activeTheme: 当前实际启用的主题，可能只覆盖部分默认文案，也可能新增主题专属文案。
+//
+// 返回值：
+// - map[string]string: 当前主题渲染时需要的全部 key；value 只用于判断 key 是否存在。
+//
+// 设计说明：
+// 语言包作为插件提供时，不能只翻译自己关心的一两个 key 就出现在语言选择里。
+// 这里沿用运行时消息合并规则：先取默认主题默认语言的完整文案，再叠加当前主题默认语言
+// 的覆盖文案。这样 Pure White 这类“基于默认文案 + 少量主题文案”的主题，会要求语言包
+// 同时覆盖默认文案和主题新增文案，避免切换后界面半中文半目标语言。
+func requiredThemeMessages(defaultTheme, activeTheme Pack) map[string]string {
+	messages := localizedPackMessages(defaultTheme, effectiveDefaultLocale(defaultTheme))
+	if activeTheme.ID != defaultTheme.ID {
+		mergeMessages(messages, localizedPackMessages(activeTheme, effectiveDefaultLocale(activeTheme)))
+	}
+	return messages
+}
+
+// mergeActiveLocaleCodes 合并当前主题与已启用且完整匹配的语言插件提供的语言代码。
+//
+// 参数：
+// - themeLocales: 当前主题自身声明的语言代码列表，例如 en、zh-CN。
+// - activePlugins: 当前已经启用并会参与文案覆盖的插件包。
+// - requiredMessages: 当前主题需要被完整翻译的文案 key 集合。
+//
+// 返回值：
+// - []string: 去重后的语言代码列表，保留主题语言在前，并追加插件语言。
+//
+// 设计说明：
+// 翻译包作为 plugin 发布时，主题本身可能并不知道 zh-TW 或 ja。
+// 但只有当插件某个语言完整覆盖当前主题全部 key 时，才把它加入语言下拉；否则用户会选到
+// 一个不完整的语言，页面出现部分回退文案。
+func mergeActiveLocaleCodes(themeLocales []string, activePlugins []Pack, requiredMessages map[string]string) []string {
+	seen := map[string]bool{}
+	merged := make([]string, 0, len(themeLocales))
+	appendLocale := func(localeCode string) {
+		localeCode = strings.TrimSpace(localeCode)
+		if localeCode == "" || seen[localeCode] {
+			return
+		}
+		seen[localeCode] = true
+		merged = append(merged, localeCode)
+	}
+	for _, localeCode := range themeLocales {
+		appendLocale(localeCode)
+	}
+	for _, plugin := range activePlugins {
+		for _, localeCode := range plugin.Locales {
+			if !pluginLocaleCoversMessages(plugin, localeCode, requiredMessages) {
+				continue
+			}
+			appendLocale(localeCode)
+		}
+	}
+	return merged
+}
+
+// pluginLocaleCoversMessages 判断插件某个语言是否完整覆盖当前主题所需文案。
+//
+// 参数：
+// - plugin: 已扫描出的插件包。
+// - localeCode: 要检查的语言代码，例如 ja 或 zh-TW。
+// - requiredMessages: 当前主题需要完整翻译的 key 集合。
+//
+// 返回值：
+// - bool: 插件在该语言下包含 requiredMessages 的全部 key，且每个值非空时返回 true。
+//
+// 注意：
+// 这里要求“完整覆盖”，而不是依赖默认主题兜底。这样语言选择列表只展示真正可用的语言包。
+func pluginLocaleCoversMessages(plugin Pack, localeCode string, requiredMessages map[string]string) bool {
+	localeCode = strings.TrimSpace(localeCode)
+	if localeCode == "" || len(requiredMessages) == 0 {
+		return false
+	}
+	messages := plugin.Translations[localeCode]
+	if len(messages) == 0 {
+		return false
+	}
+	for key := range requiredMessages {
+		if strings.TrimSpace(messages[key]) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func sortLocales(locales []string) []string {

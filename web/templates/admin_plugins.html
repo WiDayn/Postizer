@@ -12,6 +12,7 @@
   data-default-theme-locale="{{defaultThemeLocale .Appearance}}"
   data-current-theme-pack-id="{{.Appearance.ThemeSelection.PackID}}"
   data-current-theme-locale="{{.Appearance.ThemeLocale}}"
+  data-current-theme-locales='{{toJSON .Appearance.ThemeLocales}}'
   data-current-plugin-order='{{toJSON .Appearance.PluginOrder}}'
 >
   <section class="ui-panel admin-panel plugin-panel">
@@ -112,12 +113,13 @@
 
       <div class="settings-actions">
         <button type="button" class="ui-button ui-button--primary apply-packs-button" data-apply-scope="plugin">{{msg . "settings.plugins.apply"}}</button>
+        <button type="button" class="ui-button ui-button--ghost cancel-changes-button" data-cancel-scope="plugin">{{msg . "settings.cancel_changes"}}</button>
         <button type="button" class="ui-button ui-button--ghost restore-default-packs-button" data-restore-scope="plugin">{{msg . "settings.plugins.clear"}}</button>
         <span class="ui-status pack-settings-status" aria-live="polite"></span>
       </div>
     </div>
   </section>
 </form>
-<script defer src="/static/admin-settings.js?v=25"></script>
+<script defer src="/static/admin-settings.js?v=37"></script>
 {{template "adminEnd" .}}
 {{end}}

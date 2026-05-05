@@ -1335,6 +1335,14 @@
     overflow-wrap: anywhere;
   }
 
+  /* 下划线只标记当前已经应用到站点的主题，区别于临时点选的卡片边框。 */
+  .pack-card.is-current .pack-card__title-row strong {
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-decoration-color: #000;
+    text-underline-offset: .24rem;
+  }
+
   .pack-version-badge {
     display: inline-flex;
     align-items: center;
@@ -1520,6 +1528,14 @@
   .locale-card__content strong {
     font-size: 1.05rem;
     line-height: 1.15;
+  }
+
+  /* 下划线只标记当前已经应用到站点的语言，区别于临时点选的卡片边框。 */
+  .locale-card.is-current .locale-card__content strong {
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-decoration-color: #000;
+    text-underline-offset: .18rem;
   }
 
   .locale-card__meta {
