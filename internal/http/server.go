@@ -120,6 +120,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/media/paste", s.requireAdmin(http.HandlerFunc(s.uploadMedia)))
 	mux.Handle("POST /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.uploadHomeImage)))
 	mux.Handle("DELETE /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.clearHomeImage)))
+	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/resource-packs", s.requireAdmin(http.HandlerFunc(s.uploadResourcePack)))
 	mux.Handle("DELETE /admin/api/resource-packs/{type}/{id}", s.requireAdmin(http.HandlerFunc(s.deleteResourcePack)))
 	mux.Handle("POST /admin/api/resource-packs/apply", s.requireAdmin(http.HandlerFunc(s.applyResourcePacks)))
@@ -447,7 +448,7 @@ func (s *Server) uploadHomeImage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	item, err := s.media.SaveUpload(file, header.Filename)
+	item, err := s.media.SaveUploadWithOptions(file, header.Filename, s.mediaProcessingOptions())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -530,6 +531,35 @@ func (s *Server) clearHomeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]bool{"enabled": false})
+}
+
+func (s *Server) updateMediaProcessingSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload site.MediaProcessing
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.MediaProcessing = payload
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.currentStore().Settings.MediaProcessing)
+}
+
+func (s *Server) mediaProcessingOptions() media.ProcessingOptions {
+	settings := s.currentStore().Settings.MediaProcessing
+	return media.ProcessingOptions{
+		ConvertToWebP: settings.AutoWebP,
+		WebPQuality:   settings.WebPQuality,
+		KeepOriginal:  settings.KeepOriginal,
+	}
 }
 
 func (s *Server) uploadResourcePack(w http.ResponseWriter, r *http.Request) {
@@ -1016,7 +1046,7 @@ func (s *Server) uploadMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	item, err := s.media.SaveUpload(file, header.Filename)
+	item, err := s.media.SaveUploadWithOptions(file, header.Filename, s.mediaProcessingOptions())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

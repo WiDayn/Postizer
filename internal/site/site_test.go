@@ -288,3 +288,47 @@ func TestLoadSettingsIgnoresDisabledLegacyTextPack(t *testing.T) {
 		t.Fatalf("plugin order = %q, want %q", got, want)
 	}
 }
+
+func TestLoadSettingsDefaultsMediaProcessing(t *testing.T) {
+	settings, err := LoadSettings(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.MediaProcessing.AutoWebP {
+		t.Fatal("auto webp should be disabled by default")
+	}
+	if got, want := settings.MediaProcessing.WebPQuality, 82; got != want {
+		t.Fatalf("webp quality = %d, want %d", got, want)
+	}
+	if settings.MediaProcessing.KeepOriginal {
+		t.Fatal("keep original should be disabled by default")
+	}
+}
+
+func TestLoadSettingsNormalizesMediaProcessingQuality(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "media_processing": {
+    "auto_webp": true,
+    "webp_quality": 140,
+    "keep_original": true
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.MediaProcessing.AutoWebP {
+		t.Fatal("auto webp should be preserved")
+	}
+	if got, want := settings.MediaProcessing.WebPQuality, 100; got != want {
+		t.Fatalf("webp quality = %d, want %d", got, want)
+	}
+	if !settings.MediaProcessing.KeepOriginal {
+		t.Fatal("keep original should be preserved")
+	}
+}

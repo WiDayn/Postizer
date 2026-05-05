@@ -36,10 +36,11 @@ type Store struct {
 }
 
 type Settings struct {
-	HomeImage   HomeImage            `json:"home_image"`
-	ThemePack   appearance.Selection `json:"theme_pack"`
-	ThemeLocale string               `json:"theme_locale"`
-	PluginOrder []string             `json:"plugin_order"`
+	HomeImage       HomeImage            `json:"home_image"`
+	MediaProcessing MediaProcessing      `json:"media_processing"`
+	ThemePack       appearance.Selection `json:"theme_pack"`
+	ThemeLocale     string               `json:"theme_locale"`
+	PluginOrder     []string             `json:"plugin_order"`
 
 	// Theme / TextPack 仅用于兼容读取旧版配置，保存时会被清空。
 	TextPack appearance.Selection `json:"text_pack,omitempty"`
@@ -50,6 +51,12 @@ type HomeImage struct {
 	Enabled bool   `json:"enabled"`
 	Src     string `json:"src"`
 	Alt     string `json:"alt"`
+}
+
+type MediaProcessing struct {
+	AutoWebP     bool `json:"auto_webp"`
+	WebPQuality  int  `json:"webp_quality"`
+	KeepOriginal bool `json:"keep_original"`
 }
 
 type Post struct {
@@ -192,11 +199,20 @@ func SaveSettings(root string, settings Settings) error {
 // defaultSettings 返回系统启动时应采用的默认设置。
 func defaultSettings() Settings {
 	return Settings{
+		MediaProcessing: defaultMediaProcessing(),
 		ThemePack: appearance.Selection{
 			Enabled: false,
 			PackID:  appearance.DefaultThemePackID,
 		},
 		ThemeLocale: "en",
+	}
+}
+
+func defaultMediaProcessing() MediaProcessing {
+	return MediaProcessing{
+		AutoWebP:     false,
+		WebPQuality:  82,
+		KeepOriginal: false,
 	}
 }
 
@@ -224,6 +240,7 @@ func normalizeSettings(settings *Settings) {
 	settings.ThemePack = normalizePackSelection(settings.ThemePack, appearance.DefaultThemePackID)
 	settings.ThemeLocale = normalizeThemeLocaleValue(settings.ThemeLocale)
 	settings.PluginOrder = normalizePluginOrder(settings.PluginOrder)
+	settings.MediaProcessing = normalizeMediaProcessing(settings.MediaProcessing)
 
 	// 旧版文字包迁移：
 	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。
@@ -246,6 +263,20 @@ func normalizeSettings(settings *Settings) {
 	if strings.TrimSpace(settings.ThemeLocale) == "" {
 		settings.ThemeLocale = defaults.ThemeLocale
 	}
+}
+
+func normalizeMediaProcessing(settings MediaProcessing) MediaProcessing {
+	defaults := defaultMediaProcessing()
+	if settings.WebPQuality == 0 {
+		settings.WebPQuality = defaults.WebPQuality
+	}
+	if settings.WebPQuality < 1 {
+		settings.WebPQuality = 1
+	}
+	if settings.WebPQuality > 100 {
+		settings.WebPQuality = 100
+	}
+	return settings
 }
 
 // normalizePackSelection 把资源包选择归一成当前设置页使用的新语义：

@@ -19,8 +19,10 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/deepteams/webp"
+	"github.com/deepteams/webp"
 )
+
+const DefaultWebPQuality = 82
 
 // Item 表示一个已经上传并可对外访问的媒体资源。
 type Item struct {
@@ -32,6 +34,9 @@ type Item struct {
 	MIMEType     string    `json:"mime_type"`
 	Width        int       `json:"width"`
 	Height       int       `json:"height"`
+	Optimized    bool      `json:"optimized,omitempty"`
+	OriginalPath string    `json:"original_path,omitempty"`
+	OriginalMIME string    `json:"original_mime_type,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -40,6 +45,12 @@ type Update struct {
 	OriginalName string `json:"original_name"`
 	Alt          string `json:"alt"`
 	Caption      string `json:"caption"`
+}
+
+type ProcessingOptions struct {
+	ConvertToWebP bool
+	WebPQuality   int
+	KeepOriginal  bool
 }
 
 // Store 负责管理媒体文件与其元数据索引。
@@ -101,6 +112,10 @@ func (s *Store) Item(id string) (Item, bool) {
 
 // SaveUpload 保存用户上传的文件，并生成可直接用于前端渲染的元数据。
 func (s *Store) SaveUpload(file io.Reader, originalName string) (Item, error) {
+	return s.SaveUploadWithOptions(file, originalName, ProcessingOptions{})
+}
+
+func (s *Store) SaveUploadWithOptions(file io.Reader, originalName string, options ProcessingOptions) (Item, error) {
 	body, err := io.ReadAll(file)
 	if err != nil {
 		return Item{}, err
@@ -114,21 +129,62 @@ func (s *Store) SaveUpload(file io.Reader, originalName string) (Item, error) {
 		return Item{}, err
 	}
 	now := time.Now()
+	options = normalizeProcessingOptions(options)
+	mimeType := http.DetectContentType(body)
 	ext := strings.ToLower(filepath.Ext(originalName))
 	if ext == "" {
-		ext = extensionFromMIME(http.DetectContentType(body))
+		ext = extensionFromMIME(mimeType)
 	}
 	if ext == "" {
 		ext = ".bin"
 	}
 
+	storedBody := body
+	storedExt := ext
+	storedMIME := mimeType
+	width, height, _ := imageDimensions(body)
+	optimized := false
+	var originalRelativeFile string
+	if shouldConvertToWebP(mimeType, ext, options) {
+		converted, convertedWidth, convertedHeight, err := encodeWebP(body, options.WebPQuality)
+		if err != nil {
+			return Item{}, err
+		}
+		storedBody = converted
+		storedExt = ".webp"
+		storedMIME = "image/webp"
+		width = convertedWidth
+		height = convertedHeight
+		optimized = true
+		if options.KeepOriginal {
+			originalRelativeFile = filepath.Join("originals", now.Format("2006"), now.Format("01"), id+ext)
+		}
+	}
+	if storedMIME == "" {
+		storedMIME = "application/octet-stream"
+	}
+
 	relativeFile := filepath.Join(now.Format("2006"), now.Format("01"), id+ext)
+	if optimized {
+		relativeFile = filepath.Join(now.Format("2006"), now.Format("01"), id+storedExt)
+	}
 	fullPath := filepath.Join(s.publicDir, relativeFile)
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return Item{}, err
 	}
-	if err := os.WriteFile(fullPath, body, 0644); err != nil {
+	if err := os.WriteFile(fullPath, storedBody, 0644); err != nil {
 		return Item{}, err
+	}
+	if originalRelativeFile != "" {
+		originalPath := filepath.Join(s.publicDir, originalRelativeFile)
+		if err := os.MkdirAll(filepath.Dir(originalPath), 0755); err != nil {
+			_ = os.Remove(fullPath)
+			return Item{}, err
+		}
+		if err := os.WriteFile(originalPath, body, 0644); err != nil {
+			_ = os.Remove(fullPath)
+			return Item{}, err
+		}
 	}
 
 	item := Item{
@@ -136,15 +192,15 @@ func (s *Store) SaveUpload(file io.Reader, originalName string) (Item, error) {
 		Path:         "/" + filepath.ToSlash(filepath.Join("media", relativeFile)),
 		OriginalName: normalizeOriginalName(originalName, id+ext),
 		Alt:          altFromName(originalName),
-		MIMEType:     http.DetectContentType(body),
+		MIMEType:     storedMIME,
+		Width:        width,
+		Height:       height,
+		Optimized:    optimized,
 		CreatedAt:    now,
 	}
-	if item.MIMEType == "" {
-		item.MIMEType = "application/octet-stream"
-	}
-	if width, height, ok := imageDimensions(body); ok {
-		item.Width = width
-		item.Height = height
+	if originalRelativeFile != "" {
+		item.OriginalPath = "/" + filepath.ToSlash(filepath.Join("media", originalRelativeFile))
+		item.OriginalMIME = mimeType
 	}
 
 	s.mu.Lock()
@@ -190,7 +246,12 @@ func (s *Store) Delete(id string) error {
 		if err := s.saveLocked(); err != nil {
 			return err
 		}
-		_ = os.Remove(filepath.Join(s.publicDir, strings.TrimPrefix(item.Path, "/media/")))
+		if path, ok := s.publicPathFilePath(item.Path); ok {
+			_ = os.Remove(path)
+		}
+		if path, ok := s.publicPathFilePath(item.OriginalPath); ok {
+			_ = os.Remove(path)
+		}
 		return nil
 	}
 	return fmt.Errorf("media item %q not found", id)
@@ -232,7 +293,7 @@ func (s *Store) backfillMissingDimensions() (bool, error) {
 		if !strings.HasPrefix(item.MIMEType, "image/") {
 			continue
 		}
-		path, ok := s.itemFilePath(*item)
+		path, ok := s.publicPathFilePath(item.Path)
 		if !ok {
 			continue
 		}
@@ -254,9 +315,10 @@ func (s *Store) backfillMissingDimensions() (bool, error) {
 	return changed, nil
 }
 
-func (s *Store) itemFilePath(item Item) (string, bool) {
-	relative := strings.TrimPrefix(strings.TrimSpace(item.Path), "/media/")
-	if relative == "" || relative == item.Path {
+func (s *Store) publicPathFilePath(publicPath string) (string, bool) {
+	trimmed := strings.TrimSpace(publicPath)
+	relative := strings.TrimPrefix(trimmed, "/media/")
+	if relative == "" || relative == trimmed {
 		return "", false
 	}
 	cleaned := filepath.Clean(filepath.FromSlash(relative))
@@ -264,6 +326,48 @@ func (s *Store) itemFilePath(item Item) (string, bool) {
 		return "", false
 	}
 	return filepath.Join(s.publicDir, cleaned), true
+}
+
+func normalizeProcessingOptions(options ProcessingOptions) ProcessingOptions {
+	if options.WebPQuality == 0 {
+		options.WebPQuality = DefaultWebPQuality
+	}
+	if options.WebPQuality < 1 {
+		options.WebPQuality = 1
+	}
+	if options.WebPQuality > 100 {
+		options.WebPQuality = 100
+	}
+	return options
+}
+
+func shouldConvertToWebP(mimeType, ext string, options ProcessingOptions) bool {
+	if !options.ConvertToWebP {
+		return false
+	}
+	if strings.EqualFold(mimeType, "image/webp") || strings.EqualFold(ext, ".webp") {
+		return false
+	}
+	switch mimeType {
+	case "image/png", "image/jpeg":
+		return true
+	default:
+		return false
+	}
+}
+
+func encodeWebP(body []byte, quality int) ([]byte, int, int, error) {
+	img, _, err := image.Decode(bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("decode image for webp conversion: %w", err)
+	}
+	var out bytes.Buffer
+	options := webp.OptionsForPreset(webp.PresetPicture, float32(quality))
+	if err := webp.Encode(&out, img, options); err != nil {
+		return nil, 0, 0, fmt.Errorf("encode webp: %w", err)
+	}
+	bounds := img.Bounds()
+	return out.Bytes(), bounds.Dx(), bounds.Dy(), nil
 }
 
 func imageDimensions(body []byte) (int, int, bool) {

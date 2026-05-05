@@ -15,6 +15,12 @@ const homeImageUpload = document.querySelector("#homeImageUpload");
 const homeImageInput = document.querySelector("#homeImageInput");
 const selectHomeImageButton = document.querySelector("#selectHomeImageButton");
 const clearHomeImageButton = document.querySelector("#clearHomeImageButton");
+const mediaProcessingSettingsForm = document.querySelector("#mediaProcessingSettingsForm");
+const mediaProcessingStatus = document.querySelector("#mediaProcessingStatus");
+const mediaAutoWebP = document.querySelector("#mediaAutoWebP");
+const mediaWebPQuality = document.querySelector("#mediaWebPQuality");
+const mediaWebPQualityRange = document.querySelector("#mediaWebPQualityRange");
+const mediaKeepOriginal = document.querySelector("#mediaKeepOriginal");
 
 function tr(key, fallback) {
   if (window.postizerMessage) return window.postizerMessage(key, fallback);
@@ -46,6 +52,16 @@ function setPackSettingsStatus(message) {
 
 function setHomeImageStatus(message) {
   if (homeImageStatus) homeImageStatus.textContent = message;
+}
+
+function setMediaProcessingStatus(message) {
+  if (mediaProcessingStatus) mediaProcessingStatus.textContent = message;
+}
+
+function normalizedQuality(value) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) return 82;
+  return Math.min(100, Math.max(1, parsed));
 }
 
 function selectedValue(name) {
@@ -552,6 +568,41 @@ if (localResourcePackList) {
     }
     setPackSettingsStatus(tr("settings.status.deleted", "Deleted"));
     window.location.reload();
+  });
+}
+
+function syncMediaQuality(source) {
+  const quality = normalizedQuality(source && source.value);
+  if (mediaWebPQuality) mediaWebPQuality.value = String(quality);
+  if (mediaWebPQualityRange) mediaWebPQualityRange.value = String(quality);
+}
+
+if (mediaWebPQuality && mediaWebPQualityRange) {
+  mediaWebPQuality.addEventListener("input", () => syncMediaQuality(mediaWebPQuality));
+  mediaWebPQualityRange.addEventListener("input", () => syncMediaQuality(mediaWebPQualityRange));
+  mediaWebPQuality.addEventListener("change", () => syncMediaQuality(mediaWebPQuality));
+  mediaWebPQualityRange.addEventListener("change", () => syncMediaQuality(mediaWebPQualityRange));
+}
+
+if (mediaProcessingSettingsForm) {
+  mediaProcessingSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    syncMediaQuality(mediaWebPQuality || mediaWebPQualityRange);
+    setMediaProcessingStatus(tr("settings.status.saving", "Saving"));
+    const response = await fetch(apiURL("/admin/api/settings/media-processing"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auto_webp: Boolean(mediaAutoWebP && mediaAutoWebP.checked),
+        webp_quality: normalizedQuality(mediaWebPQuality && mediaWebPQuality.value),
+        keep_original: Boolean(mediaKeepOriginal && mediaKeepOriginal.checked)
+      })
+    });
+    if (!response.ok) {
+      setMediaProcessingStatus((await response.text()).trim());
+      return;
+    }
+    setMediaProcessingStatus(tr("settings.status.saved", "Saved"));
   });
 }
 

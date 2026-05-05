@@ -79,7 +79,35 @@
     </div>
   </form>
 </section>
+
+<section class="ui-panel admin-panel">
+  <div class="ui-panel__head">
+    <h2>{{msg . "settings.media_processing.title" "Image Processing"}}</h2>
+    <span id="mediaProcessingStatus" class="ui-status">{{msg . "settings.status.ready"}}</span>
+  </div>
+  <form id="mediaProcessingSettingsForm" class="settings-form">
+    <p class="settings-form-note">{{msg . "settings.media_processing.help" "When enabled, PNG and JPEG uploads are stored as compressed WebP. GIF and existing WebP uploads are left unchanged."}}</p>
+    <label class="ui-check">
+      <input id="mediaAutoWebP" name="auto_webp" type="checkbox" {{if .Store.Settings.MediaProcessing.AutoWebP}}checked{{end}}>
+      <span>{{msg . "settings.media_processing.enabled" "Convert PNG/JPEG images to WebP"}}</span>
+    </label>
+    <label class="ui-field">
+      <span>{{msg . "settings.media_processing.quality" "WebP quality"}}</span>
+      <div class="settings-range-row">
+        <input id="mediaWebPQualityRange" class="ui-range" type="range" min="1" max="100" value="{{.Store.Settings.MediaProcessing.WebPQuality}}">
+        <input id="mediaWebPQuality" class="ui-input settings-number-input" name="webp_quality" type="number" min="1" max="100" value="{{.Store.Settings.MediaProcessing.WebPQuality}}">
+      </div>
+    </label>
+    <label class="ui-check">
+      <input id="mediaKeepOriginal" name="keep_original" type="checkbox" {{if .Store.Settings.MediaProcessing.KeepOriginal}}checked{{end}}>
+      <span>{{msg . "settings.media_processing.keep_original" "Keep original image"}}</span>
+    </label>
+    <div class="settings-actions">
+      <button type="submit" class="ui-button ui-button--primary">{{msg . "settings.media_processing.save" "Save image settings"}}</button>
+    </div>
+  </form>
+</section>
 <script defer src="/static/media-picker.js?v=2"></script>
-<script defer src="/static/admin-settings.js?v=26"></script>
+<script defer src="/static/admin-settings.js?v=27"></script>
 {{template "adminEnd" .}}
 {{end}}

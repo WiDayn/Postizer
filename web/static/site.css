@@ -551,6 +551,30 @@
     padding: .75rem;
   }
 
+  .settings-form-note {
+    margin: 0;
+    color: var(--muted);
+    font-family: var(--font-ui);
+    font-size: .78rem;
+    line-height: 1.35;
+  }
+
+  .settings-range-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 5.25rem;
+    gap: .6rem;
+    align-items: center;
+  }
+
+  .ui-range {
+    width: 100%;
+    accent-color: var(--ink);
+  }
+
+  .settings-number-input {
+    text-align: right;
+  }
+
   .settings-home-image {
     display: block;
     width: 100%;
