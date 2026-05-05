@@ -3,5 +3,7 @@
   "site.brand": "Postizer",
   "site.edition_line": "Dear Reader",
   "site.hero.hide_image": "隐藏顶部图片",
-  "home.lead_kicker": "文章"
+  "home.lead_kicker": "文章",
+  "menus.location.navbar": "导航栏",
+  "menus.location.navbar.description": "顶部主导航"
 }

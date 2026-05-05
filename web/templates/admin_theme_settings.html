@@ -1,0 +1,28 @@
+{{define "admin_theme_settings.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">{{msg . "admin.kicker"}}</p>
+  <h1>{{msg . "theme_settings.heading" "Theme Settings"}}</h1>
+</header>
+
+<section id="themeSettings" class="ui-panel admin-panel theme-settings-panel">
+  <div class="ui-panel__head">
+    <h2>{{msg . "theme_settings.menus.title" "Menu Placement"}}</h2>
+    <span id="themeSettingsStatus" class="ui-status">{{msg . "settings.status.ready" "Ready"}}</span>
+  </div>
+  <div class="theme-settings-copy">
+    <p>{{msg . "theme_settings.menus.help" "Assign custom menus to locations provided by the active theme."}}</p>
+  </div>
+  <section class="theme-settings-section">
+    <h3>{{msg . "theme_settings.locations.title" "Theme Locations"}}</h3>
+    <div id="themeLocationList" class="theme-location-list"></div>
+  </section>
+  <div class="settings-actions theme-settings-actions">
+    <button id="saveThemeSettings" class="ui-button ui-button--primary" type="button">{{msg . "theme_settings.save" "Save Theme Settings"}}</button>
+  </div>
+</section>
+
+<script id="themeSettingsInitialData" type="application/json">{{toScriptJSON (themeSettingsData .)}}</script>
+<script defer src="/static/theme-settings.js?v=1"></script>
+{{template "adminEnd" .}}
+{{end}}

@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{pageTitle .}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=83">
+  <link rel="stylesheet" href="/static/site.css?v=88">
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
@@ -32,14 +32,11 @@
     <img src="{{.Store.Settings.HomeImage.Src}}" alt="{{.Store.Settings.HomeImage.Alt}}">
   </figure>
   {{end}}
+  {{with menuLinks . "navbar"}}
   <nav class="section-nav" aria-label="Primary">
-    <a href="/">{{msg . "nav.front_page"}}</a>
-    <a href="/archive">{{msg . "nav.archive"}}</a>
-    <a href="/tags">{{msg . "nav.topics"}}</a>
-    <a href="/search">{{msg . "nav.search"}}</a>
-    {{range .Store.Pages}}<a href="{{pageURL .}}">{{.Title}}</a>{{end}}
-    <a href="/admin">{{msg . "nav.admin"}}</a>
+    {{range .}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
   </nav>
+  {{end}}
   <main class="main-column">
 {{end}}
 
@@ -55,6 +52,8 @@
       <a class="{{if eq .ActiveAdmin "media"}}is-active{{end}}" href="/admin/media">{{msg . "nav.media"}}</a>
       <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
       <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
+      <a class="{{if eq .ActiveAdmin "theme-settings"}}is-active{{end}}" href="/admin/theme-settings">{{msg . "nav.theme_settings" "Theme Settings"}}</a>
+      <a class="{{if eq .ActiveAdmin "menus"}}is-active{{end}}" href="/admin/menus">{{msg . "nav.menus" "Custom Menus"}}</a>
       <a class="{{if eq .ActiveAdmin "settings"}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>
     </nav>
     <div class="admin-sidebar-footer">

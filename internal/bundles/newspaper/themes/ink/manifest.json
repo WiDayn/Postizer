@@ -10,6 +10,13 @@
     "ink.css"
   ],
   "translations_dir": "translations",
+  "menu_locations": [
+    {
+      "id": "navbar",
+      "name": "Navbar",
+      "description": "Primary navigation bar"
+    }
+  ],
   "tags": [
     "official",
     "retro"

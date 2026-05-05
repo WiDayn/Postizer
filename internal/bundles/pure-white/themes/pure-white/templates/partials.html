@@ -12,17 +12,15 @@
     <img src="{{.Store.Settings.HomeImage.Src}}" alt="{{.Store.Settings.HomeImage.Alt}}">
   </figure>
   {{end}}
+  {{$navbarLinks := menuLinks . "navbar"}}
+  {{if or $navbarLinks (and .Home .Store.Settings.HomeImage.Enabled)}}
   <nav class="section-nav" aria-label="Primary">
-    <a href="/">{{msg . "nav.front_page"}}</a>
-    <a href="/archive">{{msg . "nav.archive"}}</a>
-    <a href="/tags">{{msg . "nav.topics"}}</a>
-    <a href="/search">{{msg . "nav.search"}}</a>
-    {{range .Store.Pages}}<a href="{{pageURL .}}">{{.Title}}</a>{{end}}
-    <a href="/admin">{{msg . "nav.admin"}}</a>
+    {{range $navbarLinks}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
     {{if and .Home .Store.Settings.HomeImage.Enabled}}
     <button class="hero-collapse-button" type="button" title="{{msg . "site.hero.hide_image" "Hide cover image"}}" aria-label="{{msg . "site.hero.hide_image" "Hide cover image"}}"></button>
     {{end}}
   </nav>
+  {{end}}
   <script defer src="{{.Appearance.ActiveTheme.URLBase}}/pure-white.js?v={{.Appearance.ActiveTheme.Version}}"></script>
   <main class="main-column">
 {{end}}
