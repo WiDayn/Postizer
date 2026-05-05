@@ -68,11 +68,18 @@
       <span class="ui-file-drop__name" data-file-name></span>
     </label>
     <div class="settings-actions">
+      <button
+        type="button"
+        id="selectHomeImageButton"
+        class="ui-button"
+        data-current-home-image="{{.Store.Settings.HomeImage.Src}}"
+      >{{msg . "settings.home_image.choose_media" "Choose from media library"}}</button>
       <button type="button" id="clearHomeImageButton" class="ui-button ui-button--ghost">{{msg . "common.clear"}}</button>
       <span id="homeImageStatus" class="ui-status">{{msg . "settings.status.ready"}}</span>
     </div>
   </form>
 </section>
-<script defer src="/static/admin-settings.js?v=25"></script>
+<script defer src="/static/media-picker.js?v=2"></script>
+<script defer src="/static/admin-settings.js?v=26"></script>
 {{template "adminEnd" .}}
 {{end}}

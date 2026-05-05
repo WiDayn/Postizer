@@ -85,6 +85,18 @@ func (s *Store) Items() []Item {
 	return items
 }
 
+// Item returns one media item by ID.
+func (s *Store) Item(id string) (Item, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return Item{}, false
+}
+
 // SaveUpload 保存用户上传的文件，并生成可直接用于前端渲染的元数据。
 func (s *Store) SaveUpload(file io.Reader, originalName string) (Item, error) {
 	body, err := io.ReadAll(file)

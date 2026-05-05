@@ -13,6 +13,7 @@ const pluginTransferRemoveButton = document.querySelector("#pluginTransferRemove
 const homeImageStatus = document.querySelector("#homeImageStatus");
 const homeImageUpload = document.querySelector("#homeImageUpload");
 const homeImageInput = document.querySelector("#homeImageInput");
+const selectHomeImageButton = document.querySelector("#selectHomeImageButton");
 const clearHomeImageButton = document.querySelector("#clearHomeImageButton");
 
 function tr(key, fallback) {
@@ -569,6 +570,33 @@ if (homeImageUpload && homeImageInput) {
     }
     setHomeImageStatus(tr("settings.status.saved", "Saved"));
     window.location.reload();
+  });
+}
+
+if (selectHomeImageButton) {
+  selectHomeImageButton.addEventListener("click", async () => {
+    if (!window.PostizerMediaPicker) {
+      setHomeImageStatus(tr("media_picker.error", "Media selection failed"));
+      return;
+    }
+    await window.PostizerMediaPicker.open({
+      title: tr("settings.home_image.choose_media", "Choose from media library"),
+      selectLabel: tr("media_picker.use_as_home_image", "Use as Home Image"),
+      currentPath: selectHomeImageButton.dataset.currentHomeImage || "",
+      onSelect: async (item) => {
+        setHomeImageStatus(tr("settings.status.applying", "Applying"));
+        const response = await fetch(apiURL("/admin/api/home-image"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ media_id: item.id })
+        });
+        if (!response.ok) {
+          throw new Error((await response.text()).trim());
+        }
+        setHomeImageStatus(tr("settings.status.saved", "Saved"));
+        window.location.reload();
+      }
+    });
   });
 }
 

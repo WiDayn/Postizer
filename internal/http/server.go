@@ -431,6 +431,11 @@ func (s *Server) listMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uploadHomeImage(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		s.setHomeImageFromMedia(w, r)
+		return
+	}
+
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -449,11 +454,7 @@ func (s *Server) uploadHomeImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	settings := s.currentStore().Settings
-	settings.HomeImage = site.HomeImage{
-		Enabled: true,
-		Src:     item.Path,
-		Alt:     item.Alt,
-	}
+	settings.HomeImage = homeImageFromMediaItem(item)
 	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -463,6 +464,58 @@ func (s *Server) uploadHomeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, settings.HomeImage)
+}
+
+func (s *Server) setHomeImageFromMedia(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload struct {
+		MediaID string `json:"media_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	mediaID := strings.TrimSpace(payload.MediaID)
+	if mediaID == "" {
+		http.Error(w, "missing media_id", http.StatusBadRequest)
+		return
+	}
+	item, ok := s.media.Item(mediaID)
+	if !ok {
+		http.Error(w, "media item not found", http.StatusNotFound)
+		return
+	}
+	if !strings.HasPrefix(item.MIMEType, "image/") {
+		http.Error(w, "selected media item is not an image", http.StatusBadRequest)
+		return
+	}
+
+	settings := s.currentStore().Settings
+	settings.HomeImage = homeImageFromMediaItem(item)
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, settings.HomeImage)
+}
+
+func homeImageFromMediaItem(item media.Item) site.HomeImage {
+	alt := strings.TrimSpace(item.Alt)
+	if alt == "" {
+		alt = strings.TrimSpace(item.OriginalName)
+	}
+	if alt == "" {
+		alt = "Home page image"
+	}
+	return site.HomeImage{
+		Enabled: true,
+		Src:     item.Path,
+		Alt:     alt,
+	}
 }
 
 func (s *Server) clearHomeImage(w http.ResponseWriter, r *http.Request) {
@@ -1011,7 +1064,7 @@ func mediaFigureMarkdown(item media.Item) string {
 		labelBase = item.ID
 	}
 	return fmt.Sprintf(
-		"\n\n\\begin{figure}\n![%s](%s)\n\\caption{%s}\n\\label{fig:%s}\n\\end{figure}\n\n",
+		"\\begin{figure}\n![%s](%s)\n\\caption{%s}\n\\label{fig:%s}\n\\end{figure}",
 		escapeMarkdownImageAlt(item.Alt),
 		item.Path,
 		escapeLatexBraceText(caption),

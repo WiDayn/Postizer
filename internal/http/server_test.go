@@ -4,9 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"postizer/internal/appearance"
+	"postizer/internal/media"
 	"postizer/internal/site"
 )
 
@@ -26,6 +28,56 @@ func TestLoadTemplatesParsesAdminTemplates(t *testing.T) {
 
 	if _, err := loadTemplates(appearance.Pack{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHomeImageFromMediaItemUsesMetadata(t *testing.T) {
+	item := media.Item{
+		Path:         "/media/2026/05/cover.webp",
+		OriginalName: "cover.webp",
+		Alt:          "Cover",
+	}
+
+	homeImage := homeImageFromMediaItem(item)
+	if !homeImage.Enabled {
+		t.Fatal("home image should be enabled")
+	}
+	if got, want := homeImage.Src, item.Path; got != want {
+		t.Fatalf("home image src = %q, want %q", got, want)
+	}
+	if got, want := homeImage.Alt, item.Alt; got != want {
+		t.Fatalf("home image alt = %q, want %q", got, want)
+	}
+}
+
+func TestHomeImageFromMediaItemFallsBackToOriginalName(t *testing.T) {
+	item := media.Item{
+		Path:         "/media/2026/05/cover.webp",
+		OriginalName: "cover.webp",
+	}
+
+	homeImage := homeImageFromMediaItem(item)
+	if got, want := homeImage.Alt, item.OriginalName; got != want {
+		t.Fatalf("home image alt = %q, want %q", got, want)
+	}
+}
+
+func TestMediaFigureMarkdownHasNoOuterBlankLines(t *testing.T) {
+	markdown := mediaFigureMarkdown(media.Item{
+		ID:           "image-id",
+		Path:         "/media/2026/05/example.png",
+		OriginalName: "example.png",
+		Alt:          "Example",
+		Caption:      "Caption",
+	})
+	if markdown != strings.TrimSpace(markdown) {
+		t.Fatalf("media figure markdown should be trimmed, got %q", markdown)
+	}
+	if strings.HasPrefix(markdown, "\n") || strings.HasSuffix(markdown, "\n") {
+		t.Fatalf("media figure markdown has outer newlines: %q", markdown)
+	}
+	if !strings.HasPrefix(markdown, `\begin{figure}`) {
+		t.Fatalf("media figure markdown should start with figure syntax, got %q", markdown)
 	}
 }
 
