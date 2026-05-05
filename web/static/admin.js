@@ -26,6 +26,7 @@ const fields = {
 
 let currentSlug = "";
 let slugTouched = false;
+let updatedTouched = false;
 let previewTimer = 0;
 let dirty = false;
 const postsCollapsedKey = "postizer.editor.postsCollapsed";
@@ -82,8 +83,34 @@ function restorePostLibraryState() {
   }
 }
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
+function siteTimeZone() {
+  return (root && root.dataset.timeZone) || "UTC";
+}
+
+function nowMinute() {
+  const date = new Date();
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: siteTimeZone(),
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(date).reduce((acc, part) => {
+      acc[part.type] = part.value;
+      return acc;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  } catch (_) {
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  }
+}
+
+function displayDateTime(value) {
+  return String(value || "").replace("T", " ");
 }
 
 function slugify(value) {
@@ -189,8 +216,9 @@ function payload(draftOverride) {
   return {
     title: fields.title.value.trim(),
     slug: slugify(fields.slug.value || fields.title.value),
-    date: fields.date.value || today(),
+    date: fields.date.value || nowMinute(),
     updated: fields.updated.value,
+    updated_manual: updatedTouched,
     tags: fields.tags.value.split(",").map((tag) => tag.trim()).filter(Boolean),
     summary: fields.summary.value.trim(),
     draft: typeof draftOverride === "boolean" ? draftOverride : fields.draft.checked,
@@ -202,9 +230,10 @@ function payload(draftOverride) {
 function fillForm(post) {
   currentSlug = post.slug || "";
   slugTouched = Boolean(post.slug);
+  updatedTouched = false;
   fields.title.value = post.title || "";
   fields.slug.value = post.slug || "";
-  fields.date.value = post.date || today();
+  fields.date.value = post.date || nowMinute();
   fields.updated.value = post.updated || "";
   fields.tags.value = (post.tags || []).join(", ");
   fields.summary.value = post.summary || "";
@@ -232,7 +261,7 @@ function newPost() {
   fillForm({
     title: "",
     slug: "",
-    date: today(),
+    date: nowMinute(),
     updated: "",
     tags: [],
     summary: "",
@@ -269,6 +298,9 @@ async function savePost(draft) {
   currentSlug = result.slug;
   fields.slug.value = result.slug;
   fields.draft.checked = Boolean(result.draft);
+  if (result.date) fields.date.value = result.date;
+  if (result.updated) fields.updated.value = result.updated;
+  updatedTouched = false;
   updateViewLink();
   await refreshPostLibrary(result.slug);
   setDirty(false);
@@ -289,7 +321,7 @@ async function refreshPostLibrary(activeSlug) {
     button.classList.toggle("is-active", post.slug === activeSlug);
     button.innerHTML = "<strong></strong><span></span>";
     button.querySelector("strong").textContent = post.title;
-    button.querySelector("span").textContent = `${post.date || ""} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`;
+    button.querySelector("span").textContent = `${displayDateTime(post.date)} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`;
     li.appendChild(button);
     postLibrary.appendChild(li);
   });
@@ -425,9 +457,18 @@ fields.slug.addEventListener("input", () => {
   setDirty(true);
 });
 
-[fields.date, fields.updated, fields.tags, fields.summary, fields.draft, fields.toc].forEach((field) => {
+[fields.date, fields.tags, fields.summary, fields.draft, fields.toc].forEach((field) => {
   field.addEventListener("input", () => setDirty(true));
   field.addEventListener("change", () => setDirty(true));
+});
+
+fields.updated.addEventListener("input", () => {
+  updatedTouched = true;
+  setDirty(true);
+});
+fields.updated.addEventListener("change", () => {
+  updatedTouched = true;
+  setDirty(true);
 });
 
 editor.addEventListener("input", afterEdit);

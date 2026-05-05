@@ -1,6 +1,6 @@
 {{define "admin.html"}}
 {{template "adminStart" .}}
-<section class="editor-shell" data-mode="split" data-library="expanded">
+<section class="editor-shell" data-mode="split" data-library="expanded" data-time-zone="{{.Store.Settings.TimeZone}}">
   <header class="editor-topbar">
     <div>
       <p class="kicker">{{msg . "admin.kicker"}}</p>
@@ -81,11 +81,11 @@
         </div>
         <label class="ui-field">
           <span>{{msg . "editor.settings.date"}}</span>
-          <input id="postDate" class="ui-input" type="date">
+          <input id="postDate" class="ui-input" type="datetime-local">
         </label>
         <label class="ui-field">
           <span>{{msg . "editor.settings.updated"}}</span>
-          <input id="postUpdated" class="ui-input" type="date">
+          <input id="postUpdated" class="ui-input" type="datetime-local">
         </label>
         <label class="ui-field">
           <span>{{msg . "editor.settings.tags"}}</span>
@@ -130,6 +130,6 @@
     </aside>
   </div>
 </section>
-<script defer src="/static/admin.js?v=10"></script>
+<script defer src="/static/admin.js?v=11"></script>
 {{template "adminEnd" .}}
 {{end}}

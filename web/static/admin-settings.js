@@ -15,6 +15,9 @@ const homeImageUpload = document.querySelector("#homeImageUpload");
 const homeImageInput = document.querySelector("#homeImageInput");
 const selectHomeImageButton = document.querySelector("#selectHomeImageButton");
 const clearHomeImageButton = document.querySelector("#clearHomeImageButton");
+const timeZoneSettingsForm = document.querySelector("#timeZoneSettingsForm");
+const timeZoneStatus = document.querySelector("#timeZoneStatus");
+const siteTimeZone = document.querySelector("#siteTimeZone");
 const mediaProcessingSettingsForm = document.querySelector("#mediaProcessingSettingsForm");
 const mediaProcessingStatus = document.querySelector("#mediaProcessingStatus");
 const mediaAutoWebP = document.querySelector("#mediaAutoWebP");
@@ -52,6 +55,10 @@ function setPackSettingsStatus(message) {
 
 function setHomeImageStatus(message) {
   if (homeImageStatus) homeImageStatus.textContent = message;
+}
+
+function setTimeZoneStatus(message) {
+  if (timeZoneStatus) timeZoneStatus.textContent = message;
 }
 
 function setMediaProcessingStatus(message) {
@@ -568,6 +575,26 @@ if (localResourcePackList) {
     }
     setPackSettingsStatus(tr("settings.status.deleted", "Deleted"));
     window.location.reload();
+  });
+}
+
+if (timeZoneSettingsForm && siteTimeZone) {
+  timeZoneSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const timeZone = String(siteTimeZone.value || "").trim();
+    setTimeZoneStatus(tr("settings.status.saving", "Saving"));
+    const response = await fetch(apiURL("/admin/api/settings/time-zone"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ time_zone: timeZone })
+    });
+    if (!response.ok) {
+      setTimeZoneStatus((await response.text()).trim());
+      return;
+    }
+    const result = await response.json();
+    if (result.time_zone) siteTimeZone.value = result.time_zone;
+    setTimeZoneStatus(tr("settings.status.saved", "Saved"));
   });
 }
 

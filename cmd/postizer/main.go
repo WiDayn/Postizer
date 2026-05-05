@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+	_ "time/tzdata"
 
 	apphttp "postizer/internal/http"
 	"postizer/internal/media"

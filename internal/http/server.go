@@ -120,6 +120,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/media/paste", s.requireAdmin(http.HandlerFunc(s.uploadMedia)))
 	mux.Handle("POST /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.uploadHomeImage)))
 	mux.Handle("DELETE /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.clearHomeImage)))
+	mux.Handle("POST /admin/api/settings/time-zone", s.requireAdmin(http.HandlerFunc(s.updateTimeZoneSettings)))
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/resource-packs", s.requireAdmin(http.HandlerFunc(s.uploadResourcePack)))
 	mux.Handle("DELETE /admin/api/resource-packs/{type}/{id}", s.requireAdmin(http.HandlerFunc(s.deleteResourcePack)))
@@ -134,7 +135,7 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 			if t.IsZero() {
 				return ""
 			}
-			return t.Format("2006-01-02")
+			return site.FormatDisplayTime(t)
 		},
 		"postURL": func(p *site.Post) string { return "/posts/" + p.Slug },
 		"pageURL": func(p *site.Page) string { return "/pages/" + p.Slug },
@@ -159,6 +160,9 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 		},
 		"localeLabel": func(code string) string {
 			return appearance.LocaleLabel(code)
+		},
+		"timeZones": func(current string) []string {
+			return site.TimeZoneOptions(current)
 		},
 		"msg": func(data ViewData, key string, fallback ...string) string {
 			return messageFromViewData(data, key, fallback...)
@@ -349,8 +353,8 @@ func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
 		posts = append(posts, postSummary{
 			Title:   p.Title,
 			Slug:    p.Slug,
-			Date:    formatDate(p.Date),
-			Updated: formatDate(p.Updated),
+			Date:    formatInputDateTime(p.Date),
+			Updated: formatInputDateTime(p.Updated),
 			Tags:    p.Tags,
 			Summary: p.Summary,
 			Draft:   p.Draft,
@@ -371,8 +375,8 @@ func (s *Server) getPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, site.PostDraft{
 		Title:   p.Title,
 		Slug:    p.Slug,
-		Date:    formatDate(p.Date),
-		Updated: formatDate(p.Updated),
+		Date:    formatInputDateTime(p.Date),
+		Updated: formatInputDateTime(p.Updated),
 		Tags:    p.Tags,
 		Summary: p.Summary,
 		Draft:   p.Draft,
@@ -392,10 +396,8 @@ func (s *Server) savePost(w http.ResponseWriter, r *http.Request) {
 	if draft.Slug == "" {
 		draft.Slug = site.NormalizeSlug(draft.Title)
 	}
-	if draft.Date == "" {
-		draft.Date = time.Now().Format("2006-01-02")
-	}
-	if err := site.SavePost(s.contentRoot, draft); err != nil {
+	saved, err := site.SavePost(s.contentRoot, draft)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -404,9 +406,11 @@ func (s *Server) savePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"slug":  draft.Slug,
-		"url":   "/posts/" + draft.Slug,
-		"draft": draft.Draft,
+		"slug":    saved.Slug,
+		"url":     "/posts/" + saved.Slug,
+		"draft":   saved.Draft,
+		"date":    saved.Date,
+		"updated": saved.Updated,
 	})
 }
 
@@ -531,6 +535,33 @@ func (s *Server) clearHomeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]bool{"enabled": false})
+}
+
+func (s *Server) updateTimeZoneSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload struct {
+		TimeZone string `json:"time_zone"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	timeZone := strings.TrimSpace(payload.TimeZone)
+	if !site.ValidTimeZone(timeZone) {
+		http.Error(w, "invalid time zone", http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.TimeZone = timeZone
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]string{"time_zone": s.currentStore().Settings.TimeZone})
 }
 
 func (s *Server) updateMediaProcessingSettings(w http.ResponseWriter, r *http.Request) {
@@ -1251,11 +1282,11 @@ func parseThemeTemplates(templates *template.Template, dir string) error {
 	return nil
 }
 
-func formatDate(t time.Time) string {
+func formatInputDateTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Format("2006-01-02")
+	return site.FormatInputDateTime(t)
 }
 
 func writeJSON(w http.ResponseWriter, value any) {

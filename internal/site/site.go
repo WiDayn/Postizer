@@ -21,6 +21,13 @@ import (
 	"github.com/yuin/goldmark/renderer/html"
 )
 
+const (
+	DefaultTimeZone      = "Asia/Hong_Kong"
+	inputMinuteLayout    = "2006-01-02T15:04"
+	displayMinuteLayout  = "2006-01-02 15:04"
+	legacyDateOnlyLayout = "2006-01-02"
+)
+
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 type Store struct {
@@ -38,6 +45,7 @@ type Store struct {
 type Settings struct {
 	HomeImage       HomeImage            `json:"home_image"`
 	MediaProcessing MediaProcessing      `json:"media_processing"`
+	TimeZone        string               `json:"time_zone"`
 	ThemePack       appearance.Selection `json:"theme_pack"`
 	ThemeLocale     string               `json:"theme_locale"`
 	PluginOrder     []string             `json:"plugin_order"`
@@ -96,15 +104,16 @@ type Tag struct {
 type frontMatter map[string]string
 
 type PostDraft struct {
-	Title   string   `json:"title"`
-	Slug    string   `json:"slug"`
-	Date    string   `json:"date"`
-	Updated string   `json:"updated"`
-	Tags    []string `json:"tags"`
-	Summary string   `json:"summary"`
-	Draft   bool     `json:"draft"`
-	TOC     bool     `json:"toc"`
-	Body    string   `json:"body"`
+	Title         string   `json:"title"`
+	Slug          string   `json:"slug"`
+	Date          string   `json:"date"`
+	Updated       string   `json:"updated"`
+	UpdatedManual bool     `json:"updated_manual"`
+	Tags          []string `json:"tags"`
+	Summary       string   `json:"summary"`
+	Draft         bool     `json:"draft"`
+	TOC           bool     `json:"toc"`
+	Body          string   `json:"body"`
 }
 
 func Load(root string) (*Store, error) {
@@ -113,6 +122,7 @@ func Load(root string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	location := TimeLocation(settings)
 
 	store := &Store{
 		Settings:       settings,
@@ -122,10 +132,10 @@ func Load(root string) (*Store, error) {
 		TagsBySlug:     map[string]*Tag{},
 	}
 
-	if err := loadPosts(filepath.Join(root, "posts"), md, store); err != nil {
+	if err := loadPosts(filepath.Join(root, "posts"), md, store, location); err != nil {
 		return nil, err
 	}
-	if err := loadPages(filepath.Join(root, "pages"), md, store); err != nil {
+	if err := loadPages(filepath.Join(root, "pages"), md, store, location); err != nil {
 		return nil, err
 	}
 	if err := loadTagMetadata(filepath.Join(root, "tags"), store); err != nil {
@@ -200,6 +210,7 @@ func SaveSettings(root string, settings Settings) error {
 func defaultSettings() Settings {
 	return Settings{
 		MediaProcessing: defaultMediaProcessing(),
+		TimeZone:        DefaultTimeZone,
 		ThemePack: appearance.Selection{
 			Enabled: false,
 			PackID:  appearance.DefaultThemePackID,
@@ -241,6 +252,7 @@ func normalizeSettings(settings *Settings) {
 	settings.ThemeLocale = normalizeThemeLocaleValue(settings.ThemeLocale)
 	settings.PluginOrder = normalizePluginOrder(settings.PluginOrder)
 	settings.MediaProcessing = normalizeMediaProcessing(settings.MediaProcessing)
+	settings.TimeZone = NormalizeTimeZone(settings.TimeZone)
 
 	// 旧版文字包迁移：
 	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。
@@ -277,6 +289,34 @@ func normalizeMediaProcessing(settings MediaProcessing) MediaProcessing {
 		settings.WebPQuality = 100
 	}
 	return settings
+}
+
+func NormalizeTimeZone(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return DefaultTimeZone
+	}
+	if _, err := time.LoadLocation(value); err != nil {
+		return DefaultTimeZone
+	}
+	return value
+}
+
+func ValidTimeZone(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	_, err := time.LoadLocation(value)
+	return err == nil
+}
+
+func TimeLocation(settings Settings) *time.Location {
+	location, err := time.LoadLocation(NormalizeTimeZone(settings.TimeZone))
+	if err != nil {
+		return time.FixedZone(DefaultTimeZone, 8*60*60)
+	}
+	return location
 }
 
 // normalizePackSelection 把资源包选择归一成当前设置页使用的新语义：
@@ -327,7 +367,7 @@ func prependPluginID(values []string, id string) []string {
 	return normalizePluginOrder(reordered)
 }
 
-func loadPosts(dir string, md goldmark.Markdown, store *Store) error {
+func loadPosts(dir string, md goldmark.Markdown, store *Store, location *time.Location) error {
 	return walkMarkdown(dir, func(path string, body []byte) error {
 		fm, markdown := splitFrontMatter(body)
 		slug := fm.get("slug", slugFromPath(path))
@@ -341,8 +381,8 @@ func loadPosts(dir string, md goldmark.Markdown, store *Store) error {
 		post := &Post{
 			Title:       fm.get("title", slug),
 			Slug:        slug,
-			Date:        parseDate(fm.get("date", "")),
-			Updated:     parseDate(fm.get("updated", "")),
+			Date:        parseDate(fm.get("date", ""), location),
+			Updated:     parseDate(fm.get("updated", ""), location),
 			Tags:        parseList(fm.get("tags", "")),
 			Summary:     fm.get("summary", ""),
 			Draft:       fm.get("draft", "false") == "true",
@@ -372,7 +412,7 @@ func loadPosts(dir string, md goldmark.Markdown, store *Store) error {
 	})
 }
 
-func loadPages(dir string, md goldmark.Markdown, store *Store) error {
+func loadPages(dir string, md goldmark.Markdown, store *Store, location *time.Location) error {
 	return walkMarkdown(dir, func(path string, body []byte) error {
 		fm, markdown := splitFrontMatter(body)
 		slug := fm.get("slug", slugFromPath(path))
@@ -386,7 +426,7 @@ func loadPages(dir string, md goldmark.Markdown, store *Store) error {
 		page := &Page{
 			Title:    fm.get("title", slug),
 			Slug:     slug,
-			Updated:  parseDate(fm.get("updated", "")),
+			Updated:  parseDate(fm.get("updated", ""), location),
 			Summary:  fm.get("summary", ""),
 			TOC:      fm.get("toc", "false") == "true",
 			HTML:     htmlBody,
@@ -1015,46 +1055,64 @@ func RenderMarkdown(source string) (template.HTML, error) {
 	return renderMarkdown(newMarkdown(), []byte(source))
 }
 
-func SavePost(root string, draft PostDraft) error {
+func SavePost(root string, draft PostDraft) (PostDraft, error) {
 	draft.Slug = NormalizeSlug(draft.Slug)
 	if draft.Slug == "" {
 		draft.Slug = NormalizeSlug(draft.Title)
 	}
 	if !ValidSlug(draft.Slug) {
-		return fmt.Errorf("invalid post slug %q", draft.Slug)
+		return PostDraft{}, fmt.Errorf("invalid post slug %q", draft.Slug)
 	}
 	if strings.TrimSpace(draft.Title) == "" {
-		return fmt.Errorf("title is required")
+		return PostDraft{}, fmt.Errorf("title is required")
 	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		return PostDraft{}, err
+	}
+	location := TimeLocation(settings)
+	now := time.Now().In(location).Truncate(time.Minute)
+
 	if draft.Date == "" {
-		draft.Date = time.Now().Format("2006-01-02")
+		draft.Date = FormatInputDateTime(now)
 	}
-	if _, err := time.Parse("2006-01-02", draft.Date); err != nil {
-		return fmt.Errorf("invalid date %q", draft.Date)
+	date, err := parseContentTime(draft.Date, location)
+	if err != nil {
+		return PostDraft{}, fmt.Errorf("invalid date %q", draft.Date)
 	}
-	if draft.Updated != "" {
-		if _, err := time.Parse("2006-01-02", draft.Updated); err != nil {
-			return fmt.Errorf("invalid updated date %q", draft.Updated)
+	draft.Date = FormatInputDateTime(date)
+
+	if !draft.UpdatedManual || strings.TrimSpace(draft.Updated) == "" {
+		draft.Updated = FormatInputDateTime(now)
+	} else {
+		updated, err := parseContentTime(draft.Updated, location)
+		if err != nil {
+			return PostDraft{}, fmt.Errorf("invalid updated date %q", draft.Updated)
 		}
+		draft.Updated = FormatInputDateTime(updated)
 	}
 
 	postsDir := filepath.Join(root, "posts")
 	if err := os.MkdirAll(postsDir, 0755); err != nil {
-		return err
+		return PostDraft{}, err
 	}
 	target := filepath.Join(postsDir, draft.Slug+".md")
 	cleanPostsDir, err := filepath.Abs(postsDir)
 	if err != nil {
-		return err
+		return PostDraft{}, err
 	}
 	cleanTarget, err := filepath.Abs(target)
 	if err != nil {
-		return err
+		return PostDraft{}, err
 	}
 	if !strings.HasPrefix(cleanTarget, cleanPostsDir+string(os.PathSeparator)) {
-		return fmt.Errorf("post path escapes content directory")
+		return PostDraft{}, fmt.Errorf("post path escapes content directory")
 	}
-	return os.WriteFile(cleanTarget, []byte(serializePost(draft)), 0644)
+	if err := os.WriteFile(cleanTarget, []byte(serializePost(draft)), 0644); err != nil {
+		return PostDraft{}, err
+	}
+	return draft, nil
 }
 
 func serializePost(draft PostDraft) string {
@@ -1132,12 +1190,50 @@ func (fm frontMatter) get(key, fallback string) string {
 	return fallback
 }
 
-func parseDate(value string) time.Time {
+func parseDate(value string, location *time.Location) time.Time {
 	if value == "" {
 		return time.Time{}
 	}
-	t, _ := time.Parse("2006-01-02", value)
+	t, err := parseContentTime(value, location)
+	if err != nil {
+		return time.Time{}
+	}
 	return t
+}
+
+func parseContentTime(value string, location *time.Location) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, fmt.Errorf("empty time")
+	}
+	if location == nil {
+		location = time.UTC
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t.In(location).Truncate(time.Minute), nil
+		}
+	}
+	for _, layout := range []string{inputMinuteLayout, displayMinuteLayout, legacyDateOnlyLayout} {
+		if t, err := time.ParseInLocation(layout, value, location); err == nil {
+			return t.Truncate(time.Minute), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported time %q", value)
+}
+
+func FormatInputDateTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(inputMinuteLayout)
+}
+
+func FormatDisplayTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(displayMinuteLayout)
 }
 
 func parseList(value string) []string {

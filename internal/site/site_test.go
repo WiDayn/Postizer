@@ -11,10 +11,10 @@ import (
 
 func TestSavePostAndLoadDraft(t *testing.T) {
 	root := t.TempDir()
-	err := SavePost(root, PostDraft{
+	_, err := SavePost(root, PostDraft{
 		Title:   "Editor Smoke",
 		Slug:    "editor-smoke",
-		Date:    "2026-05-04",
+		Date:    "2026-05-04T10:30",
 		Tags:    []string{"go", "editor"},
 		Summary: "Saved from the editor.",
 		Draft:   true,
@@ -32,6 +32,12 @@ func TestSavePostAndLoadDraft(t *testing.T) {
 	if !strings.Contains(string(body), `draft: true`) {
 		t.Fatalf("saved post did not preserve draft state:\n%s", body)
 	}
+	if !strings.Contains(string(body), `date: "2026-05-04T10:30"`) {
+		t.Fatalf("saved post did not preserve minute-level date:\n%s", body)
+	}
+	if !strings.Contains(string(body), `updated: "`) {
+		t.Fatalf("saved post did not auto-populate updated time:\n%s", body)
+	}
 
 	store, err := Load(root)
 	if err != nil {
@@ -42,6 +48,80 @@ func TestSavePostAndLoadDraft(t *testing.T) {
 	}
 	if store.PostsBySlug["editor-smoke"] != nil {
 		t.Fatal("draft post leaked into public index")
+	}
+}
+
+func TestSavePostPreservesManualUpdatedMinute(t *testing.T) {
+	root := t.TempDir()
+	saved, err := SavePost(root, PostDraft{
+		Title:         "Manual Updated",
+		Slug:          "manual-updated",
+		Date:          "2026-05-04",
+		Updated:       "2026-05-05 12:34",
+		UpdatedManual: true,
+		Body:          "Body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Date, "2026-05-04T00:00"; got != want {
+		t.Fatalf("date = %q, want %q", got, want)
+	}
+	if got, want := saved.Updated, "2026-05-05T12:34"; got != want {
+		t.Fatalf("updated = %q, want %q", got, want)
+	}
+	body, err := os.ReadFile(filepath.Join(root, "posts", "manual-updated.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `updated: "2026-05-05T12:34"`) {
+		t.Fatalf("manual updated time was not serialized:\n%s", body)
+	}
+}
+
+func TestLoadParsesMinuteDatesInConfiguredTimeZone(t *testing.T) {
+	root := t.TempDir()
+	settings := defaultSettings()
+	settings.TimeZone = "Asia/Tokyo"
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+	postDir := filepath.Join(root, "posts")
+	if err := os.MkdirAll(postDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := `---
+title: "Time Zone"
+slug: "time-zone"
+date: "2026-05-04T08:30"
+updated: "2026-05-04T09:45"
+tags: []
+summary: ""
+draft: false
+toc: true
+---
+
+Body.
+`
+	if err := os.WriteFile(filepath.Join(postDir, "time-zone.md"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := store.PostsBySlug["time-zone"]
+	if post == nil {
+		t.Fatal("post not loaded")
+	}
+	if got, want := post.Date.Location().String(), "Asia/Tokyo"; got != want {
+		t.Fatalf("location = %q, want %q", got, want)
+	}
+	if got, want := FormatInputDateTime(post.Date), "2026-05-04T08:30"; got != want {
+		t.Fatalf("date = %q, want %q", got, want)
+	}
+	if got, want := FormatDisplayTime(post.Updated), "2026-05-04 09:45"; got != want {
+		t.Fatalf("updated display = %q, want %q", got, want)
 	}
 }
 
@@ -294,6 +374,9 @@ func TestLoadSettingsDefaultsMediaProcessing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got, want := settings.TimeZone, DefaultTimeZone; got != want {
+		t.Fatalf("time zone = %q, want %q", got, want)
+	}
 	if settings.MediaProcessing.AutoWebP {
 		t.Fatal("auto webp should be disabled by default")
 	}
@@ -302,6 +385,20 @@ func TestLoadSettingsDefaultsMediaProcessing(t *testing.T) {
 	}
 	if settings.MediaProcessing.KeepOriginal {
 		t.Fatal("keep original should be disabled by default")
+	}
+}
+
+func TestTimeZoneOptionsIncludesCommonZones(t *testing.T) {
+	options := TimeZoneOptions("Asia/Tokyo")
+	for _, expected := range []string{"UTC", "Asia/Hong_Kong", "Asia/Tokyo", "America/New_York", "Europe/London"} {
+		if !containsString(options, expected) {
+			t.Fatalf("time zone options did not include %q", expected)
+		}
+	}
+	for i := 1; i < len(options); i++ {
+		if options[i-1] > options[i] {
+			t.Fatalf("time zone options are not sorted near %q and %q", options[i-1], options[i])
+		}
 	}
 }
 
