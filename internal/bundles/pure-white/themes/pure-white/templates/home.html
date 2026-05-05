@@ -2,17 +2,28 @@
 {{template "chromeStart" .}}
 <section class="front-page">
   <div class="front-grid pure-home-posts">
-    <p class="kicker pure-home-posts__heading">{{msg . "home.lead_kicker"}}</p>
     {{range .Posts}}
-    <article class="pure-home-post">
-      <time class="pure-home-post__date">{{date .Date}}</time>
-      <h2 class="pure-home-post__title"><a href="{{postURL .}}">{{.Title}}</a></h2>
-      <div class="pure-home-post__body">{{.HTML}}</div>
+    <article class="article pure-home-post">
+      <header class="article-header">
+        <p class="kicker">{{msg $ "post.kicker"}}</p>
+        <h1><a href="{{postURL .}}">{{.Title}}</a></h1>
+        <div class="post-meta">
+          <time>{{date .Date}}</time>
+          <span>{{.ReadingTime}} {{msg $ "common.minute_suffix"}}</span>
+          {{range .Tags}}<a href="/tags/{{.}}">#{{.}}</a>{{end}}
+        </div>
+      </header>
+      <div class="article-body js-math">{{.HTML}}</div>
     </article>
     {{else}}
-    <article class="pure-home-post">
-      <h2 class="pure-home-post__title">{{msg . "home.empty.title"}}</h2>
-      <p>{{msg . "home.empty.body"}}</p>
+    <article class="article pure-home-post">
+      <header class="article-header">
+        <p class="kicker">{{msg . "home.lead_kicker"}}</p>
+        <h1>{{msg . "home.empty.title"}}</h1>
+      </header>
+      <div class="article-body">
+        <p>{{msg . "home.empty.body"}}</p>
+      </div>
     </article>
     {{end}}
   </div>
