@@ -88,6 +88,68 @@ func TestSettingsAfterDeletingActivePluginRemovesItFromOrder(t *testing.T) {
 	}
 }
 
+func TestSettingsAfterDeletingActiveBundleRestoresThemeAndRemovesPlugins(t *testing.T) {
+	settings := site.Settings{
+		ThemePack: appearance.Selection{
+			Enabled: true,
+			PackID:  "bundle-theme",
+		},
+		ThemeLocale: "zh-CN",
+		PluginOrder: []string{"keep-a", "bundle-copy", "keep-b"},
+	}
+	pack := appearance.Pack{
+		Manifest: appearance.Manifest{
+			ID:   "mixed-bundle",
+			Type: appearance.BundlePack,
+		},
+		BundledThemeIDs:  []string{"bundle-theme"},
+		BundledPluginIDs: []string{"bundle-copy"},
+	}
+
+	next, changed := settingsAfterDeletingPack(settings, pack, "en")
+	if !changed {
+		t.Fatal("settings should change when an active mixed bundle is deleted")
+	}
+	if next.ThemePack.Enabled {
+		t.Fatal("theme pack should be disabled after deleting its parent bundle")
+	}
+	if got, want := next.ThemePack.PackID, appearance.DefaultThemePackID; got != want {
+		t.Fatalf("theme pack id = %q, want %q", got, want)
+	}
+	if got, want := next.PluginOrder, []string{"keep-a", "keep-b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("plugin order = %#v, want %#v", got, want)
+	}
+}
+
+func TestSettingsAfterDeletingPluginOnlyBundleRemovesPluginsOnly(t *testing.T) {
+	settings := site.Settings{
+		ThemePack: appearance.Selection{
+			Enabled: false,
+			PackID:  appearance.DefaultThemePackID,
+		},
+		ThemeLocale: "en",
+		PluginOrder: []string{"bundle-copy", "keep"},
+	}
+	pack := appearance.Pack{
+		Manifest: appearance.Manifest{
+			ID:   "plugin-bundle",
+			Type: appearance.BundlePack,
+		},
+		BundledPluginIDs: []string{"bundle-copy"},
+	}
+
+	next, changed := settingsAfterDeletingPack(settings, pack, "en")
+	if !changed {
+		t.Fatal("settings should change when an active plugin-only bundle is deleted")
+	}
+	if !reflect.DeepEqual(next.ThemePack, settings.ThemePack) {
+		t.Fatalf("theme pack changed unexpectedly: %#v", next.ThemePack)
+	}
+	if got, want := next.PluginOrder, []string{"keep"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("plugin order = %#v, want %#v", got, want)
+	}
+}
+
 func TestSettingsAfterDeletingInactivePackDoesNotChangeSettings(t *testing.T) {
 	settings := site.Settings{
 		ThemePack: appearance.Selection{

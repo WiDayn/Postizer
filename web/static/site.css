@@ -597,10 +597,31 @@
     align-items: start;
   }
 
-  .pack-card__top strong {
-    display: block;
+  .pack-card__title-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+    align-items: baseline;
+  }
+
+  .pack-card__title-row strong {
+    min-width: 0;
     font-size: 1.7rem;
     line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  .pack-version-badge {
+    display: inline-flex;
+    align-items: center;
+    translate: 0 -.08rem;
+    padding: .08rem .35rem;
+    border: 1px solid rgba(0, 0, 0, .34);
+    background: #fff;
+    font-family: var(--font-ui);
+    font-size: .64rem;
+    line-height: 1.2;
+    white-space: nowrap;
   }
 
   .pack-card__badges {
@@ -650,6 +671,10 @@
     border-color: #000;
     background: #fff;
     color: #000;
+  }
+
+  .pack-card.is-selected .pack-version-badge {
+    border-color: #000;
   }
 
   .pack-upload-row {

@@ -1,0 +1,557 @@
+/*
+ * Pure White 主题参考截图里的个人博客视觉：
+ * - 首页首屏使用横向大图，站点名和副标题压在图片左侧。
+ * - 导航栏保持纯白、居中、低装饰，和截图里的大留白节奏一致。
+ * - 正文区域使用两列内容/侧栏布局，线条只保留浅灰分隔。
+ * - 如果没有设置首页图片，会使用浅灰白背景，避免首页头部塌陷。
+ */
+@layer base {
+  :root {
+    --font-latin: "Helvetica Neue", Arial, sans-serif;
+    --font-cjk-body: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    --font-cjk-heading: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    --font-body: var(--font-latin), var(--font-cjk-body);
+    --font-heading: var(--font-latin), var(--font-cjk-heading);
+    --font-ui: var(--font-latin), var(--font-cjk-body);
+    --paper: #fff;
+    --paper-deep: #f2f2f2;
+    --ink: #202020;
+    --muted: #70757a;
+    --rule: #dedede;
+    --accent: #111;
+    --kicker: #222;
+    --status: #333;
+    --surface: #fff;
+    --surface-soft: #fbfbfb;
+    --surface-muted: #f5f5f5;
+    --inverse: #1f1f1f;
+    --inverse-ink: #fff;
+  }
+
+  html {
+    background: #fff;
+  }
+
+  body {
+    padding: 0;
+    background: #fff;
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.75;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration-color: rgba(0, 0, 0, .42);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 4vw, 3.2rem);
+    line-height: 1.24;
+  }
+
+  code,
+  pre,
+  input,
+  textarea,
+  button,
+  .section-nav,
+  .edition-line,
+  .post-meta,
+  .kicker,
+  .tag-list,
+  .post-list time,
+  .right-rail {
+    font-family: var(--font-ui);
+  }
+}
+
+@layer layout {
+  .site-shell {
+    --pure-content-width: 79rem;
+    --pure-edge: max(1.25rem, calc((100vw - var(--pure-content-width)) / 2));
+    --pure-column-gap: clamp(1.5rem, 3vw, 3rem);
+    display: grid;
+    grid-template-columns:
+      var(--pure-edge)
+      minmax(0, 4fr)
+      minmax(0, 1fr)
+      var(--pure-edge);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "header header header header"
+      "nav nav nav nav"
+      ". main side .";
+    column-gap: var(--pure-column-gap);
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    border: 0;
+    background: #fff;
+  }
+
+  /*
+   * 首页存在 front-page 时，header 与 home-image-band 放进同一个 grid 区域。
+   * 这样无需改模板结构，就能得到“图片上叠标题”的截图式首屏。
+   */
+  .site-shell:has(.front-page) {
+    grid-template-rows: clamp(18rem, 31vw, 23rem) 4.4rem minmax(0, 1fr);
+    grid-template-areas:
+      "hero hero hero hero"
+      "nav nav nav nav"
+      ". main side .";
+  }
+
+  .main-column {
+    grid-area: main;
+    min-width: 0;
+    padding: 5.25rem 0 6rem;
+  }
+
+  .right-rail {
+    grid-area: side;
+    min-width: 0;
+    padding: 6.35rem 0 6rem;
+    border: 0;
+    background: #fff;
+  }
+
+  @media (max-width: 920px) {
+    .site-shell,
+    .site-shell:has(.front-page) {
+      display: grid;
+      grid-template-columns: minmax(1.25rem, 1fr) minmax(0, 44rem) minmax(1.25rem, 1fr);
+      grid-template-rows: auto auto auto auto;
+      grid-template-areas:
+        "header header header"
+        "nav nav nav"
+        ". main ."
+        ". side .";
+      column-gap: 0;
+      min-height: 100vh;
+      border: 0;
+    }
+
+    .site-shell:has(.front-page) {
+      grid-template-rows: clamp(15rem, 56vw, 20rem) auto auto auto;
+      grid-template-areas:
+        "hero hero hero"
+        "nav nav nav"
+        ". main ."
+        ". side .";
+    }
+
+    .main-column {
+      padding: 3.25rem 0 4rem;
+    }
+
+    .right-rail {
+      padding: 2.4rem 0 4rem;
+      border-top: 1px solid #eee;
+    }
+  }
+}
+
+@layer components {
+  .newspaper-header {
+    grid-area: header;
+    display: grid;
+    gap: .35rem;
+    align-content: center;
+    justify-content: start;
+    min-height: 11rem;
+    padding: 3rem var(--pure-edge) 2.4rem;
+    border: 0;
+    background: #fff;
+    color: var(--ink);
+  }
+
+  .site-shell:has(.front-page) .newspaper-header {
+    grid-area: hero;
+    z-index: 2;
+    min-height: 100%;
+    padding-block: 0;
+    background:
+      linear-gradient(90deg, rgba(255, 255, 255, .88), rgba(255, 255, 255, .38) 48%, rgba(255, 255, 255, .08)),
+      linear-gradient(135deg, #fff, #f1f1f1);
+  }
+
+  .site-shell:has(.home-image-band) .newspaper-header {
+    background: linear-gradient(90deg, rgba(0, 0, 0, .46), rgba(0, 0, 0, .16) 52%, rgba(0, 0, 0, .32));
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .34);
+  }
+
+  .brand {
+    color: inherit;
+    font-family: var(--font-heading);
+    font-size: clamp(2rem, 3.5vw, 2.6rem);
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+
+  .edition-line {
+    justify-content: start;
+    color: rgba(32, 32, 32, .68);
+    font-size: .95rem;
+    line-height: 1.25;
+    text-transform: none;
+  }
+
+  .site-shell:has(.home-image-band) .edition-line {
+    color: rgba(255, 255, 255, .92);
+  }
+
+  .home-image-band {
+    grid-area: hero;
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    min-height: clamp(18rem, 31vw, 23rem);
+    overflow: hidden;
+    border: 0;
+    background: #111;
+  }
+
+  .home-image-band img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: clamp(18rem, 31vw, 23rem);
+    object-fit: cover;
+    object-position: center;
+    filter: saturate(.88) contrast(.96);
+  }
+
+  .section-nav {
+    grid-area: nav;
+    position: relative;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: clamp(1.35rem, 3vw, 2.35rem);
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 4.4rem;
+    padding-inline: var(--pure-edge);
+    border: 0;
+    border-bottom: 1px solid #eee;
+    background: #fff;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, .02);
+    font-size: .9rem;
+    text-transform: none;
+  }
+
+  .section-nav button.hero-collapse-button:not(.ui-button):not(.ui-media-button) {
+    position: relative;
+    display: block;
+    flex: 0 0 auto;
+    width: 2.3rem;
+    height: 2.3rem;
+    margin-left: auto;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    cursor: pointer;
+    padding: 0;
+    appearance: none;
+  }
+
+  .hero-collapse-button::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: .72rem;
+    height: .72rem;
+    border-right: 2px solid #777;
+    border-bottom: 2px solid #777;
+    transform: translate(-50%, -62%) rotate(45deg);
+  }
+
+  .hero-collapse-button:hover::after,
+  .hero-collapse-button:focus-visible::after {
+    border-color: #222;
+  }
+
+  .hero-collapse-button:focus-visible {
+    outline: 2px solid #222;
+    outline-offset: 2px;
+  }
+
+  .section-nav a,
+  .section-nav a:first-child {
+    padding: 0;
+    border: 0;
+    color: #252525;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .section-nav a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .front-page,
+  .front-grid,
+  .front-grid:has(.front-briefs) {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4rem;
+  }
+
+  .lead-story,
+  .front-grid:has(.front-briefs) .lead-story {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .lead-story .kicker {
+    margin-bottom: 3rem;
+  }
+
+  .lead-story h2 {
+    margin: 0 0 1rem;
+    font-size: clamp(1.65rem, 2.6vw, 2.35rem);
+    font-weight: 400;
+    line-height: 1.42;
+  }
+
+  .lead-story h2 a {
+    color: #202020;
+  }
+
+  .lead-story p {
+    max-width: 42rem;
+    color: #444;
+    font-size: 1rem;
+    line-height: 1.75;
+  }
+
+  .kicker {
+    margin: 0 0 .55rem;
+    color: #222;
+    font-size: .9rem;
+    font-weight: 700;
+    line-height: 1.4;
+    text-transform: none;
+  }
+
+  .post-meta {
+    gap: .85rem;
+    color: #777;
+    font-size: .82rem;
+  }
+
+  .brief-list li {
+    display: grid;
+    gap: .5rem;
+    padding: 0 0 3.8rem;
+    border: 0;
+  }
+
+  .brief-list time,
+  .post-list time {
+    color: #777;
+    font-size: .82rem;
+    font-weight: 700;
+  }
+
+  .brief-list a {
+    color: #202020;
+    font-size: 1.45rem;
+    font-weight: 400;
+    line-height: 1.42;
+  }
+
+  .brief-list span {
+    color: #555;
+    font-size: .96rem;
+    line-height: 1.65;
+  }
+
+  .page-header,
+  .article-header {
+    margin-bottom: 2.4rem;
+    padding-bottom: 0;
+    border: 0;
+  }
+
+  .page-header.compact h1 {
+    font-size: clamp(1.8rem, 3vw, 2.35rem);
+    font-weight: 400;
+    line-height: 1.35;
+  }
+
+  .post-list li,
+  .dense-list li {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: .55rem;
+    align-items: start;
+    padding: 0 0 4.1rem;
+    border: 0;
+  }
+
+  .post-list-title {
+    color: #202020;
+    font-size: clamp(1.45rem, 2.4vw, 1.85rem);
+    font-weight: 400;
+    line-height: 1.45;
+    text-decoration: none;
+  }
+
+  .post-list-title:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .post-list-summary,
+  .post-list-tags {
+    color: #555;
+    font-size: .96rem;
+    line-height: 1.65;
+  }
+
+  .article-header h1 {
+    max-width: 48rem;
+    font-size: clamp(2rem, 4vw, 3.2rem);
+    font-weight: 500;
+    line-height: 1.28;
+  }
+
+  .article-body {
+    max-width: 48rem;
+    color: #252525;
+    font-size: 1rem;
+    line-height: 1.85;
+  }
+
+  .article-body h1,
+  .article-body h2,
+  .article-body h3,
+  .article-body h4,
+  .article-body h5,
+  .article-body h6 {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .article-body p {
+    margin-bottom: .85rem;
+  }
+
+  .article-body pre {
+    border: 1px solid #e6e6e6;
+    background: #f8f8f8;
+    color: #222;
+  }
+
+  .article-body blockquote {
+    border-left-color: #d7d7d7;
+    color: #555;
+  }
+
+  .article-body .article-figure img {
+    border-color: #e4e4e4;
+  }
+
+  .rail-section {
+    display: grid;
+    gap: 0;
+    margin-bottom: 2.8rem;
+    font-size: .92rem;
+  }
+
+  .rail-section h2 {
+    margin: 0;
+    padding: 0 0 .7rem;
+    border-bottom: 1px solid #dcdcdc;
+    color: #222;
+    font-size: .95rem;
+    font-weight: 600;
+    text-transform: none;
+  }
+
+  .rail-section > a,
+  .tag-list a {
+    display: block;
+    padding: .55rem 0;
+    border: 0;
+    border-bottom: 1px solid #dcdcdc;
+    color: #333;
+    text-decoration: none;
+  }
+
+  .tag-list {
+    display: grid;
+    gap: 0;
+  }
+
+  .tag-list a span {
+    float: right;
+    color: #888;
+  }
+
+  .image-lightbox {
+    background: rgba(255, 255, 255, .98);
+  }
+
+  @media (max-width: 920px) {
+    .newspaper-header,
+    .site-shell:has(.front-page) .newspaper-header {
+      padding-inline: 1.25rem;
+    }
+
+    .section-nav {
+      justify-content: flex-start;
+      min-height: 3.8rem;
+      padding-inline: 1.25rem;
+      overflow-x: auto;
+    }
+
+    .home-image-band,
+    .home-image-band img {
+      min-height: clamp(15rem, 56vw, 20rem);
+    }
+
+    .front-page,
+    .front-grid,
+    .front-grid:has(.front-briefs) {
+      gap: 3.2rem;
+    }
+  }
+
+  @media (max-width: 680px) {
+    .brand {
+      font-size: clamp(1.7rem, 9vw, 2.2rem);
+    }
+
+    .lead-story .kicker {
+      margin-bottom: 2.2rem;
+    }
+
+    .brief-list li,
+    .post-list li,
+    .dense-list li {
+      padding-bottom: 3rem;
+    }
+  }
+}
