@@ -28,15 +28,16 @@ import (
 )
 
 type Server struct {
-	store             *site.Store
-	appearance        *appearance.Catalog
-	media             *media.Store
-	contentRoot       string
-	officialPacksRoot string
-	userPacksRoot     string
-	templates         *template.Template
-	auth              authConfig
-	mu                sync.RWMutex
+	store               *site.Store
+	appearance          *appearance.Catalog
+	media               *media.Store
+	contentRoot         string
+	officialBundlesRoot string
+	userContentRoot     string
+	userBundlesRoot     string
+	templates           *template.Template
+	auth                authConfig
+	mu                  sync.RWMutex
 }
 
 type ViewData struct {
@@ -71,12 +72,13 @@ const (
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
 	s := &Server{
-		store:             store,
-		media:             mediaStore,
-		contentRoot:       contentRoot,
-		officialPacksRoot: filepath.Join("packs", "official"),
-		userPacksRoot:     filepath.Join(contentRoot, "packs"),
-		auth:              newAuthConfig(contentRoot),
+		store:               store,
+		media:               mediaStore,
+		contentRoot:         contentRoot,
+		officialBundlesRoot: "official_bundles",
+		userContentRoot:     contentRoot,
+		userBundlesRoot:     filepath.Join(contentRoot, "bundles"),
+		auth:                newAuthConfig(contentRoot),
 	}
 	if err := s.reloadRuntime(); err != nil {
 		return nil, err
@@ -85,8 +87,8 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cache(http.StripPrefix("/static/", http.FileServer(http.Dir("web/static")))))
 	mux.Handle("GET /media/", cache(http.StripPrefix("/media/", http.FileServer(http.Dir(mediaStore.PublicDir())))))
-	mux.Handle("GET /packs/official/", cache(http.StripPrefix("/packs/official/", http.FileServer(http.Dir(s.officialPacksRoot)))))
-	mux.Handle("GET /packs/user/", cache(http.StripPrefix("/packs/user/", http.FileServer(http.Dir(s.userPacksRoot)))))
+	mux.Handle("GET /packs/official/bundles/", cache(http.StripPrefix("/packs/official/bundles/", http.FileServer(http.Dir(s.officialBundlesRoot)))))
+	mux.Handle("GET /packs/user/bundles/", cache(http.StripPrefix("/packs/user/bundles/", http.FileServer(http.Dir(s.userBundlesRoot)))))
 	mux.HandleFunc("GET /", s.home)
 	mux.HandleFunc("GET /archive", s.archive)
 	mux.HandleFunc("GET /posts/{slug}", s.post)
@@ -495,7 +497,7 @@ func (s *Server) uploadResourcePack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	installed, err := appearance.InstallPackZIP(bytes.NewReader(body), int64(len(body)), s.userPacksRoot)
+	installed, err := appearance.InstallPackZIP(bytes.NewReader(body), int64(len(body)), s.userContentRoot)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -521,6 +523,7 @@ func (s *Server) deleteResourcePack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "user resource pack not found", http.StatusNotFound)
 		return
 	}
+	pack.Active = packInUse(pack, currentAppearance)
 
 	settings := s.currentStore().Settings
 	nextSettings, changed := settingsAfterDeletingPack(settings, pack, defaultThemeLocale(currentAppearance))
@@ -530,7 +533,7 @@ func (s *Server) deleteResourcePack(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := appearance.DeleteUserPack(s.userPacksRoot, packType, packID); err != nil {
+	if err := appearance.DeleteUserPack(s.userContentRoot, packType, packID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -659,13 +662,15 @@ func packExists(packs []appearance.Pack, id string) bool {
 // parseResourcePackType 把 URL 中的类型片段转换成 appearance.PackType。
 //
 // 参数：
-// - value: 路由中的 `{type}`，前端会提交 manifest 使用的 theme/plugin/text。
+// - value: 路由中的 `{type}`，前端会提交 manifest 使用的 bundle/theme/plugin/text。
 //
 // 返回值：
 // - 第一个返回值是规范化后的资源包类型。
 // - 第二个返回值表示类型是否受支持；不支持时调用方应返回 400。
 func parseResourcePackType(value string) (appearance.PackType, bool) {
 	switch appearance.PackType(strings.TrimSpace(value)) {
+	case appearance.BundlePack:
+		return appearance.BundlePack, true
 	case appearance.ThemePack:
 		return appearance.ThemePack, true
 	case appearance.PluginPack:
@@ -683,7 +688,8 @@ func parseResourcePackType(value string) (appearance.PackType, bool) {
 // - catalog: 当前运行时外观目录快照。
 //
 // 返回值：
-// - 只包含 SourceUser 的主题包、插件包以及兼容旧版 text 包。
+// - 只包含 SourceUser 的 bundle、独立主题包、独立插件包以及兼容旧版 text 包。
+// - bundle 内部的子主题/子插件不会在本地资源包列表重复出现，因为删除单位是父 bundle。
 //
 // 排序策略：
 // 1. 主题包排在插件/文字包前面，符合“样式优先”的设置页阅读顺序。
@@ -692,14 +698,19 @@ func userInstalledPacks(catalog *appearance.Catalog) []appearance.Pack {
 	if catalog == nil {
 		return nil
 	}
-	packs := make([]appearance.Pack, 0, len(catalog.Themes)+len(catalog.Plugins))
-	for _, pack := range catalog.Themes {
+	packs := make([]appearance.Pack, 0, len(catalog.Bundles)+len(catalog.Themes)+len(catalog.Plugins))
+	for _, pack := range catalog.Bundles {
 		if pack.Source == appearance.SourceUser {
 			packs = append(packs, pack)
 		}
 	}
+	for _, pack := range catalog.Themes {
+		if pack.Source == appearance.SourceUser && pack.BundleID == "" {
+			packs = append(packs, pack)
+		}
+	}
 	for _, pack := range catalog.Plugins {
-		if pack.Source == appearance.SourceUser {
+		if pack.Source == appearance.SourceUser && pack.BundleID == "" {
 			packs = append(packs, pack)
 		}
 	}
@@ -721,19 +732,23 @@ func userInstalledPacks(catalog *appearance.Catalog) []appearance.Pack {
 
 func resourcePackTypeRank(packType appearance.PackType) int {
 	switch packType {
-	case appearance.ThemePack:
+	case appearance.BundlePack:
 		return 0
-	case appearance.PluginPack:
+	case appearance.ThemePack:
 		return 1
-	case appearance.LegacyTextPack:
+	case appearance.PluginPack:
 		return 2
-	default:
+	case appearance.LegacyTextPack:
 		return 3
+	default:
+		return 4
 	}
 }
 
 func packTypeMessageKey(pack appearance.Pack) string {
 	switch pack.Type {
+	case appearance.BundlePack:
+		return "settings.local_packs.type.bundle"
 	case appearance.ThemePack:
 		return "settings.local_packs.type.theme"
 	case appearance.PluginPack:
@@ -752,6 +767,7 @@ func packTypeMessageKey(pack appearance.Pack) string {
 // - catalog: 当前运行时外观目录快照。
 //
 // 返回值：
+// - bundle 内的当前主题或任一启用插件正在使用时返回 true。
 // - 主题包 ID 与 ActiveTheme 一致时返回 true。
 // - 插件包或旧版 text 包 ID 出现在 PluginOrder 中时返回 true。
 func packInUse(pack appearance.Pack, catalog *appearance.Catalog) bool {
@@ -759,6 +775,15 @@ func packInUse(pack appearance.Pack, catalog *appearance.Catalog) bool {
 		return false
 	}
 	switch pack.Type {
+	case appearance.BundlePack:
+		if catalog.ActiveTheme.BundleID == pack.ID {
+			return true
+		}
+		for _, plugin := range catalog.ActivePlugins {
+			if plugin.BundleID == pack.ID {
+				return true
+			}
+		}
 	case appearance.ThemePack:
 		return pack.ID == catalog.ActiveTheme.ID
 	case appearance.PluginPack, appearance.LegacyTextPack:
@@ -803,6 +828,7 @@ func findUserPack(catalog *appearance.Catalog, packType appearance.PackType, id 
 //
 // 行为：
 // - 删除正在使用的主题包时，主题恢复到系统默认主题，并把主题语言恢复为默认主题语言。
+// - 删除 bundle 时，如果当前主题来自该 bundle，则恢复默认主题；如果启用插件来自该 bundle，则从顺序中移除。
 // - 删除正在使用的插件包或旧版 text 包时，从插件启用顺序中移除该 ID。
 // - 删除未启用的包时不改变设置。
 func settingsAfterDeletingPack(settings site.Settings, pack appearance.Pack, defaultLocale string) (site.Settings, bool) {
@@ -812,6 +838,20 @@ func settingsAfterDeletingPack(settings site.Settings, pack appearance.Pack, def
 	}
 
 	switch pack.Type {
+	case appearance.BundlePack:
+		if bundleContainsPackID(pack.BundledThemeIDs, settings.ThemePack.PackID) || fallbackActiveBundleWithoutChildren(pack) {
+			settings.ThemePack = appearance.Selection{
+				Enabled: false,
+				PackID:  appearance.DefaultThemePackID,
+			}
+			settings.ThemeLocale = defaultLocale
+			changed = true
+		}
+		nextOrder, removed := filterPluginOrder(settings.PluginOrder, pack.BundledPluginIDs)
+		if removed {
+			settings.PluginOrder = nextOrder
+			changed = true
+		}
 	case appearance.ThemePack:
 		if settings.ThemePack.PackID == pack.ID {
 			settings.ThemePack = appearance.Selection{
@@ -822,19 +862,82 @@ func settingsAfterDeletingPack(settings site.Settings, pack appearance.Pack, def
 			changed = true
 		}
 	case appearance.PluginPack, appearance.LegacyTextPack:
-		filtered := make([]string, 0, len(settings.PluginOrder))
-		for _, id := range settings.PluginOrder {
-			if id == pack.ID {
-				changed = true
-				continue
-			}
-			filtered = append(filtered, id)
-		}
-		if changed {
+		filtered, removed := filterPluginOrder(settings.PluginOrder, []string{pack.ID})
+		if removed {
 			settings.PluginOrder = filtered
+			changed = true
 		}
 	}
 	return settings, changed
+}
+
+// bundleContainsPackID 判断一个 bundle 子包 ID 列表中是否包含目标 ID。
+//
+// 参数：
+// - ids: bundle 扫描阶段记录下来的主题或插件 ID 列表。
+// - target: 当前设置中保存的主题/插件 ID。
+//
+// 返回值：
+// - 找到完全匹配的 ID 时返回 true；空字符串或未命中返回 false。
+func bundleContainsPackID(ids []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
+}
+
+// fallbackActiveBundleWithoutChildren 兼容极旧的 bundle 快照。
+//
+// 参数：
+// - pack: 即将删除的 bundle 包。
+//
+// 返回值：
+// - 当包被标记为 active，但没有记录任何子主题/子插件 ID 时返回 true。
+//
+// 设计说明：
+// 正常情况下 bundle 都会携带 BundledThemeIDs/BundledPluginIDs，删除逻辑可以精确清理。
+// 这个兜底分支只用于避免旧运行时快照缺少子 ID 时无法恢复默认主题。
+func fallbackActiveBundleWithoutChildren(pack appearance.Pack) bool {
+	return pack.Active && len(pack.BundledThemeIDs) == 0 && len(pack.BundledPluginIDs) == 0
+}
+
+// filterPluginOrder 从插件启用顺序中移除指定插件 ID。
+//
+// 参数：
+// - order: 当前 settings.PluginOrder。
+// - deletedIDs: 即将删除的独立插件 ID，或某个 bundle 内的所有插件 ID。
+//
+// 返回值：
+// - 第一个返回值是过滤后的插件顺序。
+// - 第二个返回值表示是否真的移除了至少一个 ID。
+func filterPluginOrder(order []string, deletedIDs []string) ([]string, bool) {
+	deleted := map[string]bool{}
+	for _, id := range deletedIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			deleted[id] = true
+		}
+	}
+	if len(deleted) == 0 {
+		return order, false
+	}
+
+	filtered := make([]string, 0, len(order))
+	removed := false
+	for _, id := range order {
+		if deleted[id] {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, id)
+	}
+	return filtered, removed
 }
 
 func defaultThemeLocale(catalog *appearance.Catalog) string {
@@ -1014,7 +1117,7 @@ func (s *Server) reloadRuntime() error {
 	if err != nil {
 		return err
 	}
-	catalog, err := appearance.LoadCatalog(s.officialPacksRoot, s.userPacksRoot, store.Settings.ThemePack, store.Settings.ThemeLocale, store.Settings.PluginOrder)
+	catalog, err := appearance.LoadCatalog(s.officialBundlesRoot, s.userContentRoot, store.Settings.ThemePack, store.Settings.ThemeLocale, store.Settings.PluginOrder)
 	if err != nil {
 		return err
 	}

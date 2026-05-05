@@ -36,7 +36,10 @@
             >
             <span class="pack-card__content">
               <span class="pack-card__top">
-                <strong>{{.Name}}</strong>
+                <span class="pack-card__title-row">
+                  <strong>{{.Name}}</strong>
+                  {{if .Version}}<span class="pack-version-badge">v{{.Version}}</span>{{end}}
+                </span>
                 <span class="pack-card__badges">{{range .BadgeKeys}}<span class="pack-badge">{{msg $ .}}</span>{{end}}</span>
               </span>
               <span class="pack-card__description">{{.Description}}</span>

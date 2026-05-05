@@ -1,0 +1,28 @@
+{{define "chromeStart"}}
+{{template "head" .}}
+<div class="site-shell">
+  <header class="newspaper-header">
+    <a class="brand compact-brand" href="/">{{msg . "site.brand" "Postizer"}}</a>
+    <div class="edition-line">
+      <span>{{msg . "site.edition_line"}}</span>
+    </div>
+  </header>
+  {{if and .Home .Store.Settings.HomeImage.Enabled}}
+  <figure class="home-image-band">
+    <img src="{{.Store.Settings.HomeImage.Src}}" alt="{{.Store.Settings.HomeImage.Alt}}">
+  </figure>
+  {{end}}
+  <nav class="section-nav" aria-label="Primary">
+    <a href="/">{{msg . "nav.front_page"}}</a>
+    <a href="/archive">{{msg . "nav.archive"}}</a>
+    <a href="/tags">{{msg . "nav.topics"}}</a>
+    <a href="/search">{{msg . "nav.search"}}</a>
+    {{range .Store.Pages}}<a href="{{pageURL .}}">{{.Title}}</a>{{end}}
+    <a href="/admin">{{msg . "nav.admin"}}</a>
+    {{if and .Home .Store.Settings.HomeImage.Enabled}}
+    <button class="hero-collapse-button" type="button" title="{{msg . "site.hero.hide_image" "Hide cover image"}}" aria-label="{{msg . "site.hero.hide_image" "Hide cover image"}}"></button>
+    {{end}}
+  </nav>
+  <script defer src="{{.Appearance.ActiveTheme.URLBase}}/pure-white.js?v={{.Appearance.ActiveTheme.Version}}"></script>
+  <main class="main-column">
+{{end}}

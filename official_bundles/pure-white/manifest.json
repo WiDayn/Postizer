@@ -1,0 +1,16 @@
+{
+  "id": "pure-white",
+  "type": "bundle",
+  "name": "Pure White",
+  "version": "1.0.6",
+  "description": "Official Pure White resource bundle containing the clean personal blog theme.",
+  "packs": [
+    {
+      "path": "themes/pure-white"
+    }
+  ],
+  "tags": [
+    "official",
+    "minimal"
+  ]
+}

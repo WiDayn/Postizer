@@ -1,0 +1,18 @@
+{
+  "id": "pure-white",
+  "type": "theme",
+  "name": "Pure White",
+  "sort_name": "Pure White",
+  "version": "1.0.6",
+  "templates_dir": "templates",
+  "description": "Full-width image banner, quiet centered navigation, white reading canvas, and soft gray dividers inspired by clean personal blog layouts.",
+  "default_locale": "en",
+  "styles": [
+    "pure-white.css"
+  ],
+  "translations_dir": "translations",
+  "tags": [
+    "official",
+    "minimal"
+  ]
+}

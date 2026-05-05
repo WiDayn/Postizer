@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -26,6 +27,8 @@ const (
 const (
 	// DirThemes 是主题包在资源包根目录中的固定子目录名。
 	DirThemes = "themes"
+	// DirBundles 是可包含多套主题包的资源包集合目录名。
+	DirBundles = "bundles"
 	// DirPlugins 是插件包在资源包根目录中的固定子目录名。
 	DirPlugins = "plugins"
 	// DirTexts 保留给旧版文字包兼容读取，不再作为正式 UI 分类。
@@ -47,6 +50,8 @@ type PackType string
 const (
 	// ThemePack 用于定义模板、样式以及主题内置多语言翻译。
 	ThemePack PackType = "theme"
+	// BundlePack 用于把多个主题包、多个插件包或二者的组合，作为一个安装/删除单位分发。
+	BundlePack PackType = "bundle"
 	// PluginPack 用于定义可排序的附属覆盖包。
 	PluginPack PackType = "plugin"
 	// LegacyTextPack 仅用于兼容读取旧版单语言文字包。
@@ -71,7 +76,15 @@ type Selection struct {
 	PackID  string `json:"pack_id"`
 }
 
-// Manifest 描述一个主题包或插件包的元信息。
+// BundleEntry 描述 bundle manifest 中的一个子资源包路径。
+//
+// Path 必须指向一个包含子 manifest 的目录；子 manifest 可以是 theme，也可以是 plugin。
+// 如果 bundle manifest 省略 packs 字段，扫描器会自动读取 bundle 下的 themes/* 与 plugins/*。
+type BundleEntry struct {
+	Path string `json:"path"`
+}
+
+// Manifest 描述一个主题包、插件包或 bundle 资源合集的元信息。
 //
 // 约定：
 // 1. `styles`、`templates_dir`、`translations_dir`、`messages_file` 都相对包根目录。
@@ -79,35 +92,46 @@ type Selection struct {
 // 3. 插件包也可以通过 `translations_dir` 提供多语言覆盖。
 // 4. 旧版 `text` 包使用 `messages_file + lang` 表示“单语言翻译包”。
 type Manifest struct {
-	ID              string   `json:"id"`
-	Type            PackType `json:"type"`
-	Name            string   `json:"name"`
-	SortName        string   `json:"sort_name"`
-	Version         string   `json:"version"`
-	Description     string   `json:"description"`
-	Lang            string   `json:"lang"`
-	DefaultLocale   string   `json:"default_locale"`
-	Tags            []string `json:"tags"`
-	Styles          []string `json:"styles"`
-	TemplatesDir    string   `json:"templates_dir"`
-	TranslationsDir string   `json:"translations_dir"`
-	MessagesFile    string   `json:"messages_file"`
+	ID              string        `json:"id"`
+	Type            PackType      `json:"type"`
+	Name            string        `json:"name"`
+	SortName        string        `json:"sort_name"`
+	Version         string        `json:"version"`
+	Description     string        `json:"description"`
+	SourceURL       string        `json:"source_url"`
+	Lang            string        `json:"lang"`
+	DefaultLocale   string        `json:"default_locale"`
+	Tags            []string      `json:"tags"`
+	Styles          []string      `json:"styles"`
+	TemplatesDir    string        `json:"templates_dir"`
+	TranslationsDir string        `json:"translations_dir"`
+	MessagesFile    string        `json:"messages_file"`
+	Packs           []BundleEntry `json:"packs"`
 }
 
-// Pack 是运行时可用的主题包或插件包对象。
+// Pack 是运行时可用的主题包、插件包或 bundle 资源合集对象。
 type Pack struct {
 	Manifest
-	Source       PackSource
-	RootDir      string
-	RelativeDir  string
-	URLBase      string
-	StyleURLs    []string
-	TemplateDir  string
-	BadgeKeys    []string
-	Locales      []string
-	Translations map[string]map[string]string
-	Active       bool
-	Order        int
+	Source        PackSource
+	RootDir       string
+	RelativeDir   string
+	URLBase       string
+	StyleURLs     []string
+	TemplateDir   string
+	BadgeKeys     []string
+	Locales       []string
+	Translations  map[string]map[string]string
+	BundleID      string
+	BundleName    string
+	BundleVersion string
+	// BundledThemeIDs 只在 Type=bundle 的父资源包上使用，记录该 bundle 内包含的主题 ID。
+	// 删除 bundle 时会根据这些 ID 判断是否需要把当前主题恢复到默认主题。
+	BundledThemeIDs []string
+	// BundledPluginIDs 只在 Type=bundle 的父资源包上使用，记录该 bundle 内包含的插件 ID。
+	// 删除 bundle 时会从插件启用顺序中移除这些 ID，避免 settings.json 残留悬空插件。
+	BundledPluginIDs []string
+	Active           bool
+	Order            int
 }
 
 // LocaleOption 用于在设置页里渲染当前主题支持的语言选项。
@@ -119,6 +143,7 @@ type LocaleOption struct {
 // Catalog 是一次扫描后的主题/插件目录快照和当前激活结果。
 type Catalog struct {
 	Themes          []Pack
+	Bundles         []Pack
 	Plugins         []Pack
 	ActiveTheme     Pack
 	ActivePlugins   []Pack
@@ -134,17 +159,18 @@ type Catalog struct {
 
 // InstalledPack 表示一次用户上传安装后的结果摘要。
 type InstalledPack struct {
-	ID     string   `json:"id"`
-	Type   PackType `json:"type"`
-	Name   string   `json:"name"`
-	Source string   `json:"source"`
+	ID        string   `json:"id"`
+	Type      PackType `json:"type"`
+	Name      string   `json:"name"`
+	Source    string   `json:"source"`
+	SourceURL string   `json:"source_url,omitempty"`
 }
 
 // LoadCatalog 扫描主题包与插件包，构建运行时外观目录。
 //
 // 参数：
-// - officialRoot: 官方资源目录
-// - userRoot: 用户资源目录
+// - officialRoot: 官方 bundle 根目录，通常是 official_bundles
+// - userRoot: 用户内容根目录，bundle 会从 content/bundles 读取
 // - themeSelection: 当前主题选择
 // - themeLocale: 当前主题语言
 // - pluginOrder: 当前启用插件包顺序，索引越小优先级越高
@@ -152,6 +178,10 @@ func LoadCatalog(officialRoot, userRoot string, themeSelection Selection, themeL
 	themeSelection = normalizeSelection(themeSelection, DefaultThemePackID)
 
 	themes, err := scanThemePacks(officialRoot, userRoot)
+	if err != nil {
+		return Catalog{}, err
+	}
+	bundles, err := scanBundlePacks(officialRoot, userRoot)
 	if err != nil {
 		return Catalog{}, err
 	}
@@ -192,9 +222,12 @@ func LoadCatalog(officialRoot, userRoot string, themeSelection Selection, themeL
 	themeLocale = normalizeThemeLocale(themeLocale, activeTheme.Locales, defaultLocale)
 	themeLocales := buildLocaleOptions(activeTheme.Locales, themeLocale)
 
-	messages := cloneMessages(activeTheme.Translations[defaultLocale])
-	if themeLocale != defaultLocale {
-		mergeMessages(messages, activeTheme.Translations[themeLocale])
+	// 非默认主题通常只关心少量视觉文案覆盖，例如首页副标题或导航短名。
+	// 先加载默认主题的完整文案，再把当前主题文案覆盖上去，可以避免新主题为了
+	// 一个 CSS 变体复制整套翻译文件；同时插件仍然保持最高优先级。
+	messages := localizedPackMessages(defaultTheme, themeLocale)
+	if activeTheme.ID != defaultTheme.ID {
+		mergeMessages(messages, localizedPackMessages(activeTheme, themeLocale))
 	}
 	for index := len(activePlugins) - 1; index >= 0; index-- {
 		mergeMessages(messages, activePlugins[index].Translations[themeLocale])
@@ -202,6 +235,7 @@ func LoadCatalog(officialRoot, userRoot string, themeSelection Selection, themeL
 
 	return Catalog{
 		Themes:          themes,
+		Bundles:         bundles,
 		Plugins:         append(append([]Pack(nil), activePlugins...), inactivePlugins...),
 		ActiveTheme:     activeTheme,
 		ActivePlugins:   activePlugins,
@@ -216,12 +250,21 @@ func LoadCatalog(officialRoot, userRoot string, themeSelection Selection, themeL
 	}, nil
 }
 
-// InstallPackZIP 安装用户上传的 zip 资源包或插件包。
+// InstallPackZIP 安装用户上传的 zip 资源包。
 //
-// 兼容策略：
-// 1. 新版主题包 `type=theme`
-// 2. 新版插件包 `type=plugin`
-// 3. 旧版文字包 `type=text` 仍允许上传，并会被当作插件覆盖层读取
+// 参数：
+// - readerAt: zip 文件内容。
+// - size: zip 文件字节数。
+// - userRoot: 用户内容根目录，通常是 content。
+//
+// 返回值：
+// - 安装成功时返回安装摘要，Source 固定为 user。
+// - zip 不合法、manifest 不合法、不是 bundle 类型、解压越界或校验失败时返回错误。
+//
+// 设计说明：
+// 新上传统一以 bundle 为单位，写入 content/bundles/<id>。
+// bundle 内可以包含多个 theme、多个 plugin，或二者混合。
+// 旧版独立 theme/plugin/text 仍可被扫描读取，但不再作为上传安装格式。
 func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (InstalledPack, error) {
 	zr, err := zip.NewReader(readerAt, size)
 	if err != nil {
@@ -239,6 +282,9 @@ func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (Installe
 	}
 	if err := validateManifest(manifest); err != nil {
 		return InstalledPack{}, err
+	}
+	if manifest.Type != BundlePack {
+		return InstalledPack{}, fmt.Errorf("uploaded resource pack must be %q, got %q", BundlePack, manifest.Type)
 	}
 
 	targetDir := filepath.Join(userRoot, typeDirName(manifest.Type), manifest.ID)
@@ -284,6 +330,12 @@ func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (Installe
 		totalSize += written
 	}
 
+	if manifest.Type == BundlePack {
+		if err := validateBundleInstall(stageDir, manifest); err != nil {
+			return InstalledPack{}, err
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(targetDir), 0755); err != nil {
 		return InstalledPack{}, fmt.Errorf("create user pack dir: %w", err)
 	}
@@ -295,10 +347,11 @@ func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (Installe
 	}
 
 	return InstalledPack{
-		ID:     manifest.ID,
-		Type:   manifest.Type,
-		Name:   manifest.Name,
-		Source: string(SourceUser),
+		ID:        manifest.ID,
+		Type:      manifest.Type,
+		Name:      manifest.Name,
+		Source:    string(SourceUser),
+		SourceURL: strings.TrimSpace(manifest.SourceURL),
 	}, nil
 }
 
@@ -306,7 +359,7 @@ func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (Installe
 //
 // 参数：
 // - userRoot: 用户资源包根目录，通常是内容目录下的 `packs`。
-// - packType: 要删除的资源包类型，支持 theme、plugin 和兼容旧版的 text。
+// - packType: 要删除的资源包类型，支持 bundle、theme、plugin 和兼容旧版的 text。
 // - id: manifest 中声明的资源包 ID，只允许小写字母、数字和短横线。
 //
 // 返回值：
@@ -322,7 +375,7 @@ func DeleteUserPack(userRoot string, packType PackType, id string) error {
 		return errors.New("user pack root is required")
 	}
 	switch packType {
-	case ThemePack, PluginPack, LegacyTextPack:
+	case ThemePack, BundlePack, PluginPack, LegacyTextPack:
 	default:
 		return fmt.Errorf("invalid pack type %q", packType)
 	}
@@ -343,6 +396,36 @@ func DeleteUserPack(userRoot string, packType PackType, id string) error {
 	}
 	if err := os.RemoveAll(targetDir); err != nil {
 		return fmt.Errorf("delete pack %q: %w", id, err)
+	}
+	return nil
+}
+
+// validateBundleInstall 校验用户上传的 bundle 是否包含可用子资源包。
+//
+// 参数：
+// - bundleDir: 上传 zip 解压后的临时 bundle 根目录。
+// - manifest: 顶层 bundle manifest。
+//
+// 返回值：
+// - bundle 至少包含一个 theme 或 plugin，且同类型子包 ID 不重复时返回 nil。
+// - 子包缺失、类型不支持、路径非法或同类型 ID 重复时返回错误。
+func validateBundleInstall(bundleDir string, manifest Manifest) error {
+	children, err := scanBundleChildren(bundleDir, SourceUser, manifest, path.Join(DirBundles, manifest.ID), path.Join("/packs", string(SourceUser), DirBundles, manifest.ID), "")
+	if err != nil {
+		return fmt.Errorf("validate bundle children: %w", err)
+	}
+	if len(children) == 0 {
+		return errors.New("bundle must contain at least one theme or plugin pack")
+	}
+	seen := map[PackType]map[string]bool{}
+	for _, child := range children {
+		if seen[child.Type] == nil {
+			seen[child.Type] = map[string]bool{}
+		}
+		if seen[child.Type][child.ID] {
+			return fmt.Errorf("bundle contains duplicate %s pack id %q", child.Type, child.ID)
+		}
+		seen[child.Type][child.ID] = true
 	}
 	return nil
 }
@@ -369,7 +452,15 @@ func LocaleLabel(code string) string {
 }
 
 func scanThemePacks(officialRoot, userRoot string) ([]Pack, error) {
-	packs, err := scanPacks(officialRoot, userRoot, ThemePack)
+	direct, err := scanPacks(officialRoot, userRoot, ThemePack)
+	if err != nil {
+		return nil, err
+	}
+	bundled, err := scanBundleChildPacks(officialRoot, userRoot, ThemePack)
+	if err != nil {
+		return nil, err
+	}
+	packs, err := dedupeBundledPacks(append(direct, bundled...), ThemePack)
 	if err != nil {
 		return nil, err
 	}
@@ -389,14 +480,445 @@ func scanThemePacks(officialRoot, userRoot string) ([]Pack, error) {
 	return packs, nil
 }
 
-func scanPluginPacks(officialRoot, userRoot string) ([]Pack, error) {
+// scanBundlePacks 扫描官方目录和用户目录中的顶层 bundle。
+//
+// 参数：
+// - officialRoot: 官方资源根目录。
+// - userRoot: 用户上传资源根目录。
+//
+// 返回值：
+// - []Pack: 顶层 bundle 列表，每个 bundle 会记录自身包含的主题 ID 与插件 ID。
+func scanBundlePacks(officialRoot, userRoot string) ([]Pack, error) {
 	var packs []Pack
+	for _, sourceConfig := range []struct {
+		source PackSource
+		root   string
+	}{
+		{source: SourceOfficial, root: officialRoot},
+		{source: SourceUser, root: userRoot},
+	} {
+		found, err := scanBundlePackRoot(sourceConfig.root, sourceConfig.source)
+		if err != nil {
+			return nil, err
+		}
+		packs = append(packs, found...)
+	}
+	sort.Slice(packs, func(i, j int) bool {
+		leftRank := packTagRank(packs[i])
+		rightRank := packTagRank(packs[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		left := themeSortKey(packs[i])
+		right := themeSortKey(packs[j])
+		if left != right {
+			return left < right
+		}
+		return packs[i].ID < packs[j].ID
+	})
+	return packs, nil
+}
 
-	found, err := scanPacks(officialRoot, userRoot, PluginPack)
+// scanBundlePackRoot 扫描单个来源目录中的顶层 bundle。
+//
+// 参数：
+// - root: 某个来源的资源根目录，例如 official_bundles 或 content。
+// - source: 资源来源标识，用于生成 URLBase。
+//
+// 返回值：
+// - []Pack: 当前来源下的 bundle 父包；不存在对应目录时返回空列表。
+func scanBundlePackRoot(root string, source PackSource) ([]Pack, error) {
+	var packs []Pack
+	for _, bundleRoot := range bundleScanRoots(root, source) {
+		found, err := scanBundlePackDir(bundleRoot, source)
+		if err != nil {
+			return nil, err
+		}
+		packs = append(packs, found...)
+	}
+	return packs, nil
+}
+
+// scanBundlePackDir 扫描一个已经定位好的 bundle 父目录。
+//
+// 参数：
+// - bundleRoot: 包含物理目录、相对路径前缀和 URL 前缀的扫描配置。
+// - source: 资源来源标识，用于写入 Pack.Source。
+//
+// 返回值：
+// - []Pack: 当前目录下所有顶层 bundle 父包。
+// - 目录不存在时返回空列表；manifest 错误或类型不匹配时返回错误。
+func scanBundlePackDir(bundleRoot bundleScanRoot, source PackSource) ([]Pack, error) {
+	entries, err := os.ReadDir(bundleRoot.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read bundle packs: %w", err)
+	}
+
+	var packs []Pack
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		bundleDir := filepath.Join(bundleRoot.dir, entry.Name())
+		manifestPath := filepath.Join(bundleDir, "manifest.json")
+		manifest, err := readManifestFile(manifestPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := validateManifest(manifest); err != nil {
+			return nil, fmt.Errorf("%s: %w", manifestPath, err)
+		}
+		if manifest.Type != BundlePack {
+			return nil, fmt.Errorf("%s: manifest type %q does not match folder type %q", manifestPath, manifest.Type, BundlePack)
+		}
+
+		bundleRelativeDir := path.Join(bundleRoot.relativePrefix, entry.Name())
+		bundleURLBase := path.Join(bundleRoot.urlPrefix, entry.Name())
+		pack, err := buildPack(bundleDir, source, manifest, bundleRelativeDir, bundleURLBase)
+		if err != nil {
+			return nil, err
+		}
+		children, err := scanBundleChildren(bundleDir, source, manifest, bundleRelativeDir, bundleURLBase, "")
+		if err != nil {
+			return nil, err
+		}
+		pack.BundledThemeIDs, pack.BundledPluginIDs = bundleChildIDs(children)
+		packs = append(packs, pack)
+	}
+	return packs, nil
+}
+
+// scanBundleChildPacks 扫描所有 bundle 内指定类型的子资源包。
+//
+// 参数：
+// - officialRoot: 官方资源根目录。
+// - userRoot: 用户上传资源根目录。
+// - childType: 要提取的子包类型，当前用于 ThemePack 或 PluginPack。
+//
+// 返回值：
+// - []Pack: 所有匹配类型的 bundle 子包，子包会携带 BundleID 等归属信息。
+func scanBundleChildPacks(officialRoot, userRoot string, childType PackType) ([]Pack, error) {
+	var packs []Pack
+	for _, sourceConfig := range []struct {
+		source PackSource
+		root   string
+	}{
+		{source: SourceOfficial, root: officialRoot},
+		{source: SourceUser, root: userRoot},
+	} {
+		found, err := scanBundleChildRoot(sourceConfig.root, sourceConfig.source, childType)
+		if err != nil {
+			return nil, err
+		}
+		packs = append(packs, found...)
+	}
+	return packs, nil
+}
+
+// scanBundleChildRoot 扫描单个来源目录中所有 bundle 的指定类型子包。
+//
+// 参数：
+// - root: 某个来源的资源根目录。
+// - source: 资源来源标识。
+// - childType: 要提取的子包类型。
+//
+// 返回值：
+// - []Pack: 当前来源下所有 bundle 的匹配子包。
+func scanBundleChildRoot(root string, source PackSource, childType PackType) ([]Pack, error) {
+	var packs []Pack
+	for _, bundleRoot := range bundleScanRoots(root, source) {
+		found, err := scanBundleChildDir(bundleRoot, source, childType)
+		if err != nil {
+			return nil, err
+		}
+		packs = append(packs, found...)
+	}
+	return packs, nil
+}
+
+// scanBundleChildDir 扫描一个 bundle 父目录中的指定类型子包。
+//
+// 参数：
+// - bundleRoot: 包含物理目录、相对路径前缀和 URL 前缀的扫描配置。
+// - source: 资源来源标识。
+// - childType: 需要返回的子包类型，通常是 ThemePack 或 PluginPack。
+//
+// 返回值：
+// - []Pack: 当前父目录下所有 bundle 中匹配类型的子资源包。
+func scanBundleChildDir(bundleRoot bundleScanRoot, source PackSource, childType PackType) ([]Pack, error) {
+	entries, err := os.ReadDir(bundleRoot.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read bundle packs: %w", err)
+	}
+
+	var packs []Pack
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		bundleDir := filepath.Join(bundleRoot.dir, entry.Name())
+		manifestPath := filepath.Join(bundleDir, "manifest.json")
+		manifest, err := readManifestFile(manifestPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := validateManifest(manifest); err != nil {
+			return nil, fmt.Errorf("%s: %w", manifestPath, err)
+		}
+		if manifest.Type != BundlePack {
+			return nil, fmt.Errorf("%s: manifest type %q does not match folder type %q", manifestPath, manifest.Type, BundlePack)
+		}
+
+		children, err := scanBundleChildren(
+			bundleDir,
+			source,
+			manifest,
+			path.Join(bundleRoot.relativePrefix, entry.Name()),
+			path.Join(bundleRoot.urlPrefix, entry.Name()),
+			childType,
+		)
+		if err != nil {
+			return nil, err
+		}
+		packs = append(packs, children...)
+	}
+	return packs, nil
+}
+
+// bundleScanRoot 描述一次 bundle 父目录扫描所需的路径上下文。
+//
+// 字段：
+// - dir: 实际文件系统目录。
+// - relativePrefix: 写入 Pack.RelativeDir 的逻辑前缀。
+// - urlPrefix: 写入 Pack.URLBase 的公开 URL 前缀。
+type bundleScanRoot struct {
+	dir            string
+	relativePrefix string
+	urlPrefix      string
+}
+
+// bundleScanRoots 返回某个来源需要扫描的 bundle 父目录。
+//
+// 参数：
+// - root: 来源资源根目录。官方来源现在直接使用 official_bundles；用户来源使用 content。
+// - source: 资源来源标识，用于决定扫描布局和生成 URL 前缀。
+//
+// 返回值：
+//   - 官方来源会先扫描 root 本身，兼容新的 official_bundles/newspaper 结构；
+//     同时保留 root/bundles 作为过渡兼容，方便旧测试和旧布局继续被识别。
+//   - 用户来源只扫描 root/bundles，也就是 content/bundles，确保用户上传目录以 bundle 为安装单位隔离。
+func bundleScanRoots(root string, source PackSource) []bundleScanRoot {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil
+	}
+
+	urlPrefix := path.Join("/packs", string(source), DirBundles)
+	if source == SourceOfficial {
+		return []bundleScanRoot{
+			{dir: root, relativePrefix: DirBundles, urlPrefix: urlPrefix},
+			{dir: filepath.Join(root, DirBundles), relativePrefix: DirBundles, urlPrefix: urlPrefix},
+		}
+	}
+	return []bundleScanRoot{
+		{dir: filepath.Join(root, DirBundles), relativePrefix: DirBundles, urlPrefix: urlPrefix},
+	}
+}
+
+// scanBundleChildren 读取一个 bundle 内的子资源包。
+//
+// 参数：
+// - bundleDir: 父 bundle 在文件系统中的目录。
+// - source: 父 bundle 来源，决定生成 /packs/official 或 /packs/user URL。
+// - bundleManifest: 父 bundle 的 manifest，用于读取 packs 显式路径和写入子包归属信息。
+// - bundleRelativeDir: 父 bundle 相对资源根目录的位置。
+// - bundleURLBase: 父 bundle 对外静态资源 URL 前缀。
+// - childType: 可选过滤类型；为空时返回 theme 与 plugin，传入 ThemePack/PluginPack 时只返回该类型。
+//
+// 返回值：
+// - []Pack: 已构建好的子主题包或子插件包；每个子包都会带上 BundleID/BundleName/BundleVersion。
+//
+// 设计说明：
+// 1. bundle 子包只允许 theme 和 plugin，避免在 bundle 中递归嵌套 bundle 导致安装/删除语义不清。
+// 2. 显式 packs 路径优先；未声明时自动扫描 themes/* 和 plugins/*，让简单资源包少写配置。
+func scanBundleChildren(bundleDir string, source PackSource, bundleManifest Manifest, bundleRelativeDir, bundleURLBase string, childType PackType) ([]Pack, error) {
+	childPaths, err := bundleChildPaths(bundleDir, bundleManifest)
 	if err != nil {
 		return nil, err
 	}
-	packs = append(packs, found...)
+
+	var packs []Pack
+	for _, childPath := range childPaths {
+		childDir := filepath.Join(bundleDir, filepath.FromSlash(childPath))
+		manifestPath := filepath.Join(childDir, "manifest.json")
+		manifest, err := readManifestFile(manifestPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateManifest(manifest); err != nil {
+			return nil, fmt.Errorf("%s: %w", manifestPath, err)
+		}
+		switch manifest.Type {
+		case ThemePack, PluginPack:
+		default:
+			return nil, fmt.Errorf("%s: bundle child type %q is not supported; want %q or %q", manifestPath, manifest.Type, ThemePack, PluginPack)
+		}
+		if childType != "" && manifest.Type != childType {
+			continue
+		}
+
+		pack, err := buildPack(childDir, source, manifest, path.Join(bundleRelativeDir, childPath), path.Join(bundleURLBase, childPath))
+		if err != nil {
+			return nil, err
+		}
+		pack.BundleID = bundleManifest.ID
+		pack.BundleName = bundleManifest.Name
+		pack.BundleVersion = bundleManifest.Version
+		packs = append(packs, pack)
+	}
+	return packs, nil
+}
+
+// bundleChildPaths 解析一个 bundle 应该扫描哪些子包目录。
+//
+// 参数：
+// - bundleDir: 父 bundle 根目录。
+// - manifest: 父 bundle manifest。
+//
+// 返回值：
+// - 如果 manifest.packs 存在，返回其中声明的相对路径。
+// - 如果 manifest.packs 为空，自动返回 themes/* 与 plugins/* 下的子目录。
+func bundleChildPaths(bundleDir string, manifest Manifest) ([]string, error) {
+	if len(manifest.Packs) > 0 {
+		paths := make([]string, 0, len(manifest.Packs))
+		for index, pack := range manifest.Packs {
+			cleaned, err := cleanPackPath(pack.Path)
+			if err != nil {
+				return nil, fmt.Errorf("packs[%d].path: %w", index, err)
+			}
+			if cleaned == "" {
+				return nil, fmt.Errorf("packs[%d].path is required", index)
+			}
+			paths = append(paths, cleaned)
+		}
+		return paths, nil
+	}
+
+	var paths []string
+	for _, childDirName := range []string{DirThemes, DirPlugins} {
+		childDir := filepath.Join(bundleDir, childDirName)
+		entries, err := os.ReadDir(childDir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read bundle %s: %w", childDirName, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				paths = append(paths, path.Join(childDirName, entry.Name()))
+			}
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// bundleChildIDs 从子包列表中拆出主题 ID 和插件 ID。
+//
+// 参数：
+// - children: 已扫描出的 bundle 子包。
+//
+// 返回值：
+// - 第一个返回值是排序后的主题 ID 列表。
+// - 第二个返回值是排序后的插件 ID 列表。
+func bundleChildIDs(children []Pack) ([]string, []string) {
+	themeIDs := make([]string, 0, len(children))
+	pluginIDs := make([]string, 0, len(children))
+	for _, child := range children {
+		switch child.Type {
+		case ThemePack:
+			themeIDs = append(themeIDs, child.ID)
+		case PluginPack:
+			pluginIDs = append(pluginIDs, child.ID)
+		}
+	}
+	sort.Strings(themeIDs)
+	sort.Strings(pluginIDs)
+	return themeIDs, pluginIDs
+}
+
+// dedupeBundledPacks 处理同一来源下“旧独立包”和“新 bundle 子包”的迁移重名。
+//
+// 参数：
+// - packs: 直接扫描和 bundle 子包扫描合并后的资源包列表。
+// - packType: 当前处理的类型，用于生成更明确的错误信息。
+//
+// 返回值：
+// - 同一来源下独立包和 bundle 子包 ID 相同时，优先保留 bundle 子包。
+// - 其他重复 ID 会返回错误，避免运行时选择产生歧义。
+func dedupeBundledPacks(packs []Pack, packType PackType) ([]Pack, error) {
+	byID := map[string]Pack{}
+	order := make([]string, 0, len(packs))
+	for _, pack := range packs {
+		if existing, ok := byID[pack.ID]; ok {
+			if shouldReplaceWithBundledPack(existing, pack) {
+				byID[pack.ID] = pack
+				continue
+			}
+			if shouldReplaceWithBundledPack(pack, existing) {
+				continue
+			}
+			return nil, fmt.Errorf("duplicate %s pack id %q", packType, pack.ID)
+		}
+		byID[pack.ID] = pack
+		order = append(order, pack.ID)
+	}
+
+	deduped := make([]Pack, 0, len(byID))
+	for _, id := range order {
+		deduped = append(deduped, byID[id])
+	}
+	return deduped, nil
+}
+
+// shouldReplaceWithBundledPack 判断候选包是否应该替换已有独立包。
+//
+// 参数：
+// - existing: 当前按 ID 缓存的资源包。
+// - candidate: 新扫描到的同 ID 资源包。
+//
+// 返回值：
+// - 同一来源下，已有包是独立包且候选包来自 bundle 时返回 true。
+func shouldReplaceWithBundledPack(existing, candidate Pack) bool {
+	return existing.Source == candidate.Source && existing.BundleID == "" && candidate.BundleID != ""
+}
+
+func scanPluginPacks(officialRoot, userRoot string) ([]Pack, error) {
+	direct, err := scanPacks(officialRoot, userRoot, PluginPack)
+	if err != nil {
+		return nil, err
+	}
+	bundled, err := scanBundleChildPacks(officialRoot, userRoot, PluginPack)
+	if err != nil {
+		return nil, err
+	}
+	packs, err := dedupeBundledPacks(append(direct, bundled...), PluginPack)
+	if err != nil {
+		return nil, err
+	}
 
 	// 只兼容读取用户目录里的旧版 text 包，避免把项目内置的历史文字包重新暴露到新 UI。
 	legacy, err := scanLegacyTextPacks(userRoot)
@@ -493,28 +1015,47 @@ func scanPackRoot(root string, source PackSource, packType PackType) ([]Pack, er
 			return nil, fmt.Errorf("%s: manifest type %q does not match folder type %q", manifestPath, manifest.Type, packType)
 		}
 
-		translations, locales, defaultLocale, err := loadPackTranslations(packDir, manifest)
+		pack, err := buildPack(packDir, source, manifest, path.Join(typeDirName(packType), entry.Name()), path.Join("/packs", string(source), typeDirName(packType), entry.Name()))
 		if err != nil {
 			return nil, err
 		}
-
-		pack := Pack{
-			Manifest:     manifest,
-			Source:       source,
-			RootDir:      packDir,
-			RelativeDir:  path.Join(typeDirName(packType), entry.Name()),
-			URLBase:      path.Join("/packs", string(source), typeDirName(packType), entry.Name()),
-			Locales:      locales,
-			Translations: translations,
-		}
-		pack.DefaultLocale = defaultLocale
-		pack.TemplateDir = resolveExistingDir(packDir, manifest.TemplatesDir, "templates")
-		pack.StyleURLs = resolveStyleURLs(pack, manifest.Styles)
-		pack.BadgeKeys = packBadges(pack)
-
 		packs = append(packs, pack)
 	}
 	return packs, nil
+}
+
+// buildPack 把已经校验过 manifest 的目录转换成运行时 Pack。
+//
+// 参数：
+// - packDir: 资源包在文件系统中的根目录。
+// - source: 资源包来源，官方或用户。
+// - manifest: manifest.json 解析结果。
+// - relativeDir: 相对资源根目录的位置，用于设置页展示和调试。
+// - urlBase: 静态资源 URL 前缀。
+//
+// 返回值：
+// - Pack: 包含样式 URL、模板目录、语言列表和翻译表的运行时对象。
+func buildPack(packDir string, source PackSource, manifest Manifest, relativeDir, urlBase string) (Pack, error) {
+	translations, locales, defaultLocale, err := loadPackTranslations(packDir, manifest)
+	if err != nil {
+		return Pack{}, err
+	}
+
+	pack := Pack{
+		Manifest:     manifest,
+		Source:       source,
+		RootDir:      packDir,
+		RelativeDir:  relativeDir,
+		URLBase:      urlBase,
+		Locales:      locales,
+		Translations: translations,
+	}
+	pack.SourceURL = strings.TrimSpace(manifest.SourceURL)
+	pack.DefaultLocale = defaultLocale
+	pack.TemplateDir = resolveExistingDir(packDir, manifest.TemplatesDir, "templates")
+	pack.StyleURLs = resolveStyleURLs(pack, manifest.Styles)
+	pack.BadgeKeys = packBadges(pack)
+	return pack, nil
 }
 
 func loadPackTranslations(packDir string, manifest Manifest) (map[string]map[string]string, []string, string, error) {
@@ -600,6 +1141,28 @@ func effectiveDefaultLocale(pack Pack) string {
 		return pack.Locales[0]
 	}
 	return "en"
+}
+
+// localizedPackMessages 返回某个资源包在指定语言下的完整文案快照。
+//
+// 参数：
+// - pack: 已扫描完成的主题包或插件包。
+// - locale: 调用方希望使用的语言代码，例如 en 或 zh-CN。
+//
+// 返回值：
+// - map[string]string: 先包含资源包默认语言文案，再叠加指定语言文案后的新 map。
+//
+// 设计说明：
+// 1. 主题包的默认语言承担“完整文案基线”的角色。
+// 2. 指定语言只需要覆盖与默认语言不同的 key，缺失项自然回退到默认语言。
+// 3. 返回新 map 可以避免后续 mergeMessages 修改 Pack.Translations 中的原始缓存。
+func localizedPackMessages(pack Pack, locale string) map[string]string {
+	defaultLocale := effectiveDefaultLocale(pack)
+	messages := cloneMessages(pack.Translations[defaultLocale])
+	if strings.TrimSpace(locale) != "" && locale != defaultLocale {
+		mergeMessages(messages, pack.Translations[locale])
+	}
+	return messages
 }
 
 func normalizeThemeLocale(requested string, supported []string, fallback string) string {
@@ -702,6 +1265,10 @@ func packBadges(pack Pack) []string {
 			badges = append(badges, "badge.official")
 		case "other":
 			badges = append(badges, "badge.other")
+		case "retro":
+			badges = append(badges, "badge.retro")
+		case "minimal":
+			badges = append(badges, "badge.minimal")
 		default:
 			badges = append(badges, tag)
 		}
@@ -739,10 +1306,14 @@ func badgeTagRank(tag string) int {
 		return 0
 	case "official":
 		return 1
-	case "other":
+	case "minimal":
 		return 2
-	default:
+	case "other":
 		return 3
+	case "retro":
+		return 4
+	default:
+		return 5
 	}
 }
 
@@ -778,7 +1349,7 @@ func normalizeSelection(selection Selection, fallbackID string) Selection {
 
 func validateManifest(manifest Manifest) error {
 	switch manifest.Type {
-	case ThemePack, PluginPack, LegacyTextPack:
+	case ThemePack, BundlePack, PluginPack, LegacyTextPack:
 	default:
 		return fmt.Errorf("invalid pack type %q", manifest.Type)
 	}
@@ -788,7 +1359,57 @@ func validateManifest(manifest Manifest) error {
 	if strings.TrimSpace(manifest.Name) == "" {
 		return errors.New("pack name is required")
 	}
+	if err := validateManifestSourceURL(manifest); err != nil {
+		return err
+	}
 	return validateManifestPaths(manifest)
+}
+
+// validateManifestSourceURL 校验 bundle 的来源链接字段。
+//
+// 参数：
+// - manifest: 已解析但尚未完全信任的资源包 manifest。
+//
+// 返回值：
+// - source_url 为空时返回 nil，表示不设置来源链接。
+// - source_url 非空时只允许出现在 bundle manifest 上，并且必须是 https://github.com/... 链接。
+//
+// 设计说明：
+// 这个字段用于让用户追溯第三方资源包的来源。当前先收窄到 GitHub，避免把后台变成
+// 任意外链展示区；官方 bundle 可以省略该字段。
+func validateManifestSourceURL(manifest Manifest) error {
+	sourceURL := strings.TrimSpace(manifest.SourceURL)
+	if sourceURL == "" {
+		return nil
+	}
+	if manifest.Type != BundlePack {
+		return errors.New("source_url is only supported on bundle packs")
+	}
+
+	parsed, err := url.Parse(sourceURL)
+	if err != nil {
+		return fmt.Errorf("source_url must be a valid GitHub URL: %w", err)
+	}
+	if parsed.Scheme != "https" || parsed.User != nil || !isGitHubHost(parsed.Hostname()) || strings.Trim(parsed.Path, "/") == "" {
+		return errors.New("source_url must be an https://github.com/... URL")
+	}
+	return nil
+}
+
+// isGitHubHost 判断 URL hostname 是否属于当前允许的 GitHub 页面域名。
+//
+// 参数：
+// - host: url.URL.Hostname() 返回的主机名，不包含端口。
+//
+// 返回值：
+// - host 是 github.com 或 www.github.com 时返回 true；其他域名返回 false。
+func isGitHubHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "github.com", "www.github.com":
+		return true
+	default:
+		return false
+	}
 }
 
 func validPackID(value string) bool {
@@ -822,6 +1443,11 @@ func validateManifestPaths(manifest Manifest) error {
 			return fmt.Errorf("styles[%d]: %w", index, err)
 		}
 	}
+	for index, pack := range manifest.Packs {
+		if _, err := cleanPackPath(pack.Path); err != nil {
+			return fmt.Errorf("packs[%d].path: %w", index, err)
+		}
+	}
 	return nil
 }
 
@@ -847,6 +1473,8 @@ func typeDirName(packType PackType) string {
 	switch packType {
 	case ThemePack:
 		return DirThemes
+	case BundlePack:
+		return DirBundles
 	case PluginPack:
 		return DirPlugins
 	case LegacyTextPack:
@@ -895,7 +1523,11 @@ func resolveStyleURLs(pack Pack, styles []string) []string {
 		if err != nil || cleaned == "" {
 			continue
 		}
-		urls = append(urls, path.Join(pack.URLBase, cleaned))
+		styleURL := path.Join(pack.URLBase, cleaned)
+		if version := strings.TrimSpace(pack.Version); version != "" {
+			styleURL += "?v=" + url.QueryEscape(version)
+		}
+		urls = append(urls, styleURL)
 	}
 	return urls
 }
@@ -913,6 +1545,18 @@ func readMessagesFile(path string) (map[string]string, error) {
 		return map[string]string{}, nil
 	}
 	return messages, nil
+}
+
+func readManifestFile(path string) (Manifest, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("read manifest %s: %w", path, err)
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return Manifest{}, fmt.Errorf("parse manifest %s: %w", path, err)
+	}
+	return manifest, nil
 }
 
 func cloneMessages(source map[string]string) map[string]string {
@@ -939,13 +1583,17 @@ func zipManifest(files []*zip.File) (*zip.File, string, error) {
 		if path.Base(name) != "manifest.json" {
 			continue
 		}
+		dir := path.Dir(name)
+		if dir != "." && strings.Contains(dir, "/") {
+			continue
+		}
 		if manifestFile != nil {
-			return nil, "", errors.New("zip must contain exactly one manifest.json")
+			return nil, "", errors.New("zip must contain exactly one top-level manifest.json")
 		}
 		manifestFile = file
 	}
 	if manifestFile == nil {
-		return nil, "", errors.New("zip does not contain manifest.json")
+		return nil, "", errors.New("zip does not contain top-level manifest.json")
 	}
 	prefix := path.Dir(strings.Trim(manifestFile.Name, "/"))
 	if prefix == "." {
