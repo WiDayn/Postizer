@@ -46,6 +46,7 @@ type Store struct {
 type Settings struct {
 	HomeImage       HomeImage            `json:"home_image"`
 	MediaProcessing MediaProcessing      `json:"media_processing"`
+	ThemeSettings   ThemeSettings        `json:"theme_settings"`
 	TimeZone        string               `json:"time_zone"`
 	ThemePack       appearance.Selection `json:"theme_pack"`
 	ThemeLocale     string               `json:"theme_locale"`
@@ -66,6 +67,29 @@ type MediaProcessing struct {
 	AutoWebP     bool `json:"auto_webp"`
 	WebPQuality  int  `json:"webp_quality"`
 	KeepOriginal bool `json:"keep_original"`
+}
+
+type ThemeSettings struct {
+	Menus         []Menu            `json:"menus"`
+	MenuLocations map[string]string `json:"menu_locations"`
+}
+
+type Menu struct {
+	ID    string     `json:"id"`
+	Name  string     `json:"name"`
+	Items []MenuItem `json:"items"`
+}
+
+type MenuItem struct {
+	Type   string `json:"type"`
+	Label  string `json:"label"`
+	Target string `json:"target"`
+	URL    string `json:"url"`
+}
+
+type MenuLink struct {
+	Label string
+	URL   string
 }
 
 type Post struct {
@@ -182,6 +206,93 @@ func Load(root string) (*Store, error) {
 	return store, nil
 }
 
+func (s *Store) MenuLinks(location string) []MenuLink {
+	if s == nil {
+		return nil
+	}
+	location = normalizeMenuID(location)
+	if location == "" {
+		return nil
+	}
+	menuID := normalizeMenuID(s.Settings.ThemeSettings.MenuLocations[location])
+	if menuID == "" {
+		return nil
+	}
+	var menu *Menu
+	for i := range s.Settings.ThemeSettings.Menus {
+		if s.Settings.ThemeSettings.Menus[i].ID == menuID {
+			menu = &s.Settings.ThemeSettings.Menus[i]
+			break
+		}
+	}
+	if menu == nil {
+		return nil
+	}
+	links := make([]MenuLink, 0, len(menu.Items))
+	for _, item := range menu.Items {
+		if link, ok := s.resolveMenuItem(item); ok {
+			links = append(links, link)
+		}
+	}
+	return links
+}
+
+func (s *Store) MenuLocationAssigned(location string) bool {
+	if s == nil {
+		return false
+	}
+	location = normalizeMenuID(location)
+	if location == "" {
+		return false
+	}
+	_, ok := s.Settings.ThemeSettings.MenuLocations[location]
+	return ok
+}
+
+func (s *Store) resolveMenuItem(item MenuItem) (MenuLink, bool) {
+	label := strings.TrimSpace(item.Label)
+	switch strings.ToLower(strings.TrimSpace(item.Type)) {
+	case "page":
+		page := s.PagesBySlug[strings.TrimSpace(item.Target)]
+		if page == nil {
+			return MenuLink{}, false
+		}
+		if label == "" {
+			label = page.Title
+		}
+		return MenuLink{Label: label, URL: "/pages/" + page.Slug}, true
+	case "post":
+		post := s.PostsBySlug[strings.TrimSpace(item.Target)]
+		if post == nil {
+			return MenuLink{}, false
+		}
+		if label == "" {
+			label = post.Title
+		}
+		return MenuLink{Label: label, URL: "/posts/" + post.Slug}, true
+	case "tag":
+		tag := s.TagsBySlug[strings.TrimSpace(item.Target)]
+		if tag == nil {
+			return MenuLink{}, false
+		}
+		if label == "" {
+			label = tag.Title
+		}
+		return MenuLink{Label: label, URL: "/tags/" + tag.Slug}, true
+	case "custom":
+		url := strings.TrimSpace(item.URL)
+		if !ValidMenuURL(url) {
+			return MenuLink{}, false
+		}
+		if label == "" {
+			label = url
+		}
+		return MenuLink{Label: label, URL: url}, true
+	default:
+		return MenuLink{}, false
+	}
+}
+
 func LoadSettings(root string) (Settings, error) {
 	path := filepath.Join(root, "settings.json")
 	body, err := os.ReadFile(path)
@@ -267,6 +378,7 @@ func normalizeSettings(settings *Settings) {
 	settings.ThemeLocale = normalizeThemeLocaleValue(settings.ThemeLocale)
 	settings.PluginOrder = normalizePluginOrder(settings.PluginOrder)
 	settings.MediaProcessing = normalizeMediaProcessing(settings.MediaProcessing)
+	settings.ThemeSettings = normalizeThemeSettings(settings.ThemeSettings)
 	settings.TimeZone = NormalizeTimeZone(settings.TimeZone)
 
 	// 旧版文字包迁移：
@@ -370,6 +482,98 @@ func normalizePluginOrder(values []string) []string {
 		seen[value] = true
 	}
 	return normalized
+}
+
+func normalizeThemeSettings(settings ThemeSettings) ThemeSettings {
+	menus := make([]Menu, 0, len(settings.Menus))
+	menuIDs := map[string]bool{}
+	for index, menu := range settings.Menus {
+		name := strings.TrimSpace(menu.Name)
+		id := normalizeMenuID(menu.ID)
+		if id == "" {
+			id = normalizeMenuID(name)
+		}
+		if id == "" {
+			id = fmt.Sprintf("menu-%d", index+1)
+		}
+		baseID := id
+		for suffix := 2; menuIDs[id]; suffix++ {
+			id = fmt.Sprintf("%s-%d", baseID, suffix)
+		}
+		menuIDs[id] = true
+		if name == "" {
+			name = id
+		}
+		menus = append(menus, Menu{
+			ID:    id,
+			Name:  name,
+			Items: normalizeMenuItems(menu.Items),
+		})
+	}
+
+	locations := map[string]string{}
+	for location, menuID := range settings.MenuLocations {
+		location = normalizeMenuID(location)
+		menuID = normalizeMenuID(menuID)
+		if location == "" {
+			continue
+		}
+		if menuID == "" {
+			locations[location] = ""
+			continue
+		}
+		if !menuIDs[menuID] {
+			continue
+		}
+		locations[location] = menuID
+	}
+
+	return ThemeSettings{Menus: menus, MenuLocations: locations}
+}
+
+func normalizeMenuItems(items []MenuItem) []MenuItem {
+	normalized := make([]MenuItem, 0, len(items))
+	for _, item := range items {
+		item.Type = strings.ToLower(strings.TrimSpace(item.Type))
+		item.Label = strings.TrimSpace(item.Label)
+		item.Target = strings.TrimSpace(item.Target)
+		item.URL = strings.TrimSpace(item.URL)
+		switch item.Type {
+		case "page", "post", "tag":
+			if item.Target == "" {
+				continue
+			}
+			item.URL = ""
+		case "custom":
+			if !ValidMenuURL(item.URL) {
+				continue
+			}
+			item.Target = ""
+		default:
+			continue
+		}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+func normalizeMenuID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(value, "-")
+	value = regexp.MustCompile(`-+`).ReplaceAllString(value, "-")
+	return strings.Trim(value, "-")
+}
+
+func ValidMenuURL(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//") {
+		return true
+	}
+	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "mailto:")
 }
 
 func prependPluginID(values []string, id string) []string {

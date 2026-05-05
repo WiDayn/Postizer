@@ -1,0 +1,45 @@
+{{define "admin_menus.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">{{msg . "admin.kicker"}}</p>
+  <h1>{{msg . "menus.heading" "Custom Menus"}}</h1>
+</header>
+
+<section id="themeMenuSettings" class="ui-panel admin-panel theme-settings-panel menu-builder-panel">
+  <div class="ui-panel__head">
+    <h2>{{msg . "menus.title" "Menus"}}</h2>
+    <span id="themeMenuStatus" class="ui-status">{{msg . "settings.status.ready" "Ready"}}</span>
+  </div>
+  <div class="menu-selector-bar">
+    <label for="menuSelector">{{msg . "menus.selector.label" "Select a menu to edit"}}</label>
+    <select id="menuSelector" class="ui-input"></select>
+    <button id="selectThemeMenu" class="ui-button" type="button">{{msg . "menus.selector.select" "Select"}}</button>
+    <button id="addThemeMenu" class="ui-button" type="button">{{msg . "menus.selector.create" "Create a new menu"}}</button>
+    <span>{{msg . "menus.selector.reminder" "Save your changes when you are done."}}</span>
+  </div>
+  <div class="menu-builder-layout">
+    <aside class="menu-add-panel">
+      <h2>{{msg . "menus.add_items.title" "Add Menu Items"}}</h2>
+      <div id="menuSourcePanels" class="menu-source-panels"></div>
+    </aside>
+    <section class="menu-structure-panel">
+      <div class="menu-structure-head">
+        <h2>{{msg . "menus.structure.title" "Menu Structure"}}</h2>
+        <button id="deleteThemeMenu" class="ui-button ui-button--ghost" type="button">{{msg . "menus.menu.delete" "Delete Menu"}}</button>
+      </div>
+      <label class="menu-name-row">
+        <span>{{msg . "menus.structure.name" "Menu name"}}</span>
+        <input id="menuNameInput" class="ui-input" type="text">
+      </label>
+      <div id="themeMenuList" class="menu-structure-list"></div>
+      <div class="settings-actions theme-settings-actions">
+        <button id="saveThemeMenus" class="ui-button ui-button--primary" type="button">{{msg . "menus.save" "Save Menus"}}</button>
+      </div>
+    </section>
+  </div>
+</section>
+
+<script id="themeMenuInitialData" type="application/json">{{toScriptJSON (menuAdminData .)}}</script>
+<script defer src="/static/menus.js?v=5"></script>
+{{template "adminEnd" .}}
+{{end}}

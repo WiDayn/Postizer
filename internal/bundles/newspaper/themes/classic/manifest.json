@@ -6,6 +6,13 @@
   "description": "Dense black-and-white editorial layout with a newspaper front page and sidebar admin shell.",
   "default_locale": "en",
   "translations_dir": "translations",
+  "menu_locations": [
+    {
+      "id": "navbar",
+      "name": "Navbar",
+      "description": "Primary navigation bar"
+    }
+  ],
   "tags": [
     "default",
     "official",

@@ -126,6 +126,69 @@ func TestResolvedThemeLocaleKeepsExplicitThemeLocaleOverPluginDefault(t *testing
 
 	if got, want := resolvedThemeLocale("zh-CN", appearance.DefaultThemePackID, themes), "zh-CN"; got != want {
 		t.Fatalf("theme locale = %q, want %q", got, want)
+func TestMenuLinksForUnspecifiedDeclaredNavbarUsesDefault(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{},
+			Pages:    []*site.Page{{Title: "About", Slug: "about"}},
+		},
+		Appearance: &appearance.Catalog{
+			ActiveTheme: appearance.Pack{
+				Manifest: appearance.Manifest{
+					MenuLocations: []appearance.MenuLocation{{ID: "navbar", Name: "Navbar"}},
+				},
+			},
+		},
+	}
+
+	links := menuLinksForLocation(data, "navbar")
+	if len(links) == 0 {
+		t.Fatal("unspecified declared navbar should use default links")
+	}
+	if got, want := links[0].URL, "/"; got != want {
+		t.Fatalf("first default link = %q, want %q", got, want)
+	}
+}
+
+func TestMenuLinksForExplicitEmptyNavbarDoesNotUseDefault(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{
+				ThemeSettings: site.ThemeSettings{
+					MenuLocations: map[string]string{"navbar": ""},
+				},
+			},
+			Pages: []*site.Page{{Title: "About", Slug: "about"}},
+		},
+		Appearance: &appearance.Catalog{
+			ActiveTheme: appearance.Pack{
+				Manifest: appearance.Manifest{
+					MenuLocations: []appearance.MenuLocation{{ID: "navbar", Name: "Navbar"}},
+				},
+			},
+		},
+	}
+
+	if links := menuLinksForLocation(data, "navbar"); len(links) != 0 {
+		t.Fatalf("explicit empty navbar links = %#v, want none", links)
+	}
+}
+
+func TestMenuLinksForUndeclaredNavbarKeepsDefaultFallback(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{},
+			Pages:    []*site.Page{{Title: "About", Slug: "about"}},
+		},
+		Appearance: &appearance.Catalog{},
+	}
+
+	links := menuLinksForLocation(data, "navbar")
+	if len(links) == 0 {
+		t.Fatal("undeclared navbar should keep default links")
+	}
+	if got, want := links[0].URL, "/"; got != want {
+		t.Fatalf("first default link = %q, want %q", got, want)
 	}
 }
 

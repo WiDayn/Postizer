@@ -118,6 +118,8 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/media", s.requireAdmin(http.HandlerFunc(s.adminMedia)))
 	mux.Handle("GET /admin/appearance", s.requireAdmin(http.HandlerFunc(s.adminAppearance)))
 	mux.Handle("GET /admin/plugins", s.requireAdmin(http.HandlerFunc(s.adminPlugins)))
+	mux.Handle("GET /admin/menus", s.requireAdmin(http.HandlerFunc(s.adminMenus)))
+	mux.Handle("GET /admin/theme-settings", s.requireAdmin(http.HandlerFunc(s.adminThemeSettings)))
 	mux.Handle("GET /admin/settings", s.requireAdmin(http.HandlerFunc(s.adminSettings)))
 	mux.Handle("GET /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.listPosts)))
 	mux.Handle("GET /admin/api/posts/{slug}", s.requireAdmin(http.HandlerFunc(s.getPost)))
@@ -137,6 +139,8 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("DELETE /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.clearHomeImage)))
 	mux.Handle("POST /admin/api/settings/time-zone", s.requireAdmin(http.HandlerFunc(s.updateTimeZoneSettings)))
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
+	mux.Handle("POST /admin/api/menus", s.requireAdmin(http.HandlerFunc(s.updateMenus)))
+	mux.Handle("POST /admin/api/theme-settings", s.requireAdmin(http.HandlerFunc(s.updateThemeSettings)))
 	mux.Handle("POST /admin/api/resource-packs", s.requireAdmin(http.HandlerFunc(s.uploadResourcePack)))
 	mux.Handle("DELETE /admin/api/resource-packs/{type}/{id}", s.requireAdmin(http.HandlerFunc(s.deleteResourcePack)))
 	mux.Handle("POST /admin/api/resource-packs/apply", s.requireAdmin(http.HandlerFunc(s.applyResourcePacks)))
@@ -178,6 +182,15 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 		},
 		"timeZones": func(current string) []string {
 			return site.TimeZoneOptions(current)
+		},
+		"menuLinks": func(data ViewData, location string) []site.MenuLink {
+			return menuLinksForLocation(data, location)
+		},
+		"menuAdminData": func(data ViewData) any {
+			return menuAdminData(data)
+		},
+		"themeSettingsData": func(data ViewData) any {
+			return themeSettingsData(data)
 		},
 		"msg": func(data ViewData, key string, fallback ...string) string {
 			return messageFromViewData(data, key, fallback...)
@@ -378,6 +391,16 @@ func (s *Server) adminAppearance(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminPlugins(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	s.render(w, "admin_plugins.html", ViewData{Title: "Plugin Packs", TitleKey: "title.admin.plugins", Store: store, ActiveAdmin: "plugins"})
+}
+
+func (s *Server) adminMenus(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.render(w, "admin_menus.html", ViewData{Title: "Custom Menus", TitleKey: "title.admin.menus", Store: store, ActiveAdmin: "menus"})
+}
+
+func (s *Server) adminThemeSettings(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.render(w, "admin_theme_settings.html", ViewData{Title: "Theme Settings", TitleKey: "title.admin.theme_settings", Store: store, ActiveAdmin: "theme-settings"})
 }
 
 func (s *Server) adminSettings(w http.ResponseWriter, r *http.Request) {
@@ -747,6 +770,48 @@ func (s *Server) updateMediaProcessingSettings(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, s.currentStore().Settings.MediaProcessing)
+}
+
+func (s *Server) updateMenus(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload site.ThemeSettings
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.ThemeSettings.Menus = payload.Menus
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.currentStore().Settings.ThemeSettings)
+}
+
+func (s *Server) updateThemeSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload struct {
+		MenuLocations map[string]string `json:"menu_locations"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.ThemeSettings.MenuLocations = payload.MenuLocations
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.currentStore().Settings.ThemeSettings)
 }
 
 func (s *Server) mediaProcessingOptions() media.ProcessingOptions {
@@ -1418,6 +1483,75 @@ func messageFromViewData(data ViewData, key string, fallback ...string) string {
 		return fallback[0]
 	}
 	return key
+}
+
+func menuLinksForLocation(data ViewData, location string) []site.MenuLink {
+	if data.Store == nil {
+		return nil
+	}
+	links := data.Store.MenuLinks(location)
+	if len(links) > 0 || data.Store.MenuLocationAssigned(location) {
+		return links
+	}
+	if location != "navbar" {
+		return nil
+	}
+	links = []site.MenuLink{
+		{Label: messageFromViewData(data, "nav.front_page", "Front Page"), URL: "/"},
+		{Label: messageFromViewData(data, "nav.archive", "Archive"), URL: "/archive"},
+		{Label: messageFromViewData(data, "nav.topics", "Topics"), URL: "/tags"},
+		{Label: messageFromViewData(data, "nav.search", "Search"), URL: "/search"},
+	}
+	for _, page := range data.Store.Pages {
+		links = append(links, site.MenuLink{Label: page.Title, URL: "/pages/" + page.Slug})
+	}
+	links = append(links, site.MenuLink{Label: messageFromViewData(data, "nav.admin", "Admin"), URL: "/admin"})
+	return links
+}
+
+func menuAdminData(data ViewData) any {
+	if data.Store == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"settings": data.Store.Settings.ThemeSettings,
+		"options":  menuContentOptions(data.Store),
+	}
+}
+
+func themeSettingsData(data ViewData) any {
+	if data.Store == nil {
+		return map[string]any{}
+	}
+	locations := []appearance.MenuLocation{}
+	if data.Appearance != nil {
+		locations = data.Appearance.ActiveTheme.MenuLocations
+	}
+	return map[string]any{
+		"settings":  data.Store.Settings.ThemeSettings,
+		"locations": locations,
+		"options":   menuContentOptions(data.Store),
+	}
+}
+
+func menuContentOptions(store *site.Store) map[string]any {
+	type option struct {
+		Title string `json:"title"`
+		Slug  string `json:"slug"`
+	}
+	pages := make([]option, 0, len(store.Pages))
+	for _, page := range store.Pages {
+		pages = append(pages, option{Title: page.Title, Slug: page.Slug})
+	}
+	posts := make([]option, 0, len(store.Posts))
+	for _, post := range store.Posts {
+		posts = append(posts, option{Title: post.Title, Slug: post.Slug})
+	}
+	tags := make([]option, 0, len(store.Tags))
+	for _, tag := range store.Tags {
+		tags = append(tags, option{Title: tag.Title, Slug: tag.Slug})
+	}
+	return map[string]any{"pages": pages, "posts": posts, "tags": tags}
 }
 
 func parseThemeTemplates(templates *template.Template, dir string) error {

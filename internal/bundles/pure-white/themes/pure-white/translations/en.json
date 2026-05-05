@@ -3,5 +3,7 @@
   "site.brand": "Postizer",
   "site.edition_line": "Dear Reader",
   "site.hero.hide_image": "Hide cover image",
-  "home.lead_kicker": "Articles"
+  "home.lead_kicker": "Articles",
+  "menus.location.navbar": "Navbar",
+  "menus.location.navbar.description": "Primary navigation bar"
 }

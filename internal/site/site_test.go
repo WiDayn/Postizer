@@ -692,6 +692,112 @@ func TestLoadSettingsDefaultsMediaProcessing(t *testing.T) {
 	}
 }
 
+func TestThemeMenuLinksResolveSupportedItems(t *testing.T) {
+	root := t.TempDir()
+	page, err := SavePage(root, PageDraft{
+		Title: "About Us",
+		Body:  "Page body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, err := SavePost(root, PostDraft{
+		Title: "Menu Post",
+		Tags:  []string{"Go News"},
+		Body:  "Post body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := defaultSettings()
+	settings.ThemeSettings = ThemeSettings{
+		Menus: []Menu{
+			{
+				ID:   "main",
+				Name: "Main",
+				Items: []MenuItem{
+					{Type: "page", Target: page.Slug},
+					{Type: "post", Target: post.Slug, Label: "Featured"},
+					{Type: "tag", Target: "go-news"},
+					{Type: "custom", Label: "External", URL: "https://example.com"},
+					{Type: "custom", Label: "Bad", URL: "javascript:alert(1)"},
+				},
+			},
+		},
+		MenuLocations: map[string]string{"navbar": "main"},
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.MenuLocationAssigned("navbar") {
+		t.Fatal("navbar menu location should be marked assigned")
+	}
+	links := store.MenuLinks("navbar")
+	want := []MenuLink{
+		{Label: "About Us", URL: "/pages/" + page.Slug},
+		{Label: "Featured", URL: "/posts/" + post.Slug},
+		{Label: "Go News", URL: "/tags/go-news"},
+		{Label: "External", URL: "https://example.com"},
+	}
+	if len(links) != len(want) {
+		t.Fatalf("menu links = %#v, want %#v", links, want)
+	}
+	for index := range want {
+		if links[index] != want[index] {
+			t.Fatalf("menu link[%d] = %#v, want %#v", index, links[index], want[index])
+		}
+	}
+}
+
+func TestLoadSettingsPreservesExplicitEmptyMenuLocation(t *testing.T) {
+	root := t.TempDir()
+	settings := defaultSettings()
+	settings.ThemeSettings = ThemeSettings{
+		MenuLocations: map[string]string{"navbar": ""},
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, ok := loaded.ThemeSettings.MenuLocations["navbar"]
+	if !ok {
+		t.Fatal("explicit empty menu location should be preserved")
+	}
+	if value != "" {
+		t.Fatalf("explicit empty menu location = %q, want empty", value)
+	}
+}
+
+func TestValidMenuURLAllowsPublicTargetsOnly(t *testing.T) {
+	cases := []struct {
+		value string
+		want  bool
+	}{
+		{"/about", true},
+		{"https://example.com", true},
+		{"http://example.com", true},
+		{"mailto:editor@example.com", true},
+		{"//example.com", false},
+		{"javascript:alert(1)", false},
+		{"", false},
+	}
+	for _, test := range cases {
+		if got := ValidMenuURL(test.value); got != test.want {
+			t.Fatalf("ValidMenuURL(%q) = %v, want %v", test.value, got, test.want)
+		}
+	}
+}
+
 func TestTimeZoneOptionsIncludesCommonZones(t *testing.T) {
 	options := TimeZoneOptions("Asia/Tokyo")
 	for _, expected := range []string{"UTC", "Asia/Hong_Kong", "Asia/Tokyo", "America/New_York", "Europe/London"} {

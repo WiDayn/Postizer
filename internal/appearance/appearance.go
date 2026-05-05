@@ -84,6 +84,13 @@ type BundleEntry struct {
 	Path string `json:"path"`
 }
 
+// MenuLocation 描述主题模板中可以放入自定义菜单的位置。
+type MenuLocation struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 // Manifest 描述一个主题包、插件包或 bundle 资源合集的元信息。
 //
 // 约定：
@@ -92,21 +99,22 @@ type BundleEntry struct {
 // 3. 插件包也可以通过 `translations_dir` 提供多语言覆盖。
 // 4. 旧版 `text` 包使用 `messages_file + lang` 表示“单语言翻译包”。
 type Manifest struct {
-	ID              string        `json:"id"`
-	Type            PackType      `json:"type"`
-	Name            string        `json:"name"`
-	SortName        string        `json:"sort_name"`
-	Version         string        `json:"version"`
-	Description     string        `json:"description"`
-	SourceURL       string        `json:"source_url"`
-	Lang            string        `json:"lang"`
-	DefaultLocale   string        `json:"default_locale"`
-	Tags            []string      `json:"tags"`
-	Styles          []string      `json:"styles"`
-	TemplatesDir    string        `json:"templates_dir"`
-	TranslationsDir string        `json:"translations_dir"`
-	MessagesFile    string        `json:"messages_file"`
-	Packs           []BundleEntry `json:"packs"`
+	ID              string         `json:"id"`
+	Type            PackType       `json:"type"`
+	Name            string         `json:"name"`
+	SortName        string         `json:"sort_name"`
+	Version         string         `json:"version"`
+	Description     string         `json:"description"`
+	SourceURL       string         `json:"source_url"`
+	Lang            string         `json:"lang"`
+	DefaultLocale   string         `json:"default_locale"`
+	Tags            []string       `json:"tags"`
+	Styles          []string       `json:"styles"`
+	TemplatesDir    string         `json:"templates_dir"`
+	TranslationsDir string         `json:"translations_dir"`
+	MessagesFile    string         `json:"messages_file"`
+	MenuLocations   []MenuLocation `json:"menu_locations"`
+	Packs           []BundleEntry  `json:"packs"`
 }
 
 // Pack 是运行时可用的主题包、插件包或 bundle 资源合集对象。
@@ -1484,6 +1492,11 @@ func validateManifest(manifest Manifest) error {
 	}
 	if err := validateManifestSourceURL(manifest); err != nil {
 		return err
+	}
+	for index, location := range manifest.MenuLocations {
+		if !validPackID(location.ID) {
+			return fmt.Errorf("menu_locations[%d].id: invalid menu location id %q", index, location.ID)
+		}
 	}
 	return validateManifestPaths(manifest)
 }

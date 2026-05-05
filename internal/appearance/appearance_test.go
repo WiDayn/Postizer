@@ -230,6 +230,12 @@ func TestLoadCatalogIncludesOfficialNewspaperClassicInk(t *testing.T) {
 	if got, want := catalog.ThemeStyles[0], "/packs/official/bundles/newspaper/themes/ink/ink.css?v=1.0.0"; got != want {
 		t.Fatalf("theme style URL = %q, want %q", got, want)
 	}
+	if len(catalog.ActiveTheme.MenuLocations) != 1 {
+		t.Fatalf("menu locations = %d, want 1", len(catalog.ActiveTheme.MenuLocations))
+	}
+	if got, want := catalog.ActiveTheme.MenuLocations[0].ID, "navbar"; got != want {
+		t.Fatalf("first menu location = %q, want %q", got, want)
+	}
 	if got, want := catalog.Messages["nav.front_page"], "首页"; got != want {
 		t.Fatalf("front page message = %q, want %q", got, want)
 	}
@@ -258,6 +264,12 @@ func TestLoadCatalogIncludesOfficialPureWhite(t *testing.T) {
 	}
 	if got, want := catalog.ThemeStyles[0], "/packs/official/bundles/pure-white/themes/pure-white/pure-white.css?v=1.0.6"; got != want {
 		t.Fatalf("theme style URL = %q, want %q", got, want)
+	}
+	if len(catalog.ActiveTheme.MenuLocations) != 1 {
+		t.Fatalf("menu locations = %d, want 1", len(catalog.ActiveTheme.MenuLocations))
+	}
+	if got, want := catalog.ActiveTheme.MenuLocations[0].ID, "navbar"; got != want {
+		t.Fatalf("first menu location = %q, want %q", got, want)
 	}
 	if got, want := catalog.Messages["home.lead_kicker"], "文章"; got != want {
 		t.Fatalf("home lead kicker = %q, want %q", got, want)
