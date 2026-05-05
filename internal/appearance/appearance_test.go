@@ -208,7 +208,7 @@ func TestLoadCatalogSortsLocalesWithFixedPriority(t *testing.T) {
 
 func TestLoadCatalogIncludesOfficialNewspaperClassicInk(t *testing.T) {
 	catalog, err := LoadCatalog(
-		filepath.Join("..", "..", "official_bundles"),
+		filepath.Join("..", "..", "internal", "bundles"),
 		t.TempDir(),
 		Selection{Enabled: true, PackID: "newspaper-classic-ink"},
 		"zh-CN",
@@ -237,7 +237,7 @@ func TestLoadCatalogIncludesOfficialNewspaperClassicInk(t *testing.T) {
 
 func TestLoadCatalogIncludesOfficialPureWhite(t *testing.T) {
 	catalog, err := LoadCatalog(
-		filepath.Join("..", "..", "official_bundles"),
+		filepath.Join("..", "..", "internal", "bundles"),
 		t.TempDir(),
 		Selection{Enabled: true, PackID: "pure-white"},
 		"zh-CN",

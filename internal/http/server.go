@@ -28,16 +28,16 @@ import (
 )
 
 type Server struct {
-	store               *site.Store
-	appearance          *appearance.Catalog
-	media               *media.Store
-	contentRoot         string
-	officialBundlesRoot string
-	userContentRoot     string
-	userBundlesRoot     string
-	templates           *template.Template
-	auth                authConfig
-	mu                  sync.RWMutex
+	store              *site.Store
+	appearance         *appearance.Catalog
+	media              *media.Store
+	contentRoot        string
+	builtinBundlesRoot string
+	userContentRoot    string
+	userBundlesRoot    string
+	templates          *template.Template
+	auth               authConfig
+	mu                 sync.RWMutex
 }
 
 type ViewData struct {
@@ -72,13 +72,13 @@ const (
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
 	s := &Server{
-		store:               store,
-		media:               mediaStore,
-		contentRoot:         contentRoot,
-		officialBundlesRoot: "official_bundles",
-		userContentRoot:     contentRoot,
-		userBundlesRoot:     filepath.Join(contentRoot, "bundles"),
-		auth:                newAuthConfig(contentRoot),
+		store:              store,
+		media:              mediaStore,
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+		auth:               newAuthConfig(contentRoot),
 	}
 	if err := s.reloadRuntime(); err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cache(http.StripPrefix("/static/", http.FileServer(http.Dir("web/static")))))
 	mux.Handle("GET /media/", cache(http.StripPrefix("/media/", http.FileServer(http.Dir(mediaStore.PublicDir())))))
-	mux.Handle("GET /packs/official/bundles/", cache(http.StripPrefix("/packs/official/bundles/", http.FileServer(http.Dir(s.officialBundlesRoot)))))
+	mux.Handle("GET /packs/official/bundles/", cache(http.StripPrefix("/packs/official/bundles/", http.FileServer(http.Dir(s.builtinBundlesRoot)))))
 	mux.Handle("GET /packs/user/bundles/", cache(http.StripPrefix("/packs/user/bundles/", http.FileServer(http.Dir(s.userBundlesRoot)))))
 	mux.HandleFunc("GET /", s.home)
 	mux.HandleFunc("GET /archive", s.archive)
@@ -1117,7 +1117,7 @@ func (s *Server) reloadRuntime() error {
 	if err != nil {
 		return err
 	}
-	catalog, err := appearance.LoadCatalog(s.officialBundlesRoot, s.userContentRoot, store.Settings.ThemePack, store.Settings.ThemeLocale, store.Settings.PluginOrder)
+	catalog, err := appearance.LoadCatalog(s.builtinBundlesRoot, s.userContentRoot, store.Settings.ThemePack, store.Settings.ThemeLocale, store.Settings.PluginOrder)
 	if err != nil {
 		return err
 	}

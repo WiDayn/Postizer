@@ -169,7 +169,7 @@ type InstalledPack struct {
 // LoadCatalog 扫描主题包与插件包，构建运行时外观目录。
 //
 // 参数：
-// - officialRoot: 官方 bundle 根目录，通常是 official_bundles
+// - officialRoot: 内置 bundle 根目录，通常是 internal/bundles
 // - userRoot: 用户内容根目录，bundle 会从 content/bundles 读取
 // - themeSelection: 当前主题选择
 // - themeLocale: 当前主题语言
@@ -522,7 +522,7 @@ func scanBundlePacks(officialRoot, userRoot string) ([]Pack, error) {
 // scanBundlePackRoot 扫描单个来源目录中的顶层 bundle。
 //
 // 参数：
-// - root: 某个来源的资源根目录，例如 official_bundles 或 content。
+// - root: 某个来源的资源根目录，例如 internal/bundles 或 content。
 // - source: 资源来源标识，用于生成 URLBase。
 //
 // 返回值：
@@ -712,11 +712,11 @@ type bundleScanRoot struct {
 // bundleScanRoots 返回某个来源需要扫描的 bundle 父目录。
 //
 // 参数：
-// - root: 来源资源根目录。官方来源现在直接使用 official_bundles；用户来源使用 content。
+// - root: 来源资源根目录。官方来源现在直接使用 internal/bundles；用户来源使用 content。
 // - source: 资源来源标识，用于决定扫描布局和生成 URL 前缀。
 //
 // 返回值：
-//   - 官方来源会先扫描 root 本身，兼容新的 official_bundles/newspaper 结构；
+//   - 官方来源会先扫描 root 本身，兼容新的 internal/bundles/newspaper 结构；
 //     同时保留 root/bundles 作为过渡兼容，方便旧测试和旧布局继续被识别。
 //   - 用户来源只扫描 root/bundles，也就是 content/bundles，确保用户上传目录以 bundle 为安装单位隔离。
 func bundleScanRoots(root string, source PackSource) []bundleScanRoot {
