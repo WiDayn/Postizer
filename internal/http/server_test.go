@@ -126,6 +126,9 @@ func TestResolvedThemeLocaleKeepsExplicitThemeLocaleOverPluginDefault(t *testing
 
 	if got, want := resolvedThemeLocale("zh-CN", appearance.DefaultThemePackID, themes), "zh-CN"; got != want {
 		t.Fatalf("theme locale = %q, want %q", got, want)
+	}
+}
+
 func TestMenuLinksForUnspecifiedDeclaredNavbarUsesDefault(t *testing.T) {
 	data := ViewData{
 		Store: &site.Store{

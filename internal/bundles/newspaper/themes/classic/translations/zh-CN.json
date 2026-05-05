@@ -114,6 +114,7 @@
   "pages.table.slug": "路径",
   "pages.table.date": "发布日期",
   "pages.table.updated": "更新日期",
+  "pages.table.status": "状态",
   "pages.table.actions": "操作",
   "editor.heading": "编辑器",
   "editor.heading.post": "文章编辑器",

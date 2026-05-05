@@ -262,6 +262,7 @@ func TestSavePageAndLoad(t *testing.T) {
 		`slug: "about-lab"`,
 		`date: "2026-05-04T09:30"`,
 		`updated: "2026-05-05T18:45"`,
+		`draft: false`,
 		`toc: true`,
 		"## About",
 	} {
@@ -278,10 +279,50 @@ func TestSavePageAndLoad(t *testing.T) {
 	if page == nil {
 		t.Fatal("page was not loaded")
 	}
+	if store.AllPagesBySlug["about-lab"] == nil {
+		t.Fatal("page was not available to admin index")
+	}
 	if got, want := FormatInputDateTime(page.Date), "2026-05-04T09:30"; got != want {
 		t.Fatalf("loaded page date = %q, want %q", got, want)
 	}
 	if got := page.Source; strings.HasPrefix(got, "\n") {
+		t.Fatalf("loaded page source had a leading blank line: %q", got)
+	}
+}
+
+func TestSavePageAndLoadDraft(t *testing.T) {
+	root := t.TempDir()
+	_, err := SavePage(root, PageDraft{
+		Title:   "Draft Page",
+		Date:    "2026-05-04T10:30",
+		Summary: "Hidden until published.",
+		Draft:   true,
+		TOC:     true,
+		Body:    "## Draft\n\nPage content.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "pages", "draft-page.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `draft: true`) {
+		t.Fatalf("saved page did not preserve draft state:\n%s", body)
+	}
+
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.AllPagesBySlug["draft-page"] == nil {
+		t.Fatal("draft page was not available to admin index")
+	}
+	if store.PagesBySlug["draft-page"] != nil {
+		t.Fatal("draft page leaked into public index")
+	}
+	if got := store.AllPagesBySlug["draft-page"].Source; strings.HasPrefix(got, "\n") {
 		t.Fatalf("loaded page source had a leading blank line: %q", got)
 	}
 }
@@ -341,6 +382,9 @@ func TestDeletePageRemovesMarkdownFile(t *testing.T) {
 	}
 	if store.PagesBySlug["remove-page"] != nil {
 		t.Fatal("deleted page remained in loaded store")
+	}
+	if store.AllPagesBySlug["remove-page"] != nil {
+		t.Fatal("deleted page remained in admin index")
 	}
 }
 

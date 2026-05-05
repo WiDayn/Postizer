@@ -19,6 +19,7 @@
         <col class="admin-post-col-slug">
         <col class="admin-post-col-date">
         <col class="admin-post-col-updated">
+        <col class="admin-post-col-status">
         <col class="admin-post-col-actions">
       </colgroup>
       <thead>
@@ -27,6 +28,7 @@
           <th scope="col">{{msg . "pages.table.slug" "Slug"}}</th>
           <th scope="col">{{msg . "pages.table.date" "Date"}}</th>
           <th scope="col">{{msg . "pages.table.updated" "Updated"}}</th>
+          <th scope="col">{{msg . "pages.table.status" "Status"}}</th>
           <th scope="col">{{msg . "pages.table.actions" "Actions"}}</th>
         </tr>
       </thead>
@@ -37,9 +39,14 @@
           <td class="admin-post-table__slug"><code>{{.Slug}}</code></td>
           <td class="admin-post-table__date">{{with date .Date}}<time>{{.}}</time>{{else}}<span class="admin-table-muted">-</span>{{end}}</td>
           <td class="admin-post-table__updated">{{with date .Updated}}<time>{{.}}</time>{{else}}<span class="admin-table-muted">-</span>{{end}}</td>
+          <td class="admin-post-table__status">
+            <span class="admin-status-pill {{if .Draft}}admin-status-pill--draft{{else}}admin-status-pill--published{{end}}">
+              {{if .Draft}}{{msg $ "common.draft"}}{{else}}{{msg $ "common.published"}}{{end}}
+            </span>
+          </td>
           <td class="admin-table-actions">
             <a href="/admin/pages/{{.Slug}}/edit">{{msg $ "common.edit"}}</a>
-            <a href="/pages/{{.Slug}}" target="_blank">{{msg $ "common.view"}}</a>
+            {{if not .Draft}}<a href="/pages/{{.Slug}}" target="_blank">{{msg $ "common.view"}}</a>{{end}}
             <form class="admin-inline-delete" method="post" action="/admin/pages/{{.Slug}}/delete" onsubmit="return confirm('{{msg $ "pages.confirm.delete" "Delete this page?"}}')">
               <button class="admin-inline-delete__button" type="submit">{{msg $ "common.delete"}}</button>
             </form>
@@ -47,7 +54,7 @@
         </tr>
         {{else}}
         <tr>
-          <td class="admin-table-empty" colspan="5">{{msg . "pages.no_pages" "No pages yet."}}</td>
+          <td class="admin-table-empty" colspan="6">{{msg . "pages.no_pages" "No pages yet."}}</td>
         </tr>
         {{end}}
       </tbody>

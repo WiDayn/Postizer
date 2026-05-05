@@ -35,11 +35,13 @@ type Store struct {
 	Posts          []*Post
 	AllPosts       []*Post
 	Pages          []*Page
+	AllPages       []*Page
 	Tags           []*Tag
 	Settings       Settings
 	PostsBySlug    map[string]*Post
 	AllPostsBySlug map[string]*Post
 	PagesBySlug    map[string]*Page
+	AllPagesBySlug map[string]*Page
 	TagsBySlug     map[string]*Tag
 }
 
@@ -113,6 +115,7 @@ type Page struct {
 	Date     time.Time
 	Updated  time.Time
 	Summary  string
+	Draft    bool
 	TOC      bool
 	HTML     template.HTML
 	Source   string
@@ -151,6 +154,7 @@ type PageDraft struct {
 	Updated       string `json:"updated"`
 	UpdatedManual bool   `json:"updated_manual"`
 	Summary       string `json:"summary"`
+	Draft         bool   `json:"draft"`
 	TOC           bool   `json:"toc"`
 	Body          string `json:"body"`
 }
@@ -168,6 +172,7 @@ func Load(root string) (*Store, error) {
 		PostsBySlug:    map[string]*Post{},
 		AllPostsBySlug: map[string]*Post{},
 		PagesBySlug:    map[string]*Page{},
+		AllPagesBySlug: map[string]*Page{},
 		TagsBySlug:     map[string]*Tag{},
 	}
 
@@ -189,6 +194,9 @@ func Load(root string) (*Store, error) {
 	})
 	sort.Slice(store.Pages, func(i, j int) bool {
 		return store.Pages[i].Title < store.Pages[j].Title
+	})
+	sort.Slice(store.AllPages, func(i, j int) bool {
+		return store.AllPages[i].Title < store.AllPages[j].Title
 	})
 	for _, tag := range store.TagsBySlug {
 		sort.Slice(tag.Posts, func(i, j int) bool {
@@ -653,13 +661,18 @@ func loadPages(dir string, md goldmark.Markdown, store *Store, location *time.Lo
 			Date:     date,
 			Updated:  updated,
 			Summary:  fm.get("summary", ""),
+			Draft:    fm.get("draft", "false") == "true",
 			TOC:      fm.get("toc", "false") == "true",
 			HTML:     htmlBody,
 			Source:   string(markdown),
 			FilePath: path,
 		}
-		store.Pages = append(store.Pages, page)
-		store.PagesBySlug[page.Slug] = page
+		store.AllPages = append(store.AllPages, page)
+		store.AllPagesBySlug[page.Slug] = page
+		if !page.Draft {
+			store.Pages = append(store.Pages, page)
+			store.PagesBySlug[page.Slug] = page
+		}
 		return nil
 	})
 }
@@ -1511,6 +1524,7 @@ func serializePage(draft PageDraft) string {
 		writeFrontMatter(&b, "updated", draft.Updated)
 	}
 	writeFrontMatter(&b, "summary", draft.Summary)
+	fmt.Fprintf(&b, "draft: %t\n", draft.Draft)
 	fmt.Fprintf(&b, "toc: %t\n", draft.TOC)
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimSpace(draft.Body))

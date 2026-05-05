@@ -331,7 +331,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin_dashboard.html", ViewData{Title: "Dashboard", TitleKey: "title.admin.dashboard", Store: store, Posts: store.AllPosts, Pages: store.Pages, Tags: store.Tags, Media: s.media.Items(), ActiveAdmin: "dashboard"})
+	s.render(w, "admin_dashboard.html", ViewData{Title: "Dashboard", TitleKey: "title.admin.dashboard", Store: store, Posts: store.AllPosts, Pages: store.AllPages, Tags: store.Tags, Media: s.media.Items(), ActiveAdmin: "dashboard"})
 }
 
 func (s *Server) adminEditor(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +360,7 @@ func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminPages(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin_pages.html", ViewData{Title: "Pages", TitleKey: "title.admin.pages", Store: store, Pages: store.Pages, ActiveAdmin: "pages"})
+	s.render(w, "admin_pages.html", ViewData{Title: "Pages", TitleKey: "title.admin.pages", Store: store, Pages: store.AllPages, ActiveAdmin: "pages"})
 }
 
 func (s *Server) adminNewPage(w http.ResponseWriter, r *http.Request) {
@@ -371,7 +371,7 @@ func (s *Server) adminNewPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminEditPage(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	store := s.currentStore()
-	if store.PagesBySlug[slug] == nil {
+	if store.AllPagesBySlug[slug] == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -505,17 +505,19 @@ func (s *Server) listPages(w http.ResponseWriter, r *http.Request) {
 		Date    string `json:"date"`
 		Updated string `json:"updated"`
 		Summary string `json:"summary"`
+		Draft   bool   `json:"draft"`
 		URL     string `json:"url"`
 	}
 	store := s.currentStore()
-	pages := make([]pageSummary, 0, len(store.Pages))
-	for _, p := range store.Pages {
+	pages := make([]pageSummary, 0, len(store.AllPages))
+	for _, p := range store.AllPages {
 		pages = append(pages, pageSummary{
 			Title:   p.Title,
 			Slug:    p.Slug,
 			Date:    formatInputDateTime(p.Date),
 			Updated: formatInputDateTime(p.Updated),
 			Summary: p.Summary,
+			Draft:   p.Draft,
 			URL:     "/pages/" + p.Slug,
 		})
 	}
@@ -525,7 +527,7 @@ func (s *Server) listPages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getPage(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	store := s.currentStore()
-	p := store.PagesBySlug[slug]
+	p := store.AllPagesBySlug[slug]
 	if p == nil {
 		http.NotFound(w, r)
 		return
@@ -536,6 +538,7 @@ func (s *Server) getPage(w http.ResponseWriter, r *http.Request) {
 		Date:    formatInputDateTime(p.Date),
 		Updated: formatInputDateTime(p.Updated),
 		Summary: p.Summary,
+		Draft:   p.Draft,
 		TOC:     p.TOC,
 		Body:    p.Source,
 	})
@@ -560,6 +563,7 @@ func (s *Server) savePage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"slug":    saved.Slug,
 		"url":     "/pages/" + saved.Slug,
+		"draft":   saved.Draft,
 		"date":    saved.Date,
 		"updated": saved.Updated,
 	})

@@ -114,6 +114,7 @@
   "pages.table.slug": "Slug",
   "pages.table.date": "Date",
   "pages.table.updated": "Updated",
+  "pages.table.status": "Status",
   "pages.table.actions": "Actions",
   "editor.heading": "Editor",
   "editor.heading.post": "Post Editor",

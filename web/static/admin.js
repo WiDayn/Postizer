@@ -266,11 +266,11 @@ function payload(draftOverride) {
     updated_manual: updatedTouched,
     summary: fields.summary.value.trim(),
     toc: fields.toc.checked,
+    draft: typeof draftOverride === "boolean" ? draftOverride : fields.draft.checked,
     body: editor.value
   };
   if (!isPageEditor) {
     data.tags = fields.tags.value.split(",").map((tag) => tag.trim()).filter(Boolean);
-    data.draft = typeof draftOverride === "boolean" ? draftOverride : fields.draft.checked;
   }
   return data;
 }
@@ -283,7 +283,7 @@ function fillForm(post) {
   fields.updated.value = post.updated || "";
   fields.tags.value = isPageEditor ? "" : (post.tags || []).join(", ");
   fields.summary.value = post.summary || "";
-  fields.draft.checked = isPageEditor ? false : Boolean(post.draft);
+  fields.draft.checked = Boolean(post.draft);
   fields.toc.checked = post.toc !== false;
   editor.value = post.body || "";
   updateDeleteButton();
@@ -313,7 +313,7 @@ function newPost() {
     updated: "",
     tags: [],
     summary: "",
-    draft: !isPageEditor,
+    draft: true,
     toc: true,
     body: "## Notes\n\n"
   });
@@ -332,11 +332,7 @@ async function savePost(draft) {
     setStatus(tr("editor.status.title_required", "Title required"));
     return;
   }
-  if (isPageEditor) {
-    setStatus(tr("editor.status.saving_page", "Saving page"));
-  } else {
-    setStatus(draft ? tr("editor.status.saving_draft", "Saving draft") : tr("editor.status.publishing", "Publishing"));
-  }
+  setStatus(draft ? tr("editor.status.saving_draft", "Saving draft") : tr("editor.status.publishing", "Publishing"));
   const response = await fetch(apiURL(apiBase), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -350,7 +346,7 @@ async function savePost(draft) {
   currentSlug = result.slug;
   setSlugDisplay(result.slug);
   updateDeleteButton();
-  if (!isPageEditor) fields.draft.checked = Boolean(result.draft);
+  fields.draft.checked = Boolean(result.draft);
   if (result.date) fields.date.value = result.date;
   if (result.updated) fields.updated.value = result.updated;
   updatedTouched = false;
@@ -358,11 +354,7 @@ async function savePost(draft) {
   history.replaceState(null, "", `${adminBase}/${result.slug}/edit`);
   await refreshPostLibrary(result.slug);
   setDirty(false);
-  if (isPageEditor) {
-    setStatus(tr("editor.status.page_saved", "Page saved"));
-  } else {
-    setStatus(result.draft ? tr("editor.status.draft_saved", "Draft saved") : tr("editor.status.published", "Published"));
-  }
+  setStatus(result.draft ? tr("editor.status.draft_saved", "Draft saved") : tr("editor.status.published", "Published"));
 }
 
 async function deleteCurrentPost() {
@@ -394,9 +386,7 @@ async function refreshPostLibrary(activeSlug) {
     button.classList.toggle("is-active", post.slug === activeSlug);
     button.innerHTML = "<strong></strong><span></span>";
     button.querySelector("strong").textContent = post.title;
-    button.querySelector("span").textContent = isPageEditor
-      ? displayDateTime(post.date)
-      : `${displayDateTime(post.date)} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`;
+    button.querySelector("span").textContent = `${displayDateTime(post.date)} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`;
     li.appendChild(button);
     postLibrary.appendChild(li);
   });
