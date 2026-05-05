@@ -1,44 +1,25 @@
 {{define "home.html"}}
 {{template "chromeStart" .}}
 <section class="front-page">
-  <div class="front-grid">
-    {{range $i, $post := .Posts}}
-      {{if eq $i 0}}
-      <article class="lead-story">
-        <p class="kicker">{{msg $ "home.lead_kicker"}}</p>
-        <h2><a href="{{postURL $post}}">{{$post.Title}}</a></h2>
-        <p>{{$post.Summary}}</p>
-        <div class="post-meta">
-          <time>{{date $post.Date}}</time>
-          <span>{{$post.ReadingTime}} {{msg $ "common.minute_suffix"}}</span>
-          {{range $post.Tags}}<span>#{{.}}</span>{{end}}
-        </div>
-      </article>
-      {{end}}
-    {{else}}
-      <article class="lead-story">
-        <p class="kicker">{{msg . "home.lead_kicker"}}</p>
-        <h2>{{msg . "home.empty.title"}}</h2>
-        <p>{{msg . "home.empty.body"}}</p>
-      </article>
+  {{if .Posts}}
+  <ol class="brief-list front-list">
+    {{range $post := .Posts}}
+    <li>
+      <time>{{date $post.Date}}</time>
+      <a href="{{postURL $post}}">{{$post.Title}}</a>
+      <span>{{$post.Summary}}</span>
+      <div class="post-meta">
+        {{range $post.Tags}}<span>#{{.}}</span>{{end}}
+      </div>
+    </li>
     {{end}}
-
-    {{if gt (len .Posts) 1}}
-      <section class="front-briefs">
-        <ol class="brief-list">
-          {{range $i, $post := .Posts}}
-            {{if ne $i 0}}
-            <li>
-              <time>{{date $post.Date}}</time>
-              <a href="{{postURL $post}}">{{$post.Title}}</a>
-              <span>{{$post.Summary}}</span>
-            </li>
-            {{end}}
-          {{end}}
-        </ol>
-      </section>
-    {{end}}
-  </div>
+  </ol>
+  {{else}}
+  <article class="front-empty">
+    <h2>{{msg . "home.empty.title"}}</h2>
+    <p>{{msg . "home.empty.body"}}</p>
+  </article>
+  {{end}}
 </section>
 {{template "chromeEnd" .}}
 {{end}}

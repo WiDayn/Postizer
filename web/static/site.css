@@ -1705,7 +1705,7 @@
   }
 
   .front-grid:has(.front-briefs) {
-    grid-template-columns: minmax(0, 1.45fr) minmax(16rem, .9fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .lead-story {
@@ -1713,8 +1713,10 @@
   }
 
   .front-grid:has(.front-briefs) .lead-story {
-    padding-right: 1rem;
-    border-right: 1px solid var(--rule);
+    padding-right: 0;
+    padding-bottom: 1rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
   }
 
   .lead-story h2 {
@@ -1787,6 +1789,22 @@
     color: var(--muted);
     font-size: .88rem;
     line-height: 1.25;
+  }
+
+  .front-list .post-meta {
+    margin-top: .15rem;
+    gap: .55rem;
+    font-size: .72rem;
+  }
+
+  .front-empty {
+    padding: 1rem 0;
+    border-bottom: 1px solid rgba(0, 0, 0, .45);
+  }
+
+  .front-empty h2 {
+    margin: 0 0 .35rem;
+    font-size: 1.45rem;
   }
 
   .page-header.compact h1 {
