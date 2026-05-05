@@ -10,18 +10,45 @@
     <h2>{{msg . "posts.all_posts"}}</h2>
     <span>{{len .Posts}}</span>
   </div>
-  <ol class="admin-table-list">
-    {{range .Posts}}
-    <li>
-      <a href="/admin/editor">{{.Title}}</a>
-      <span>{{.Slug}}</span>
-      <span>{{date .Date}}</span>
-      <span>{{if .Draft}}{{msg $ "common.draft"}}{{else}}{{msg $ "common.published"}}{{end}}</span>
-    </li>
-    {{else}}
-    <li>{{msg . "posts.no_posts"}}</li>
-    {{end}}
-  </ol>
+  <div class="admin-table-scroll">
+    <table class="admin-data-table admin-post-table">
+      <colgroup>
+        <col class="admin-post-col-title">
+        <col class="admin-post-col-slug">
+        <col class="admin-post-col-date">
+        <col class="admin-post-col-updated">
+        <col class="admin-post-col-status">
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col">{{msg . "posts.table.title" "Title"}}</th>
+          <th scope="col">{{msg . "posts.table.slug" "Slug"}}</th>
+          <th scope="col">{{msg . "posts.table.date" "Date"}}</th>
+          <th scope="col">{{msg . "posts.table.updated" "Updated"}}</th>
+          <th scope="col">{{msg . "posts.table.status" "Status"}}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Posts}}
+        <tr>
+          <td class="admin-post-table__title"><a href="/admin/editor">{{.Title}}</a></td>
+          <td class="admin-post-table__slug"><code>{{.Slug}}</code></td>
+          <td class="admin-post-table__date"><time>{{date .Date}}</time></td>
+          <td class="admin-post-table__updated">{{with date .Updated}}<time>{{.}}</time>{{else}}<span class="admin-table-muted">-</span>{{end}}</td>
+          <td class="admin-post-table__status">
+            <span class="admin-status-pill {{if .Draft}}admin-status-pill--draft{{else}}admin-status-pill--published{{end}}">
+              {{if .Draft}}{{msg $ "common.draft"}}{{else}}{{msg $ "common.published"}}{{end}}
+            </span>
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td class="admin-table-empty" colspan="5">{{msg . "posts.no_posts"}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
 </section>
 {{template "adminEnd" .}}
 {{end}}
