@@ -12,6 +12,13 @@ const wordCount = document.querySelector("#wordCount");
 const postLibrary = document.querySelector("#postLibrary");
 const postLibraryToggle = document.querySelector("#togglePostLibrary");
 const mediaStrip = document.querySelector("#mediaStrip");
+const contentKind = root && root.dataset.contentKind === "page" ? "page" : "post";
+const isPageEditor = contentKind === "page";
+const contentPlural = isPageEditor ? "pages" : "posts";
+const apiBase = `/admin/api/${contentPlural}`;
+const publicBase = `/${contentPlural}`;
+const adminBase = `/admin/${contentPlural}`;
+const initialSlug = (root && root.dataset.initialSlug) || "";
 const fields = {
   title: document.querySelector("#postTitle"),
   slug: document.querySelector("#postSlug"),
@@ -29,7 +36,7 @@ let slugTouched = false;
 let updatedTouched = false;
 let previewTimer = 0;
 let dirty = false;
-const postsCollapsedKey = "postizer.editor.postsCollapsed";
+const postsCollapsedKey = `postizer.editor.${contentPlural}Collapsed`;
 
 function tr(key, fallback) {
   if (window.postizerMessage) return window.postizerMessage(key, fallback);
@@ -66,7 +73,9 @@ function setPostLibraryCollapsed(collapsed) {
   if (!root || !postLibraryToggle) return;
   root.dataset.library = collapsed ? "collapsed" : "expanded";
   postLibraryToggle.setAttribute("aria-expanded", String(!collapsed));
-  postLibraryToggle.title = collapsed ? tr("editor.library.expand", "Expand posts") : tr("editor.library.collapse", "Collapse posts");
+  const expandFallback = isPageEditor ? "Expand pages" : "Expand posts";
+  const collapseFallback = isPageEditor ? "Collapse pages" : "Collapse posts";
+  postLibraryToggle.title = collapsed ? tr("editor.library.expand", expandFallback) : tr("editor.library.collapse", collapseFallback);
   postLibraryToggle.textContent = collapsed ? ">" : "<";
   try {
     localStorage.setItem(postsCollapsedKey, collapsed ? "1" : "0");
@@ -213,18 +222,21 @@ function applyCommand(command) {
 }
 
 function payload(draftOverride) {
-  return {
+  const data = {
     title: fields.title.value.trim(),
     slug: slugify(fields.slug.value || fields.title.value),
     date: fields.date.value || nowMinute(),
     updated: fields.updated.value,
     updated_manual: updatedTouched,
-    tags: fields.tags.value.split(",").map((tag) => tag.trim()).filter(Boolean),
     summary: fields.summary.value.trim(),
-    draft: typeof draftOverride === "boolean" ? draftOverride : fields.draft.checked,
     toc: fields.toc.checked,
     body: editor.value
   };
+  if (!isPageEditor) {
+    data.tags = fields.tags.value.split(",").map((tag) => tag.trim()).filter(Boolean);
+    data.draft = typeof draftOverride === "boolean" ? draftOverride : fields.draft.checked;
+  }
+  return data;
 }
 
 function fillForm(post) {
@@ -235,9 +247,9 @@ function fillForm(post) {
   fields.slug.value = post.slug || "";
   fields.date.value = post.date || nowMinute();
   fields.updated.value = post.updated || "";
-  fields.tags.value = (post.tags || []).join(", ");
+  fields.tags.value = isPageEditor ? "" : (post.tags || []).join(", ");
   fields.summary.value = post.summary || "";
-  fields.draft.checked = Boolean(post.draft);
+  fields.draft.checked = isPageEditor ? false : Boolean(post.draft);
   fields.toc.checked = post.toc !== false;
   editor.value = post.body || "";
   updateViewLink();
@@ -248,12 +260,13 @@ function fillForm(post) {
 
 async function loadPost(slug) {
   setStatus(tr("editor.status.loading", "Loading"));
-  const response = await fetch(apiURL(`/admin/api/posts/${slug}`));
+  const response = await fetch(apiURL(`${apiBase}/${slug}`));
   if (!response.ok) throw new Error(await response.text());
   fillForm(await response.json());
   postLibrary.querySelectorAll("button").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.slug === slug);
   });
+  if (slug) history.replaceState(null, "", `${adminBase}/${slug}/edit`);
   setStatus(tr("editor.status.ready", "Ready"));
 }
 
@@ -265,13 +278,14 @@ function newPost() {
     updated: "",
     tags: [],
     summary: "",
-    draft: true,
+    draft: !isPageEditor,
     toc: true,
     body: "## Notes\n\n"
   });
   currentSlug = "";
   slugTouched = false;
   postLibrary.querySelectorAll("button").forEach((button) => button.classList.remove("is-active"));
+  history.replaceState(null, "", `${adminBase}/new`);
   fields.title.focus();
   setStatus(tr("editor.status.new", "New"));
   setDirty(true);
@@ -284,8 +298,12 @@ async function savePost(draft) {
     setStatus(tr("editor.status.title_required", "Title required"));
     return;
   }
-  setStatus(draft ? tr("editor.status.saving_draft", "Saving draft") : tr("editor.status.publishing", "Publishing"));
-  const response = await fetch(apiURL("/admin/api/posts"), {
+  if (isPageEditor) {
+    setStatus(tr("editor.status.saving_page", "Saving page"));
+  } else {
+    setStatus(draft ? tr("editor.status.saving_draft", "Saving draft") : tr("editor.status.publishing", "Publishing"));
+  }
+  const response = await fetch(apiURL(apiBase), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
@@ -297,18 +315,23 @@ async function savePost(draft) {
   const result = await response.json();
   currentSlug = result.slug;
   fields.slug.value = result.slug;
-  fields.draft.checked = Boolean(result.draft);
+  if (!isPageEditor) fields.draft.checked = Boolean(result.draft);
   if (result.date) fields.date.value = result.date;
   if (result.updated) fields.updated.value = result.updated;
   updatedTouched = false;
   updateViewLink();
+  history.replaceState(null, "", `${adminBase}/${result.slug}/edit`);
   await refreshPostLibrary(result.slug);
   setDirty(false);
-  setStatus(result.draft ? tr("editor.status.draft_saved", "Draft saved") : tr("editor.status.published", "Published"));
+  if (isPageEditor) {
+    setStatus(tr("editor.status.page_saved", "Page saved"));
+  } else {
+    setStatus(result.draft ? tr("editor.status.draft_saved", "Draft saved") : tr("editor.status.published", "Published"));
+  }
 }
 
 async function refreshPostLibrary(activeSlug) {
-  const response = await fetch(apiURL("/admin/api/posts"));
+  const response = await fetch(apiURL(apiBase));
   if (!response.ok) return;
   const posts = await response.json();
   postLibrary.innerHTML = "";
@@ -321,7 +344,9 @@ async function refreshPostLibrary(activeSlug) {
     button.classList.toggle("is-active", post.slug === activeSlug);
     button.innerHTML = "<strong></strong><span></span>";
     button.querySelector("strong").textContent = post.title;
-    button.querySelector("span").textContent = `${displayDateTime(post.date)} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`;
+    button.querySelector("span").textContent = isPageEditor
+      ? displayDateTime(post.date)
+      : `${displayDateTime(post.date)} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`;
     li.appendChild(button);
     postLibrary.appendChild(li);
   });
@@ -364,7 +389,7 @@ function updateCounts() {
 
 function updateViewLink() {
   const slug = slugify(fields.slug.value || fields.title.value || currentSlug);
-  fields.view.href = slug ? `/posts/${slug}` : "/";
+  fields.view.href = slug ? `${publicBase}/${slug}` : "/";
 }
 
 function afterEdit() {
@@ -550,9 +575,8 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 
-const firstPost = postLibrary.querySelector("button[data-slug]");
-if (firstPost) {
-  loadPost(firstPost.dataset.slug).catch(() => newPost());
+if (initialSlug) {
+  loadPost(initialSlug).catch(() => newPost());
 } else {
   newPost();
 }

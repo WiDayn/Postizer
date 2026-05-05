@@ -85,6 +85,7 @@ type Post struct {
 type Page struct {
 	Title    string
 	Slug     string
+	Date     time.Time
 	Updated  time.Time
 	Summary  string
 	TOC      bool
@@ -114,6 +115,17 @@ type PostDraft struct {
 	Draft         bool     `json:"draft"`
 	TOC           bool     `json:"toc"`
 	Body          string   `json:"body"`
+}
+
+type PageDraft struct {
+	Title         string `json:"title"`
+	Slug          string `json:"slug"`
+	Date          string `json:"date"`
+	Updated       string `json:"updated"`
+	UpdatedManual bool   `json:"updated_manual"`
+	Summary       string `json:"summary"`
+	TOC           bool   `json:"toc"`
+	Body          string `json:"body"`
 }
 
 func Load(root string) (*Store, error) {
@@ -423,10 +435,16 @@ func loadPages(dir string, md goldmark.Markdown, store *Store, location *time.Lo
 		if err != nil {
 			return err
 		}
+		updated := parseDate(fm.get("updated", ""), location)
+		date := parseDate(fm.get("date", ""), location)
+		if date.IsZero() {
+			date = updated
+		}
 		page := &Page{
 			Title:    fm.get("title", slug),
 			Slug:     slug,
-			Updated:  parseDate(fm.get("updated", ""), location),
+			Date:     date,
+			Updated:  updated,
 			Summary:  fm.get("summary", ""),
 			TOC:      fm.get("toc", "false") == "true",
 			HTML:     htmlBody,
@@ -1093,26 +1111,74 @@ func SavePost(root string, draft PostDraft) (PostDraft, error) {
 		draft.Updated = FormatInputDateTime(updated)
 	}
 
-	postsDir := filepath.Join(root, "posts")
-	if err := os.MkdirAll(postsDir, 0755); err != nil {
-		return PostDraft{}, err
-	}
-	target := filepath.Join(postsDir, draft.Slug+".md")
-	cleanPostsDir, err := filepath.Abs(postsDir)
-	if err != nil {
-		return PostDraft{}, err
-	}
-	cleanTarget, err := filepath.Abs(target)
-	if err != nil {
-		return PostDraft{}, err
-	}
-	if !strings.HasPrefix(cleanTarget, cleanPostsDir+string(os.PathSeparator)) {
-		return PostDraft{}, fmt.Errorf("post path escapes content directory")
-	}
-	if err := os.WriteFile(cleanTarget, []byte(serializePost(draft)), 0644); err != nil {
+	if err := writeContentFile(root, "posts", draft.Slug, serializePost(draft)); err != nil {
 		return PostDraft{}, err
 	}
 	return draft, nil
+}
+
+func SavePage(root string, draft PageDraft) (PageDraft, error) {
+	draft.Slug = NormalizeSlug(draft.Slug)
+	if draft.Slug == "" {
+		draft.Slug = NormalizeSlug(draft.Title)
+	}
+	if !ValidSlug(draft.Slug) {
+		return PageDraft{}, fmt.Errorf("invalid page slug %q", draft.Slug)
+	}
+	if strings.TrimSpace(draft.Title) == "" {
+		return PageDraft{}, fmt.Errorf("title is required")
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		return PageDraft{}, err
+	}
+	location := TimeLocation(settings)
+	now := time.Now().In(location).Truncate(time.Minute)
+
+	if draft.Date == "" {
+		draft.Date = FormatInputDateTime(now)
+	}
+	date, err := parseContentTime(draft.Date, location)
+	if err != nil {
+		return PageDraft{}, fmt.Errorf("invalid date %q", draft.Date)
+	}
+	draft.Date = FormatInputDateTime(date)
+
+	if !draft.UpdatedManual || strings.TrimSpace(draft.Updated) == "" {
+		draft.Updated = FormatInputDateTime(now)
+	} else {
+		updated, err := parseContentTime(draft.Updated, location)
+		if err != nil {
+			return PageDraft{}, fmt.Errorf("invalid updated date %q", draft.Updated)
+		}
+		draft.Updated = FormatInputDateTime(updated)
+	}
+
+	if err := writeContentFile(root, "pages", draft.Slug, serializePage(draft)); err != nil {
+		return PageDraft{}, err
+	}
+	return draft, nil
+}
+
+func writeContentFile(root, section, slug, content string) error {
+	contentDir := filepath.Join(root, section)
+	if err := os.MkdirAll(contentDir, 0755); err != nil {
+		return err
+	}
+	target := filepath.Join(contentDir, slug+".md")
+	cleanContentDir, err := filepath.Abs(contentDir)
+	if err != nil {
+		return err
+	}
+	cleanTarget, err := filepath.Abs(target)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(cleanTarget, cleanContentDir+string(os.PathSeparator)) {
+		return fmt.Errorf("%s path escapes content directory", strings.TrimSuffix(section, "s"))
+	}
+	return os.WriteFile(cleanTarget, []byte(content), 0644)
 }
 
 func serializePost(draft PostDraft) string {
@@ -1134,6 +1200,23 @@ func serializePost(draft PostDraft) string {
 	b.WriteString("]\n")
 	writeFrontMatter(&b, "summary", draft.Summary)
 	fmt.Fprintf(&b, "draft: %t\n", draft.Draft)
+	fmt.Fprintf(&b, "toc: %t\n", draft.TOC)
+	b.WriteString("---\n\n")
+	b.WriteString(strings.TrimSpace(draft.Body))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func serializePage(draft PageDraft) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	writeFrontMatter(&b, "title", draft.Title)
+	writeFrontMatter(&b, "slug", draft.Slug)
+	writeFrontMatter(&b, "date", draft.Date)
+	if draft.Updated != "" {
+		writeFrontMatter(&b, "updated", draft.Updated)
+	}
+	writeFrontMatter(&b, "summary", draft.Summary)
 	fmt.Fprintf(&b, "toc: %t\n", draft.TOC)
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimSpace(draft.Body))

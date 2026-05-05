@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{pageTitle .}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=75">
+  <link rel="stylesheet" href="/static/site.css?v=79">
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
@@ -51,7 +51,7 @@
     <nav class="admin-nav" aria-label="Admin">
       <a class="{{if eq .ActiveAdmin "dashboard"}}is-active{{end}}" href="/admin">{{msg . "nav.dashboard"}}</a>
       <a class="{{if eq .ActiveAdmin "posts"}}is-active{{end}}" href="/admin/posts">{{msg . "nav.posts"}}</a>
-      <a class="{{if eq .ActiveAdmin "editor"}}is-active{{end}}" href="/admin/editor">{{msg . "nav.editor"}}</a>
+      <a class="{{if eq .ActiveAdmin "pages"}}is-active{{end}}" href="/admin/pages">{{msg . "nav.pages" "Pages"}}</a>
       <a class="{{if eq .ActiveAdmin "media"}}is-active{{end}}" href="/admin/media">{{msg . "nav.media"}}</a>
       <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
       <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>

@@ -56,6 +56,8 @@ type ViewData struct {
 	ActiveAdmin string
 	Error       string
 	Remember    bool
+	EditorKind  string
+	EditorSlug  string
 }
 
 type authConfig struct {
@@ -105,6 +107,11 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin", s.requireAdmin(http.HandlerFunc(s.adminDashboard)))
 	mux.Handle("GET /admin/editor", s.requireAdmin(http.HandlerFunc(s.adminEditor)))
 	mux.Handle("GET /admin/posts", s.requireAdmin(http.HandlerFunc(s.adminPosts)))
+	mux.Handle("GET /admin/posts/new", s.requireAdmin(http.HandlerFunc(s.adminNewPost)))
+	mux.Handle("GET /admin/posts/{slug}/edit", s.requireAdmin(http.HandlerFunc(s.adminEditPost)))
+	mux.Handle("GET /admin/pages", s.requireAdmin(http.HandlerFunc(s.adminPages)))
+	mux.Handle("GET /admin/pages/new", s.requireAdmin(http.HandlerFunc(s.adminNewPage)))
+	mux.Handle("GET /admin/pages/{slug}/edit", s.requireAdmin(http.HandlerFunc(s.adminEditPage)))
 	mux.Handle("GET /admin/media", s.requireAdmin(http.HandlerFunc(s.adminMedia)))
 	mux.Handle("GET /admin/appearance", s.requireAdmin(http.HandlerFunc(s.adminAppearance)))
 	mux.Handle("GET /admin/plugins", s.requireAdmin(http.HandlerFunc(s.adminPlugins)))
@@ -112,6 +119,9 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.listPosts)))
 	mux.Handle("GET /admin/api/posts/{slug}", s.requireAdmin(http.HandlerFunc(s.getPost)))
 	mux.Handle("POST /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.savePost)))
+	mux.Handle("GET /admin/api/pages", s.requireAdmin(http.HandlerFunc(s.listPages)))
+	mux.Handle("GET /admin/api/pages/{slug}", s.requireAdmin(http.HandlerFunc(s.getPage)))
+	mux.Handle("POST /admin/api/pages", s.requireAdmin(http.HandlerFunc(s.savePage)))
 	mux.Handle("POST /admin/api/preview", s.requireAdmin(http.HandlerFunc(s.previewMarkdown)))
 	mux.Handle("GET /admin/api/media", s.requireAdmin(http.HandlerFunc(s.listMedia)))
 	mux.Handle("POST /admin/api/media", s.requireAdmin(http.HandlerFunc(s.uploadMedia)))
@@ -307,13 +317,47 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminEditor(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/admin/posts/new", http.StatusSeeOther)
+}
+
+func (s *Server) adminNewPost(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin.html", ViewData{Title: "Editor", TitleKey: "title.admin.editor", Store: store, Media: s.media.Items(), ActiveAdmin: "editor"})
+	s.render(w, "admin.html", ViewData{Title: "Editor", TitleKey: "title.admin.editor", Store: store, Media: s.media.Items(), ActiveAdmin: "posts", EditorKind: "post"})
+}
+
+func (s *Server) adminEditPost(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	store := s.currentStore()
+	if store.AllPostsBySlug[slug] == nil {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, "admin.html", ViewData{Title: "Editor", TitleKey: "title.admin.editor", Store: store, Media: s.media.Items(), ActiveAdmin: "posts", EditorKind: "post", EditorSlug: slug})
 }
 
 func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	s.render(w, "admin_posts.html", ViewData{Title: "Posts", TitleKey: "title.admin.posts", Store: store, Posts: store.AllPosts, ActiveAdmin: "posts"})
+}
+
+func (s *Server) adminPages(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.render(w, "admin_pages.html", ViewData{Title: "Pages", TitleKey: "title.admin.pages", Store: store, Pages: store.Pages, ActiveAdmin: "pages"})
+}
+
+func (s *Server) adminNewPage(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.render(w, "admin.html", ViewData{Title: "Editor", TitleKey: "title.admin.editor", Store: store, Media: s.media.Items(), ActiveAdmin: "pages", EditorKind: "page"})
+}
+
+func (s *Server) adminEditPage(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	store := s.currentStore()
+	if store.PagesBySlug[slug] == nil {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, "admin.html", ViewData{Title: "Editor", TitleKey: "title.admin.editor", Store: store, Media: s.media.Items(), ActiveAdmin: "pages", EditorKind: "page", EditorSlug: slug})
 }
 
 func (s *Server) adminMedia(w http.ResponseWriter, r *http.Request) {
@@ -409,6 +453,77 @@ func (s *Server) savePost(w http.ResponseWriter, r *http.Request) {
 		"slug":    saved.Slug,
 		"url":     "/posts/" + saved.Slug,
 		"draft":   saved.Draft,
+		"date":    saved.Date,
+		"updated": saved.Updated,
+	})
+}
+
+func (s *Server) listPages(w http.ResponseWriter, r *http.Request) {
+	type pageSummary struct {
+		Title   string `json:"title"`
+		Slug    string `json:"slug"`
+		Date    string `json:"date"`
+		Updated string `json:"updated"`
+		Summary string `json:"summary"`
+		URL     string `json:"url"`
+	}
+	store := s.currentStore()
+	pages := make([]pageSummary, 0, len(store.Pages))
+	for _, p := range store.Pages {
+		pages = append(pages, pageSummary{
+			Title:   p.Title,
+			Slug:    p.Slug,
+			Date:    formatInputDateTime(p.Date),
+			Updated: formatInputDateTime(p.Updated),
+			Summary: p.Summary,
+			URL:     "/pages/" + p.Slug,
+		})
+	}
+	writeJSON(w, pages)
+}
+
+func (s *Server) getPage(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	store := s.currentStore()
+	p := store.PagesBySlug[slug]
+	if p == nil {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, site.PageDraft{
+		Title:   p.Title,
+		Slug:    p.Slug,
+		Date:    formatInputDateTime(p.Date),
+		Updated: formatInputDateTime(p.Updated),
+		Summary: p.Summary,
+		TOC:     p.TOC,
+		Body:    p.Source,
+	})
+}
+
+func (s *Server) savePage(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+	var draft site.PageDraft
+	if err := json.NewDecoder(r.Body).Decode(&draft); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	draft.Slug = site.NormalizeSlug(draft.Slug)
+	if draft.Slug == "" {
+		draft.Slug = site.NormalizeSlug(draft.Title)
+	}
+	saved, err := site.SavePage(s.contentRoot, draft)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"slug":    saved.Slug,
+		"url":     "/pages/" + saved.Slug,
 		"date":    saved.Date,
 		"updated": saved.Updated,
 	})

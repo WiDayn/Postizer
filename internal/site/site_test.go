@@ -82,6 +82,93 @@ func TestSavePostPreservesManualUpdatedMinute(t *testing.T) {
 	}
 }
 
+func TestSavePageAndLoad(t *testing.T) {
+	root := t.TempDir()
+	saved, err := SavePage(root, PageDraft{
+		Title:         "About Lab",
+		Slug:          "about-lab",
+		Date:          "2026-05-04 09:30",
+		Updated:       "2026-05-05 18:45",
+		UpdatedManual: true,
+		Summary:       "A page edited from the admin.",
+		TOC:           true,
+		Body:          "## About\n\nPage content.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Updated, "2026-05-05T18:45"; got != want {
+		t.Fatalf("updated = %q, want %q", got, want)
+	}
+	if got, want := saved.Date, "2026-05-04T09:30"; got != want {
+		t.Fatalf("date = %q, want %q", got, want)
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "pages", "about-lab.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`title: "About Lab"`,
+		`slug: "about-lab"`,
+		`date: "2026-05-04T09:30"`,
+		`updated: "2026-05-05T18:45"`,
+		`toc: true`,
+		"## About",
+	} {
+		if !strings.Contains(string(body), expected) {
+			t.Fatalf("saved page did not contain %q:\n%s", expected, body)
+		}
+	}
+
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := store.PagesBySlug["about-lab"]
+	if page == nil {
+		t.Fatal("page was not loaded")
+	}
+	if got, want := FormatInputDateTime(page.Date), "2026-05-04T09:30"; got != want {
+		t.Fatalf("loaded page date = %q, want %q", got, want)
+	}
+	if got := page.Source; strings.HasPrefix(got, "\n") {
+		t.Fatalf("loaded page source had a leading blank line: %q", got)
+	}
+}
+
+func TestLoadPageFallsBackToUpdatedForLegacyDate(t *testing.T) {
+	root := t.TempDir()
+	pageDir := filepath.Join(root, "pages")
+	if err := os.MkdirAll(pageDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := `---
+title: "Legacy Page"
+slug: "legacy-page"
+updated: "2026-05-05T12:30"
+summary: ""
+toc: false
+---
+
+Body.
+`
+	if err := os.WriteFile(filepath.Join(pageDir, "legacy-page.md"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := store.PagesBySlug["legacy-page"]
+	if page == nil {
+		t.Fatal("page was not loaded")
+	}
+	if got, want := FormatInputDateTime(page.Date), "2026-05-05T12:30"; got != want {
+		t.Fatalf("legacy page date = %q, want %q", got, want)
+	}
+}
+
 func TestSplitFrontMatterRemovesSeparatorBlankLine(t *testing.T) {
 	_, markdown := splitFrontMatter([]byte("---\ntitle: \"Sample\"\n---\n\n## Heading\n\nBody."))
 	if got, want := string(markdown), "## Heading\n\nBody."; got != want {

@@ -1,30 +1,43 @@
 {{define "admin.html"}}
 {{template "adminStart" .}}
-<section class="editor-shell" data-mode="split" data-library="expanded" data-time-zone="{{.Store.Settings.TimeZone}}">
+{{$isPage := eq .EditorKind "page"}}
+<section class="editor-shell" data-mode="split" data-library="expanded" data-time-zone="{{.Store.Settings.TimeZone}}" data-content-kind="{{if $isPage}}page{{else}}post{{end}}" data-initial-slug="{{.EditorSlug}}">
   <header class="editor-topbar">
     <div>
       <p class="kicker">{{msg . "admin.kicker"}}</p>
-      <h1>{{msg . "editor.heading"}}</h1>
+      <h1>{{if $isPage}}{{msg . "editor.heading.page" "Page Editor"}}{{else}}{{msg . "editor.heading.post" "Post Editor"}}{{end}}</h1>
     </div>
     <div class="editor-actions">
       <span id="editorStatus" class="ui-status">{{msg . "editor.status.ready"}}</span>
-      <button type="button" id="newPostButton" class="ui-button">{{msg . "editor.new"}}</button>
-      <button type="button" id="saveDraftButton" class="ui-button">{{msg . "editor.save_draft"}}</button>
-      <button type="button" id="publishButton" class="ui-button ui-button--primary">{{msg . "editor.publish"}}</button>
+      <button type="button" id="newPostButton" class="ui-button">{{if $isPage}}{{msg . "editor.new_page" "New Page"}}{{else}}{{msg . "editor.new_post" "New Post"}}{{end}}</button>
+      <button type="button" id="saveDraftButton" class="ui-button" {{if $isPage}}hidden{{end}}>{{msg . "editor.save_draft"}}</button>
+      <button type="button" id="publishButton" class="ui-button ui-button--primary">{{if $isPage}}{{msg . "editor.save_page" "Save Page"}}{{else}}{{msg . "editor.publish"}}{{end}}</button>
       <a id="viewPostLink" class="ui-button ui-button--ghost" href="/" target="_blank">{{msg . "editor.view"}}</a>
     </div>
   </header>
 
   <div class="editor-workbench">
-    <aside id="editorLibrary" class="editor-library ui-panel" aria-label="{{msg . "editor.library.posts"}}">
+    <aside id="editorLibrary" class="editor-library ui-panel" aria-label="{{if $isPage}}{{msg . "editor.library.pages" "Pages"}}{{else}}{{msg . "editor.library.posts"}}{{end}}">
       <div class="ui-panel__head">
         <div class="editor-library-title">
-          <h2>{{msg . "editor.library.posts"}}</h2>
-          <span>{{len .Store.AllPosts}}</span>
+          <h2>{{if $isPage}}{{msg . "editor.library.pages" "Pages"}}{{else}}{{msg . "editor.library.posts"}}{{end}}</h2>
+          <span>{{if $isPage}}{{len .Store.Pages}}{{else}}{{len .Store.AllPosts}}{{end}}</span>
         </div>
         <button id="togglePostLibrary" class="ui-button ui-button--ghost editor-collapse-button" type="button" aria-controls="postLibrary" aria-expanded="true" title="{{msg . "editor.library.collapse"}}">&lt;</button>
       </div>
       <ol id="postLibrary" class="editor-post-list">
+        {{if $isPage}}
+        {{range .Store.Pages}}
+        <li>
+          <button type="button" class="ui-list-button" data-slug="{{.Slug}}">
+            <strong>{{.Title}}</strong>
+            <span>{{date .Date}}</span>
+          </button>
+        </li>
+        {{else}}
+        <li class="empty">{{msg . "editor.library.pages_empty" "No pages"}}</li>
+        {{end}}
+        {{else}}
         {{range .Store.AllPosts}}
         <li>
           <button type="button" class="ui-list-button" data-slug="{{.Slug}}">
@@ -35,13 +48,14 @@
         {{else}}
         <li class="empty">{{msg . "editor.library.empty"}}</li>
         {{end}}
+        {{end}}
       </ol>
     </aside>
 
     <div class="editor-main">
       <input id="postTitle" class="title-field ui-input" type="text" placeholder="{{msg . "editor.title_placeholder"}}">
       <div class="permalink-row">
-        <span>/posts/</span>
+        <span>{{if $isPage}}/pages/{{else}}/posts/{{end}}</span>
         <input id="postSlug" class="ui-input" type="text" inputmode="latin" autocomplete="off">
       </div>
 
@@ -87,7 +101,7 @@
           <span>{{msg . "editor.settings.updated"}}</span>
           <input id="postUpdated" class="ui-input" type="datetime-local">
         </label>
-        <label class="ui-field">
+        <label class="ui-field" {{if $isPage}}hidden{{end}}>
           <span>{{msg . "editor.settings.tags"}}</span>
           <input id="postTags" class="ui-input" type="text" placeholder="{{msg . "editor.settings.tags_placeholder"}}">
         </label>
@@ -95,7 +109,7 @@
           <span>{{msg . "editor.settings.summary"}}</span>
           <textarea id="postSummary" class="ui-textarea" rows="5"></textarea>
         </label>
-        <label class="ui-check">
+        <label class="ui-check" {{if $isPage}}hidden{{end}}>
           <input id="postDraft" type="checkbox">
           <span>{{msg . "editor.settings.draft"}}</span>
         </label>
@@ -130,6 +144,6 @@
     </aside>
   </div>
 </section>
-<script defer src="/static/admin.js?v=11"></script>
+<script defer src="/static/admin.js?v=13"></script>
 {{template "adminEnd" .}}
 {{end}}

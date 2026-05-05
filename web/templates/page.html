@@ -4,7 +4,14 @@
   <header class="article-header">
     <p class="kicker">{{msg . "page.kicker"}}</p>
     <h1>{{.Page.Title}}</h1>
-    {{if date .Page.Updated}}<div class="post-meta">{{msg . "page.updated"}} <time>{{date .Page.Updated}}</time></div>{{end}}
+    {{$pageDate := date .Page.Date}}
+    {{$updated := date .Page.Updated}}
+    {{if or $pageDate $updated}}
+    <div class="post-meta">
+      {{if $pageDate}}<time>{{$pageDate}}</time>{{end}}
+      {{if and $updated (ne $updated $pageDate)}}<span>{{msg . "page.updated"}} <time>{{$updated}}</time></span>{{end}}
+    </div>
+    {{end}}
   </header>
   <div class="article-body js-math">{{.Page.HTML}}</div>
 </article>

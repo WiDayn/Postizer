@@ -4,8 +4,11 @@
   <header class="article-header">
     <p class="kicker">{{msg . "post.kicker"}}</p>
     <h1>{{.Post.Title}}</h1>
+    {{$postDate := date .Post.Date}}
+    {{$updated := date .Post.Updated}}
     <div class="post-meta">
-      <time>{{date .Post.Date}}</time>
+      {{if $postDate}}<time>{{$postDate}}</time>{{end}}
+      {{if and $updated (ne $updated $postDate)}}<span>{{msg . "post.updated" "Updated"}} <time>{{$updated}}</time></span>{{end}}
       <span>{{.Post.ReadingTime}} {{msg . "common.minute_suffix"}}</span>
       {{range .Post.Tags}}<a href="/tags/{{.}}">#{{.}}</a>{{end}}
     </div>

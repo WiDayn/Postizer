@@ -521,6 +521,14 @@
     margin-bottom: .75rem;
   }
 
+  .admin-panel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: center;
+    justify-content: end;
+  }
+
   .admin-table-list {
     margin: 0;
     padding: 0;
@@ -581,7 +589,7 @@
     background: var(--surface-soft);
   }
 
-  .admin-data-table a {
+  .admin-post-table__title a {
     color: var(--ink);
     font-family: var(--font-heading);
     font-size: 1rem;
@@ -602,6 +610,10 @@
   }
 
   .admin-post-col-status {
+    width: 7.25rem;
+  }
+
+  .admin-post-col-actions {
     width: 7.25rem;
   }
 
@@ -634,6 +646,24 @@
   .admin-status-pill--published {
     background: var(--inverse);
     color: var(--inverse-ink);
+  }
+
+  .admin-table-actions {
+    white-space: nowrap;
+  }
+
+  .admin-table-actions a {
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: .76rem;
+    font-weight: 400;
+    line-height: 1;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+
+  .admin-table-actions a + a {
+    margin-left: .45rem;
   }
 
   .admin-table-muted {

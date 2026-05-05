@@ -25,12 +25,12 @@
 <section class="ui-panel admin-panel">
   <div class="ui-panel__head">
     <h2>{{msg . "dashboard.recent_posts"}}</h2>
-    <a href="/admin/editor">{{msg . "dashboard.new_edit"}}</a>
+    <a href="/admin/posts">{{msg . "dashboard.new_edit"}}</a>
   </div>
   <ol class="admin-table-list">
     {{range .Store.AllPosts}}
     <li>
-      <a href="/admin/editor">{{.Title}}</a>
+      <a href="/admin/posts/{{.Slug}}/edit">{{.Title}}</a>
       <span>{{date .Date}}</span>
       <span>{{if .Draft}}{{msg $ "common.draft"}}{{else}}{{msg $ "common.published"}}{{end}}</span>
     </li>
