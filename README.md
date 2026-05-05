@@ -64,11 +64,11 @@ The admin editor at `/admin` includes:
 - Dedicated admin shell with sidebar pages.
 - Dashboard, Posts, Editor, Media, and Settings sections.
 - Post library with draft/published state.
-- Title, slug, date, updated date, tags, summary, draft, and TOC fields.
+- Title, automatic URL path with numeric duplicate suffixes, date, updated date, tags, summary, draft, and TOC fields.
 - Markdown toolbar.
 - Edit, split, and preview modes.
 - Server-rendered live preview using the same Markdown pipeline as public posts.
-- Save draft and publish actions that write to `content/posts/{slug}.md`.
+- Save draft, publish, and delete actions for files in `content/posts/{title-slug}.md`.
 - Media upload, recent media thumbnails, click-to-insert, and paste-to-upload.
 - Media library upload, rename, caption/alt editing, figure copying, and delete actions.
 - Optional home image upload in Settings for the front page image band.

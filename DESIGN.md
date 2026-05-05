@@ -222,6 +222,11 @@ Editor routes and APIs:
 - `GET /admin/api/posts` list posts.
 - `GET /admin/api/posts/{slug}` get one post draft.
 - `POST /admin/api/posts` create/update post.
+- `DELETE /admin/api/posts/{slug}` delete one post draft or published post.
+- `GET /admin/api/pages` list pages.
+- `GET /admin/api/pages/{slug}` get one page draft.
+- `POST /admin/api/pages` create/update page.
+- `DELETE /admin/api/pages/{slug}` delete one page.
 - `POST /admin/api/preview` render Markdown preview.
 - `POST /admin/api/home-image` upload and enable the home image band.
 - `DELETE /admin/api/home-image` clear the home image band.
@@ -252,7 +257,7 @@ Implementation rules:
 - Serve only the clean extensionless public URLs.
 - Emit extensionless URLs in templates, RSS, sitemap, search index, and admin view links.
 - Do not add `.html` compatibility redirects unless a migration explicitly requires them.
-- Validate slugs with a conservative pattern such as `^[a-z0-9][a-z0-9-]*$`.
+- Validate slugs as URL-safe title segments made from letters, numbers, and hyphens.
 - Do not map arbitrary public paths directly to the filesystem.
 
 ## Backend Structure
@@ -359,16 +364,17 @@ Admin shell:
 
 Core areas:
 
-- Top action bar: current save state, new post, save draft, publish, and view published URL.
+- Top action bar: current save state, new post, delete, save draft, publish, and view published URL.
 - Post library: compact list of existing posts with date and draft/published state.
-- Writing surface: large title input, pseudo-static permalink editor, Markdown toolbar, source editor, and live preview.
+- Writing surface: large title input, automatic pseudo-static permalink display, Markdown toolbar, source editor, and live preview.
 - Document settings: date, updated date, tags, summary, draft state, and TOC toggle.
 - Media panel: recent media thumbnails, direct upload, click-to-insert, and paste-to-upload from the editor.
 
 Editor behavior:
 
-- Auto-generate slug from title until the slug field is manually edited.
+- Generate the slug from the title on every save, replacing separators with hyphens and adding a numeric suffix when needed.
 - Save posts back to `content/posts/{slug}.md`.
+- Delete posts and pages from their content folders, then reload the in-memory index.
 - Reload the in-memory content index after saving.
 - Render preview through the same server-side Markdown pipeline as public pages.
 - Support edit-only, split, and preview modes.

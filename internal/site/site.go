@@ -3,6 +3,7 @@ package site
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -28,7 +29,7 @@ const (
 	legacyDateOnlyLayout = "2006-01-02"
 )
 
-var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var slugPattern = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}-]*$`)
 
 type Store struct {
 	Posts          []*Post
@@ -107,6 +108,7 @@ type frontMatter map[string]string
 type PostDraft struct {
 	Title         string   `json:"title"`
 	Slug          string   `json:"slug"`
+	OriginalSlug  string   `json:"original_slug,omitempty"`
 	Date          string   `json:"date"`
 	Updated       string   `json:"updated"`
 	UpdatedManual bool     `json:"updated_manual"`
@@ -120,6 +122,7 @@ type PostDraft struct {
 type PageDraft struct {
 	Title         string `json:"title"`
 	Slug          string `json:"slug"`
+	OriginalSlug  string `json:"original_slug,omitempty"`
 	Date          string `json:"date"`
 	Updated       string `json:"updated"`
 	UpdatedManual bool   `json:"updated_manual"`
@@ -1074,15 +1077,12 @@ func RenderMarkdown(source string) (template.HTML, error) {
 }
 
 func SavePost(root string, draft PostDraft) (PostDraft, error) {
-	draft.Slug = NormalizeSlug(draft.Slug)
-	if draft.Slug == "" {
-		draft.Slug = NormalizeSlug(draft.Title)
-	}
-	if !ValidSlug(draft.Slug) {
-		return PostDraft{}, fmt.Errorf("invalid post slug %q", draft.Slug)
-	}
 	if strings.TrimSpace(draft.Title) == "" {
 		return PostDraft{}, fmt.Errorf("title is required")
+	}
+	draft.Slug = NormalizeSlug(draft.Title)
+	if !ValidSlug(draft.Slug) {
+		return PostDraft{}, fmt.Errorf("invalid post slug %q", draft.Slug)
 	}
 
 	settings, err := LoadSettings(root)
@@ -1111,22 +1111,27 @@ func SavePost(root string, draft PostDraft) (PostDraft, error) {
 		draft.Updated = FormatInputDateTime(updated)
 	}
 
+	originalSlug := strings.TrimSpace(draft.OriginalSlug)
+	draft.Slug, err = uniqueContentSlug(root, "posts", draft.Slug, originalSlug)
+	if err != nil {
+		return PostDraft{}, err
+	}
 	if err := writeContentFile(root, "posts", draft.Slug, serializePost(draft)); err != nil {
+		return PostDraft{}, err
+	}
+	if err := removeOldContentFile(root, "posts", originalSlug, draft.Slug); err != nil {
 		return PostDraft{}, err
 	}
 	return draft, nil
 }
 
 func SavePage(root string, draft PageDraft) (PageDraft, error) {
-	draft.Slug = NormalizeSlug(draft.Slug)
-	if draft.Slug == "" {
-		draft.Slug = NormalizeSlug(draft.Title)
-	}
-	if !ValidSlug(draft.Slug) {
-		return PageDraft{}, fmt.Errorf("invalid page slug %q", draft.Slug)
-	}
 	if strings.TrimSpace(draft.Title) == "" {
 		return PageDraft{}, fmt.Errorf("title is required")
+	}
+	draft.Slug = NormalizeSlug(draft.Title)
+	if !ValidSlug(draft.Slug) {
+		return PageDraft{}, fmt.Errorf("invalid page slug %q", draft.Slug)
 	}
 
 	settings, err := LoadSettings(root)
@@ -1155,30 +1160,115 @@ func SavePage(root string, draft PageDraft) (PageDraft, error) {
 		draft.Updated = FormatInputDateTime(updated)
 	}
 
+	originalSlug := strings.TrimSpace(draft.OriginalSlug)
+	draft.Slug, err = uniqueContentSlug(root, "pages", draft.Slug, originalSlug)
+	if err != nil {
+		return PageDraft{}, err
+	}
 	if err := writeContentFile(root, "pages", draft.Slug, serializePage(draft)); err != nil {
+		return PageDraft{}, err
+	}
+	if err := removeOldContentFile(root, "pages", originalSlug, draft.Slug); err != nil {
 		return PageDraft{}, err
 	}
 	return draft, nil
 }
 
+func DeletePost(root, slug string) error {
+	return deleteContentFile(root, "posts", slug)
+}
+
+func DeletePage(root, slug string) error {
+	return deleteContentFile(root, "pages", slug)
+}
+
 func writeContentFile(root, section, slug, content string) error {
+	target, err := contentFilePath(root, section, slug)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(target, []byte(content), 0644)
+}
+
+func uniqueContentSlug(root, section, baseSlug, originalSlug string) (string, error) {
+	if !ValidSlug(originalSlug) {
+		originalSlug = ""
+	}
+	for suffix := 0; ; suffix++ {
+		candidate := baseSlug
+		if suffix > 0 {
+			candidate = fmt.Sprintf("%s-%d", baseSlug, suffix+1)
+		}
+		if candidate == originalSlug {
+			return candidate, nil
+		}
+		exists, err := contentFileExists(root, section, candidate)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+}
+
+func contentFileExists(root, section, slug string) (bool, error) {
+	target, err := contentFilePath(root, section, slug)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(target); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	return false, nil
+}
+
+func deleteContentFile(root, section, slug string) error {
+	slug = strings.TrimSpace(slug)
+	if !ValidSlug(slug) {
+		return fmt.Errorf("invalid %s slug %q", strings.TrimSuffix(section, "s"), slug)
+	}
+	target, err := contentFilePath(root, section, slug)
+	if err != nil {
+		return err
+	}
+	return os.Remove(target)
+}
+
+func removeOldContentFile(root, section, originalSlug, targetSlug string) error {
+	if originalSlug == "" || originalSlug == targetSlug || !ValidSlug(originalSlug) {
+		return nil
+	}
+	target, err := contentFilePath(root, section, originalSlug)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func contentFilePath(root, section, slug string) (string, error) {
 	contentDir := filepath.Join(root, section)
 	if err := os.MkdirAll(contentDir, 0755); err != nil {
-		return err
+		return "", err
 	}
 	target := filepath.Join(contentDir, slug+".md")
 	cleanContentDir, err := filepath.Abs(contentDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	cleanTarget, err := filepath.Abs(target)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !strings.HasPrefix(cleanTarget, cleanContentDir+string(os.PathSeparator)) {
-		return fmt.Errorf("%s path escapes content directory", strings.TrimSuffix(section, "s"))
+		return "", fmt.Errorf("%s path escapes content directory", strings.TrimSuffix(section, "s"))
 	}
-	return os.WriteFile(cleanTarget, []byte(content), 0644)
+	return cleanTarget, nil
 }
 
 func serializePost(draft PostDraft) string {
@@ -1344,8 +1434,7 @@ func slugFromPath(path string) string {
 
 func NormalizeSlug(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, " ", "-")
-	value = regexp.MustCompile(`[^a-z0-9-]+`).ReplaceAllString(value, "")
+	value = regexp.MustCompile(`[^\p{L}\p{N}]+`).ReplaceAllString(value, "-")
 	value = regexp.MustCompile(`-+`).ReplaceAllString(value, "-")
 	return strings.Trim(value, "-")
 }

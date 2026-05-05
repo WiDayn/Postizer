@@ -11,6 +11,7 @@ const saveState = document.querySelector("#saveState");
 const wordCount = document.querySelector("#wordCount");
 const postLibrary = document.querySelector("#postLibrary");
 const postLibraryToggle = document.querySelector("#togglePostLibrary");
+const deletePostButton = document.querySelector("#deletePostButton");
 const mediaStrip = document.querySelector("#mediaStrip");
 const contentKind = root && root.dataset.contentKind === "page" ? "page" : "post";
 const isPageEditor = contentKind === "page";
@@ -32,7 +33,6 @@ const fields = {
 };
 
 let currentSlug = "";
-let slugTouched = false;
 let updatedTouched = false;
 let previewTimer = 0;
 let dirty = false;
@@ -122,13 +122,48 @@ function displayDateTime(value) {
   return String(value || "").replace("T", " ");
 }
 
+function unicodeRegExp(source, flags, fallback) {
+  try {
+    return new RegExp(source, flags);
+  } catch (_) {
+    return fallback;
+  }
+}
+
+const slugSeparatorPattern = unicodeRegExp(
+  "[^\\p{L}\\p{N}]+",
+  "gu",
+  /[^0-9a-z\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]+/gi
+);
+const wordPattern = unicodeRegExp(
+  "[\\p{L}\\p{N}_]+",
+  "gu",
+  /[0-9a-z_\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]+/gi
+);
+
 function slugify(value) {
-  return value
+  return String(value || "")
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(slugSeparatorPattern, "-")
     .replace(/^-+|-+$/g, "")
     .replace(/-+/g, "-");
+}
+
+function titleSlug() {
+  return slugify(fields.title.value);
+}
+
+function visibleSlug() {
+  return titleSlug() || currentSlug;
+}
+
+function setSlugDisplay(slug) {
+  if (fields.slug) fields.slug.textContent = slug || "";
+}
+
+function updateDeleteButton() {
+  if (deletePostButton) deletePostButton.hidden = !currentSlug;
 }
 
 function insertAtCursor(textarea, text) {
@@ -167,7 +202,7 @@ function latexBraceText(value) {
 }
 
 function nextFigureLabel(path = "") {
-  const base = slugify(fields.slug.value || fields.title.value || currentSlug || "figure") || "figure";
+  const base = titleSlug() || currentSlug || "figure";
   const count = (editor.value.match(/\\label\{fig:/g) || []).length + 1;
   const file = slugify((path.split("/").pop() || "").replace(/\.[^.]+$/, ""));
   return `fig:${base}-${file || count}`;
@@ -224,7 +259,8 @@ function applyCommand(command) {
 function payload(draftOverride) {
   const data = {
     title: fields.title.value.trim(),
-    slug: slugify(fields.slug.value || fields.title.value),
+    slug: titleSlug(),
+    original_slug: currentSlug,
     date: fields.date.value || nowMinute(),
     updated: fields.updated.value,
     updated_manual: updatedTouched,
@@ -241,10 +277,8 @@ function payload(draftOverride) {
 
 function fillForm(post) {
   currentSlug = post.slug || "";
-  slugTouched = Boolean(post.slug);
   updatedTouched = false;
   fields.title.value = post.title || "";
-  fields.slug.value = post.slug || "";
   fields.date.value = post.date || nowMinute();
   fields.updated.value = post.updated || "";
   fields.tags.value = isPageEditor ? "" : (post.tags || []).join(", ");
@@ -252,6 +286,7 @@ function fillForm(post) {
   fields.draft.checked = isPageEditor ? false : Boolean(post.draft);
   fields.toc.checked = post.toc !== false;
   editor.value = post.body || "";
+  updateDeleteButton();
   updateViewLink();
   updateCounts();
   schedulePreview(true);
@@ -283,7 +318,6 @@ function newPost() {
     body: "## Notes\n\n"
   });
   currentSlug = "";
-  slugTouched = false;
   postLibrary.querySelectorAll("button").forEach((button) => button.classList.remove("is-active"));
   history.replaceState(null, "", `${adminBase}/new`);
   fields.title.focus();
@@ -314,7 +348,8 @@ async function savePost(draft) {
   }
   const result = await response.json();
   currentSlug = result.slug;
-  fields.slug.value = result.slug;
+  setSlugDisplay(result.slug);
+  updateDeleteButton();
   if (!isPageEditor) fields.draft.checked = Boolean(result.draft);
   if (result.date) fields.date.value = result.date;
   if (result.updated) fields.updated.value = result.updated;
@@ -328,6 +363,21 @@ async function savePost(draft) {
   } else {
     setStatus(result.draft ? tr("editor.status.draft_saved", "Draft saved") : tr("editor.status.published", "Published"));
   }
+}
+
+async function deleteCurrentPost() {
+  if (!currentSlug) return;
+  const confirmKey = isPageEditor ? "pages.confirm.delete" : "posts.confirm.delete";
+  const confirmFallback = isPageEditor ? "Delete this page?" : "Delete this post?";
+  if (!window.confirm(tr(confirmKey, confirmFallback))) return;
+  setStatus(isPageEditor ? tr("editor.status.deleting_page", "Deleting page") : tr("editor.status.deleting_post", "Deleting post"));
+  const response = await fetch(apiURL(`${apiBase}/${encodeURIComponent(currentSlug)}`), { method: "DELETE" });
+  if (!response.ok) {
+    setStatus((await response.text()).trim());
+    return;
+  }
+  setDirty(false);
+  window.location.href = adminBase;
 }
 
 async function refreshPostLibrary(activeSlug) {
@@ -383,12 +433,13 @@ function schedulePreview(now = false) {
 }
 
 function updateCounts() {
-  const matches = editor.value.match(/[\p{L}\p{N}_]+/gu);
+  const matches = editor.value.match(wordPattern);
   if (wordCount) wordCount.textContent = formatMessage("editor.word_count", "{count} words", { count: matches ? matches.length : 0 });
 }
 
 function updateViewLink() {
-  const slug = slugify(fields.slug.value || fields.title.value || currentSlug);
+  const slug = visibleSlug();
+  setSlugDisplay(slug);
   fields.view.href = slug ? `${publicBase}/${slug}` : "/";
 }
 
@@ -470,14 +521,6 @@ mediaStrip.addEventListener("click", (event) => {
 });
 
 fields.title.addEventListener("input", () => {
-  if (!slugTouched) fields.slug.value = slugify(fields.title.value);
-  updateViewLink();
-  setDirty(true);
-});
-
-fields.slug.addEventListener("input", () => {
-  slugTouched = true;
-  fields.slug.value = slugify(fields.slug.value);
   updateViewLink();
   setDirty(true);
 });
@@ -566,6 +609,11 @@ if (clearHomeImageButton) {
 }
 
 document.querySelector("#newPostButton").addEventListener("click", newPost);
+if (deletePostButton) {
+  deletePostButton.addEventListener("click", () => {
+    deleteCurrentPost().catch((error) => setStatus(error.message));
+  });
+}
 document.querySelector("#saveDraftButton").addEventListener("click", () => savePost(true));
 document.querySelector("#publishButton").addEventListener("click", () => savePost(false));
 

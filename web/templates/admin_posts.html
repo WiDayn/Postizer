@@ -47,6 +47,9 @@
           <td class="admin-table-actions">
             <a href="/admin/posts/{{.Slug}}/edit">{{msg $ "common.edit"}}</a>
             {{if not .Draft}}<a href="/posts/{{.Slug}}" target="_blank">{{msg $ "common.view"}}</a>{{end}}
+            <form class="admin-inline-delete" method="post" action="/admin/posts/{{.Slug}}/delete" onsubmit="return confirm('{{msg $ "posts.confirm.delete" "Delete this post?"}}')">
+              <button class="admin-inline-delete__button" type="submit">{{msg $ "common.delete"}}</button>
+            </form>
           </td>
         </tr>
         {{else}}

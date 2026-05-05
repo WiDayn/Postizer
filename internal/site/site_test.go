@@ -54,6 +54,155 @@ func TestSavePostAndLoadDraft(t *testing.T) {
 	}
 }
 
+func TestSavePostUsesTitleForURL(t *testing.T) {
+	root := t.TempDir()
+	saved, err := SavePost(root, PostDraft{
+		Title: "Title Driven URL",
+		Slug:  "custom-url",
+		Body:  "Body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Slug, "title-driven-url"; got != want {
+		t.Fatalf("slug = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "posts", "title-driven-url.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "posts", "custom-url.md")); !os.IsNotExist(err) {
+		t.Fatalf("custom URL file should not exist, stat err = %v", err)
+	}
+}
+
+func TestSavePostUsesUnicodeTitleForURL(t *testing.T) {
+	root := t.TempDir()
+	saved, err := SavePost(root, PostDraft{
+		Title: "测试-123",
+		Body:  "Body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Slug, "测试-123"; got != want {
+		t.Fatalf("slug = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "posts", "测试-123.md")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSavePostRenamesTitleURL(t *testing.T) {
+	root := t.TempDir()
+	if _, err := SavePost(root, PostDraft{
+		Title: "Old Title",
+		Body:  "Old body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := SavePost(root, PostDraft{
+		Title:        "New Title",
+		OriginalSlug: "old-title",
+		Body:         "New body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Slug, "new-title"; got != want {
+		t.Fatalf("slug = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "posts", "new-title.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "posts", "old-title.md")); !os.IsNotExist(err) {
+		t.Fatalf("old title URL file should be removed, stat err = %v", err)
+	}
+}
+
+func TestSavePostAddsNumericSuffixForTitleURLCollision(t *testing.T) {
+	root := t.TempDir()
+	if _, err := SavePost(root, PostDraft{
+		Title: "Existing Title",
+		Body:  "Existing body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SavePost(root, PostDraft{
+		Title: "Old Title",
+		Body:  "Old body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := SavePost(root, PostDraft{
+		Title:        "Existing Title",
+		OriginalSlug: "old-title",
+		Body:         "Should not overwrite.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Slug, "existing-title-2"; got != want {
+		t.Fatalf("slug = %q, want %q", got, want)
+	}
+	body, readErr := os.ReadFile(filepath.Join(root, "posts", "existing-title.md"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(body), "Should not overwrite.") {
+		t.Fatalf("existing post was overwritten:\n%s", body)
+	}
+	if _, err := os.Stat(filepath.Join(root, "posts", "existing-title-2.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "posts", "old-title.md")); !os.IsNotExist(err) {
+		t.Fatalf("old title URL file should be removed, stat err = %v", err)
+	}
+}
+
+func TestSavePostSkipsUsedNumericSuffixes(t *testing.T) {
+	root := t.TempDir()
+	for _, title := range []string{"Same Title", "Same Title", "Same Title"} {
+		if _, err := SavePost(root, PostDraft{Title: title, Body: "Body."}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, slug := range []string{"same-title", "same-title-2", "same-title-3"} {
+		if _, err := os.Stat(filepath.Join(root, "posts", slug+".md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestDeletePostRemovesMarkdownFile(t *testing.T) {
+	root := t.TempDir()
+	if _, err := SavePost(root, PostDraft{
+		Title: "Delete Me",
+		Body:  "Body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeletePost(root, "delete-me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "posts", "delete-me.md")); !os.IsNotExist(err) {
+		t.Fatalf("deleted post should be gone, stat err = %v", err)
+	}
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.AllPostsBySlug["delete-me"] != nil {
+		t.Fatal("deleted post remained in loaded store")
+	}
+}
+
+func TestDeletePostRejectsInvalidSlug(t *testing.T) {
+	root := t.TempDir()
+	if err := DeletePost(root, "../outside"); err == nil {
+		t.Fatal("expected invalid slug error")
+	}
+}
+
 func TestSavePostPreservesManualUpdatedMinute(t *testing.T) {
 	root := t.TempDir()
 	saved, err := SavePost(root, PostDraft{
@@ -134,6 +283,64 @@ func TestSavePageAndLoad(t *testing.T) {
 	}
 	if got := page.Source; strings.HasPrefix(got, "\n") {
 		t.Fatalf("loaded page source had a leading blank line: %q", got)
+	}
+}
+
+func TestSavePageUsesTitleForURL(t *testing.T) {
+	root := t.TempDir()
+	saved, err := SavePage(root, PageDraft{
+		Title: "Page Title URL",
+		Slug:  "custom-page",
+		Body:  "Body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Slug, "page-title-url"; got != want {
+		t.Fatalf("slug = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "pages", "page-title-url.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "pages", "custom-page.md")); !os.IsNotExist(err) {
+		t.Fatalf("custom URL file should not exist, stat err = %v", err)
+	}
+}
+
+func TestSavePageAddsNumericSuffixForTitleURLCollision(t *testing.T) {
+	root := t.TempDir()
+	if _, err := SavePage(root, PageDraft{Title: "About", Body: "Body."}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := SavePage(root, PageDraft{Title: "About", Body: "Body."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := saved.Slug, "about-2"; got != want {
+		t.Fatalf("slug = %q, want %q", got, want)
+	}
+}
+
+func TestDeletePageRemovesMarkdownFile(t *testing.T) {
+	root := t.TempDir()
+	if _, err := SavePage(root, PageDraft{
+		Title: "Remove Page",
+		Body:  "Body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeletePage(root, "remove-page"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "pages", "remove-page.md")); !os.IsNotExist(err) {
+		t.Fatalf("deleted page should be gone, stat err = %v", err)
+	}
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.PagesBySlug["remove-page"] != nil {
+		t.Fatal("deleted page remained in loaded store")
 	}
 }
 

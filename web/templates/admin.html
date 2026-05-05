@@ -10,6 +10,7 @@
     <div class="editor-actions">
       <span id="editorStatus" class="ui-status">{{msg . "editor.status.ready"}}</span>
       <button type="button" id="newPostButton" class="ui-button">{{if $isPage}}{{msg . "editor.new_page" "New Page"}}{{else}}{{msg . "editor.new_post" "New Post"}}{{end}}</button>
+      <button type="button" id="deletePostButton" class="ui-button ui-button--danger" hidden>{{msg . "common.delete"}}</button>
       <button type="button" id="saveDraftButton" class="ui-button" {{if $isPage}}hidden{{end}}>{{msg . "editor.save_draft"}}</button>
       <button type="button" id="publishButton" class="ui-button ui-button--primary">{{if $isPage}}{{msg . "editor.save_page" "Save Page"}}{{else}}{{msg . "editor.publish"}}{{end}}</button>
       <a id="viewPostLink" class="ui-button ui-button--ghost" href="/" target="_blank">{{msg . "editor.view"}}</a>
@@ -56,7 +57,7 @@
       <input id="postTitle" class="title-field ui-input" type="text" placeholder="{{msg . "editor.title_placeholder"}}">
       <div class="permalink-row">
         <span>{{if $isPage}}/pages/{{else}}/posts/{{end}}</span>
-        <input id="postSlug" class="ui-input" type="text" inputmode="latin" autocomplete="off">
+        <code id="postSlug"></code>
       </div>
 
       <div class="editor-toolbar ui-toolbar" aria-label="Markdown toolbar">
@@ -144,6 +145,6 @@
     </aside>
   </div>
 </section>
-<script defer src="/static/admin.js?v=13"></script>
+<script defer src="/static/admin.js?v=15"></script>
 {{template "adminEnd" .}}
 {{end}}

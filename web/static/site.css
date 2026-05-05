@@ -614,7 +614,7 @@
   }
 
   .admin-post-col-actions {
-    width: 7.25rem;
+    width: 9.5rem;
   }
 
   .admin-post-table__title,
@@ -652,7 +652,8 @@
     white-space: nowrap;
   }
 
-  .admin-table-actions a {
+  .admin-table-actions a,
+  .admin-inline-delete__button {
     color: var(--ink);
     font-family: var(--font-ui);
     font-size: .76rem;
@@ -662,7 +663,26 @@
     text-underline-offset: 2px;
   }
 
-  .admin-table-actions a + a {
+  .admin-inline-delete {
+    display: inline;
+    margin: 0;
+  }
+
+  .admin-inline-delete__button {
+    all: unset;
+    display: inline;
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: .76rem;
+    font-weight: 400;
+    line-height: 1;
+    cursor: pointer;
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+
+  .admin-table-actions > * + * {
     margin-left: .45rem;
   }
 
@@ -2085,7 +2105,7 @@
 
   input:not(.ui-input),
   textarea:not(.ui-textarea),
-  button:not(.ui-button):not(.ui-media-button) {
+  button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button) {
     border: 1px solid var(--rule);
     border-radius: 0;
     background: var(--surface);
@@ -2099,7 +2119,7 @@
     padding: .45rem;
   }
 
-  button:not(.ui-button):not(.ui-media-button) {
+  button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button) {
     padding: .42rem .7rem;
     cursor: pointer;
   }
@@ -2351,11 +2371,17 @@
     font-size: .78rem;
   }
 
-  .permalink-row input {
-    padding: .15rem .25rem;
-    border-color: rgba(0, 0, 0, .35);
+  .permalink-row code {
+    display: block;
+    min-width: 0;
+    min-height: 1.6rem;
+    padding: .18rem .35rem;
+    border: 1px solid rgba(0, 0, 0, .35);
     background: var(--surface-soft);
+    color: var(--ink);
     font-size: .78rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
   }
 
   .editor-stage {

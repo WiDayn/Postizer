@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -109,9 +110,11 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/posts", s.requireAdmin(http.HandlerFunc(s.adminPosts)))
 	mux.Handle("GET /admin/posts/new", s.requireAdmin(http.HandlerFunc(s.adminNewPost)))
 	mux.Handle("GET /admin/posts/{slug}/edit", s.requireAdmin(http.HandlerFunc(s.adminEditPost)))
+	mux.Handle("POST /admin/posts/{slug}/delete", s.requireAdmin(http.HandlerFunc(s.deletePostAndRedirect)))
 	mux.Handle("GET /admin/pages", s.requireAdmin(http.HandlerFunc(s.adminPages)))
 	mux.Handle("GET /admin/pages/new", s.requireAdmin(http.HandlerFunc(s.adminNewPage)))
 	mux.Handle("GET /admin/pages/{slug}/edit", s.requireAdmin(http.HandlerFunc(s.adminEditPage)))
+	mux.Handle("POST /admin/pages/{slug}/delete", s.requireAdmin(http.HandlerFunc(s.deletePageAndRedirect)))
 	mux.Handle("GET /admin/media", s.requireAdmin(http.HandlerFunc(s.adminMedia)))
 	mux.Handle("GET /admin/appearance", s.requireAdmin(http.HandlerFunc(s.adminAppearance)))
 	mux.Handle("GET /admin/plugins", s.requireAdmin(http.HandlerFunc(s.adminPlugins)))
@@ -119,9 +122,11 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.listPosts)))
 	mux.Handle("GET /admin/api/posts/{slug}", s.requireAdmin(http.HandlerFunc(s.getPost)))
 	mux.Handle("POST /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.savePost)))
+	mux.Handle("DELETE /admin/api/posts/{slug}", s.requireAdmin(http.HandlerFunc(s.deletePost)))
 	mux.Handle("GET /admin/api/pages", s.requireAdmin(http.HandlerFunc(s.listPages)))
 	mux.Handle("GET /admin/api/pages/{slug}", s.requireAdmin(http.HandlerFunc(s.getPage)))
 	mux.Handle("POST /admin/api/pages", s.requireAdmin(http.HandlerFunc(s.savePage)))
+	mux.Handle("DELETE /admin/api/pages/{slug}", s.requireAdmin(http.HandlerFunc(s.deletePage)))
 	mux.Handle("POST /admin/api/preview", s.requireAdmin(http.HandlerFunc(s.previewMarkdown)))
 	mux.Handle("GET /admin/api/media", s.requireAdmin(http.HandlerFunc(s.listMedia)))
 	mux.Handle("POST /admin/api/media", s.requireAdmin(http.HandlerFunc(s.uploadMedia)))
@@ -436,10 +441,6 @@ func (s *Server) savePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	draft.Slug = site.NormalizeSlug(draft.Slug)
-	if draft.Slug == "" {
-		draft.Slug = site.NormalizeSlug(draft.Title)
-	}
 	saved, err := site.SavePost(s.contentRoot, draft)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -456,6 +457,22 @@ func (s *Server) savePost(w http.ResponseWriter, r *http.Request) {
 		"date":    saved.Date,
 		"updated": saved.Updated,
 	})
+}
+
+func (s *Server) deletePost(w http.ResponseWriter, r *http.Request) {
+	if err := s.deleteContent(r.PathValue("slug"), site.DeletePost); err != nil {
+		writeDeleteError(w, err)
+		return
+	}
+	writeJSON(w, map[string]bool{"deleted": true})
+}
+
+func (s *Server) deletePostAndRedirect(w http.ResponseWriter, r *http.Request) {
+	if err := s.deleteContent(r.PathValue("slug"), site.DeletePost); err != nil {
+		writeDeleteError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/posts", http.StatusSeeOther)
 }
 
 func (s *Server) listPages(w http.ResponseWriter, r *http.Request) {
@@ -508,10 +525,6 @@ func (s *Server) savePage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	draft.Slug = site.NormalizeSlug(draft.Slug)
-	if draft.Slug == "" {
-		draft.Slug = site.NormalizeSlug(draft.Title)
-	}
 	saved, err := site.SavePage(s.contentRoot, draft)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -527,6 +540,43 @@ func (s *Server) savePage(w http.ResponseWriter, r *http.Request) {
 		"date":    saved.Date,
 		"updated": saved.Updated,
 	})
+}
+
+func (s *Server) deletePage(w http.ResponseWriter, r *http.Request) {
+	if err := s.deleteContent(r.PathValue("slug"), site.DeletePage); err != nil {
+		writeDeleteError(w, err)
+		return
+	}
+	writeJSON(w, map[string]bool{"deleted": true})
+}
+
+func (s *Server) deletePageAndRedirect(w http.ResponseWriter, r *http.Request) {
+	if err := s.deleteContent(r.PathValue("slug"), site.DeletePage); err != nil {
+		writeDeleteError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/pages", http.StatusSeeOther)
+}
+
+func (s *Server) deleteContent(slug string, deleteFile func(string, string) error) error {
+	if !site.ValidSlug(slug) {
+		return fmt.Errorf("invalid slug %q", slug)
+	}
+	if err := deleteFile(s.contentRoot, slug); err != nil {
+		return err
+	}
+	return s.reloadRuntime()
+}
+
+func writeDeleteError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		http.Error(w, "content not found", http.StatusNotFound)
+	case strings.HasPrefix(err.Error(), "invalid "):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) previewMarkdown(w http.ResponseWriter, r *http.Request) {
