@@ -319,7 +319,8 @@ document.querySelectorAll("[data-plugin-id][data-plugin-name]").forEach((node) =
   pluginRegistry[pluginID] = {
     id: pluginID,
     name: node.dataset.pluginName || pluginID,
-    description: node.dataset.pluginDescription || ""
+    description: node.dataset.pluginDescription || "",
+    settingsURL: node.dataset.pluginSettingsUrl || ""
   };
 });
 
@@ -387,7 +388,7 @@ function renderPluginQueue() {
     if (!plugin) return;
 
     const item = document.createElement("article");
-    item.className = `pack-card plugin-card plugin-catalog-card plugin-queue-item${pluginID === selectedQueuePluginID ? " is-selected" : ""}`;
+    item.className = `pack-card plugin-card plugin-catalog-card plugin-queue-item${pluginID === selectedQueuePluginID ? " is-selected" : ""}${plugin.settingsURL ? " has-settings" : ""}`;
     item.dataset.pluginId = pluginID;
     item.dataset.pluginName = plugin.name;
     item.dataset.pluginDescription = plugin.description;
@@ -409,6 +410,19 @@ function renderPluginQueue() {
     text.appendChild(name);
     main.appendChild(text);
     copy.append(main, description);
+
+    if (plugin.settingsURL) {
+      const settingsLink = document.createElement("a");
+      settingsLink.className = "plugin-settings-link";
+      settingsLink.href = plugin.settingsURL;
+      settingsLink.title = "Plugin settings";
+      settingsLink.setAttribute("aria-label", `Plugin settings for ${plugin.name}`);
+      const icon = document.createElement("span");
+      icon.className = "plugin-settings-link__icon";
+      icon.setAttribute("aria-hidden", "true");
+      settingsLink.appendChild(icon);
+      copy.appendChild(settingsLink);
+    }
 
     const sortControls = document.createElement("div");
     sortControls.className = "plugin-sort-controls";
@@ -518,6 +532,7 @@ if (pluginPackGrid) {
 
 if (pluginQueueList) {
   pluginQueueList.addEventListener("click", (event) => {
+    if (event.target.closest(".plugin-settings-link")) return;
     const item = event.target.closest(".plugin-queue-item");
     if (!item) return;
     const pluginID = item.dataset.pluginId;

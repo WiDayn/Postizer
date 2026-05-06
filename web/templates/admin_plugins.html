@@ -35,6 +35,7 @@
               data-plugin-order="{{.Order}}"
               data-plugin-name="{{.Name}}"
               data-plugin-description="{{.Description}}"
+              {{if hasPluginSettings .}}data-plugin-settings-url="/admin/plugins/{{.ID}}"{{end}}
             >
               <div class="plugin-queue-item__body">
                 <div class="plugin-queue-item__copy">
@@ -75,7 +76,13 @@
           <div class="plugin-queue-shell">
             <div id="pluginQueueList" class="plugin-queue-list">
               {{range .Appearance.ActivePlugins}}
-              <article class="pack-card plugin-card plugin-catalog-card plugin-queue-item" data-plugin-id="{{.ID}}" data-plugin-name="{{.Name}}" data-plugin-description="{{.Description}}">
+              <article
+                class="pack-card plugin-card plugin-catalog-card plugin-queue-item{{if hasPluginSettings .}} has-settings{{end}}"
+                data-plugin-id="{{.ID}}"
+                data-plugin-name="{{.Name}}"
+                data-plugin-description="{{.Description}}"
+                {{if hasPluginSettings .}}data-plugin-settings-url="/admin/plugins/{{.ID}}"{{end}}
+              >
                 <div class="plugin-queue-item__body">
                   <div class="plugin-queue-item__copy">
                     <div class="plugin-queue-item__main">
@@ -85,6 +92,14 @@
                     </div>
                     <p class="plugin-queue-item__description">{{.Description}}</p>
                   </div>
+                  {{if hasPluginSettings .}}
+                  <a
+                    class="plugin-settings-link"
+                    href="/admin/plugins/{{.ID}}"
+                    title="Plugin settings"
+                    aria-label="Plugin settings for {{.Name}}"
+                  ><span class="plugin-settings-link__icon" aria-hidden="true"></span></a>
+                  {{end}}
                   <div class="plugin-sort-controls" aria-label="Plugin ordering">
                     <div class="plugin-sort-index">#{{.Order}}</div>
                     <button
@@ -119,26 +134,7 @@
       </div>
     </div>
   </section>
-
-  {{with pluginTools .Appearance}}
-  <section class="ui-panel admin-panel plugin-tools">
-    <div class="ui-panel__head">
-      <h2>Plugin Settings</h2>
-    </div>
-    <div class="plugin-tools-list">
-      {{range .}}
-      <article class="local-pack-item plugin-tool-item">
-        <div class="local-pack-item__copy">
-          <strong>{{.Name}}</strong>
-          <span>{{.Description}}</span>
-        </div>
-        <a class="ui-button ui-button--ghost" href="/admin/plugins/{{.ID}}">Settings</a>
-      </article>
-      {{end}}
-    </div>
-  </section>
-  {{end}}
 </form>
-<script defer src="/static/admin-settings.js?v=37"></script>
+<script defer src="/static/admin-settings.js?v=38"></script>
 {{template "adminEnd" .}}
 {{end}}

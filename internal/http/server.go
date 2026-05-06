@@ -222,6 +222,9 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 		"pluginTools": func(catalog *appearance.Catalog) []appearance.Pack {
 			return pluginTools(catalog)
 		},
+		"hasPluginSettings": func(pack appearance.Pack) bool {
+			return hasUIOutlet(pack, pluginSettingsUIOutlet)
+		},
 		"pluginAction": func(ui *appearance.PluginUI, id string) appearance.PluginUIAction {
 			return pluginAction(ui, id)
 		},
