@@ -8,7 +8,7 @@
   <div class="ui-panel__head">
     <h2>{{msg . "pages.all_pages" "All Pages"}}</h2>
     <div class="admin-panel-actions">
-      <span>{{len .Pages}}</span>
+      <span>{{.Pagination.Total}}</span>
       <a class="ui-button ui-button--primary" href="/admin/pages/new">{{msg . "pages.new" "New Page"}}</a>
     </div>
   </div>
@@ -60,6 +60,7 @@
       </tbody>
     </table>
   </div>
+  {{template "adminPagination" .}}
 </section>
 {{template "adminEnd" .}}
 {{end}}

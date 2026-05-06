@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,6 +32,154 @@ func TestLoadTemplatesParsesAdminTemplates(t *testing.T) {
 	if _, err := loadTemplates(appearance.Pack{}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestPaginateItemsSlicesAndBuildsLinks(t *testing.T) {
+	request := httptest.NewRequest("GET", "/admin/posts?page=2&token=abc", nil)
+	items, pagination := paginateItems(request, []int{1, 2, 3, 4, 5}, 2)
+
+	if got, want := items, []int{3, 4}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("paginated items = %#v, want %#v", got, want)
+	}
+	if got, want := pagination.Page, 2; got != want {
+		t.Fatalf("page = %d, want %d", got, want)
+	}
+	if got, want := pagination.TotalPages, 3; got != want {
+		t.Fatalf("total pages = %d, want %d", got, want)
+	}
+	if got, want := pagination.StartItem, 3; got != want {
+		t.Fatalf("start item = %d, want %d", got, want)
+	}
+	if got, want := pagination.EndItem, 4; got != want {
+		t.Fatalf("end item = %d, want %d", got, want)
+	}
+	if got, want := pagination.PrevURL, "/admin/posts?token=abc"; got != want {
+		t.Fatalf("prev url = %q, want %q", got, want)
+	}
+	if got, want := pagination.NextURL, "/admin/posts?page=3&token=abc"; got != want {
+		t.Fatalf("next url = %q, want %q", got, want)
+	}
+	wantLinks := []PaginationLink{
+		{Page: 1, URL: "/admin/posts?token=abc"},
+		{Page: 2, URL: "/admin/posts?page=2&token=abc", Current: true},
+		{Page: 3, URL: "/admin/posts?page=3&token=abc"},
+	}
+	if !reflect.DeepEqual(pagination.Pages, wantLinks) {
+		t.Fatalf("pagination links = %#v, want %#v", pagination.Pages, wantLinks)
+	}
+}
+
+func TestPaginateItemsClampsOutOfRangePage(t *testing.T) {
+	request := httptest.NewRequest("GET", "/admin/media?page=99", nil)
+	items, pagination := paginateItems(request, []string{"a", "b", "c"}, 2)
+
+	if got, want := items, []string{"c"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("paginated items = %#v, want %#v", got, want)
+	}
+	if got, want := pagination.Page, 2; got != want {
+		t.Fatalf("page = %d, want %d", got, want)
+	}
+	if got, want := pagination.StartItem, 3; got != want {
+		t.Fatalf("start item = %d, want %d", got, want)
+	}
+	if got, want := pagination.EndItem, 3; got != want {
+		t.Fatalf("end item = %d, want %d", got, want)
+	}
+	if got, want := pagination.PrevURL, "/admin/media"; got != want {
+		t.Fatalf("prev url = %q, want %q", got, want)
+	}
+	if pagination.NextURL != "" {
+		t.Fatalf("next url = %q, want empty", pagination.NextURL)
+	}
+}
+
+func TestPaginateItemsHandlesEmptyList(t *testing.T) {
+	request := httptest.NewRequest("GET", "/admin/pages?page=4", nil)
+	items, pagination := paginateItems(request, []int{}, 2)
+
+	if len(items) != 0 {
+		t.Fatalf("paginated items = %#v, want empty", items)
+	}
+	if got, want := pagination.Page, 1; got != want {
+		t.Fatalf("page = %d, want %d", got, want)
+	}
+	if pagination.Show {
+		t.Fatal("pagination should be hidden for an empty list")
+	}
+	if pagination.PrevURL != "" || pagination.NextURL != "" {
+		t.Fatalf("pagination urls = prev %q next %q, want empty", pagination.PrevURL, pagination.NextURL)
+	}
+}
+
+func TestFilterMediaItemsByType(t *testing.T) {
+	items := []media.Item{
+		{ID: "image", MIMEType: "image/png", OriginalName: "photo.png"},
+		{ID: "audio", MIMEType: "audio/mpeg", OriginalName: "song.mp3"},
+		{ID: "document", MIMEType: "application/pdf", OriginalName: "paper.pdf"},
+		{ID: "archive", MIMEType: "application/octet-stream", OriginalName: "pack.zip"},
+		{ID: "other", MIMEType: "application/octet-stream", OriginalName: "data.bin"},
+	}
+
+	filtered := filterMediaItemsByType(items, "document")
+	if got, want := mediaItemIDs(filtered), []string{"document"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("document media ids = %#v, want %#v", got, want)
+	}
+
+	filtered = filterMediaItemsByType(items, "archive")
+	if got, want := mediaItemIDs(filtered), []string{"archive"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("archive media ids = %#v, want %#v", got, want)
+	}
+
+	filtered = filterMediaItemsByType(items, "unknown")
+	if got, want := mediaItemIDs(filtered), mediaItemIDs(items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("unknown filter media ids = %#v, want %#v", got, want)
+	}
+}
+
+func TestMediaTypeFiltersBuildURLsAndCounts(t *testing.T) {
+	request := httptest.NewRequest("GET", "/admin/media?page=3&type=image&token=abc", nil)
+	items := []media.Item{
+		{ID: "image", MIMEType: "image/webp"},
+		{ID: "video", MIMEType: "video/mp4"},
+		{ID: "archive", OriginalName: "backup.tar.gz"},
+	}
+
+	filters := mediaTypeFilters(request, items, "image")
+	all := mediaTypeFilterByID(filters, "")
+	if all.Count != 3 {
+		t.Fatalf("all count = %d, want 3", all.Count)
+	}
+	if got, want := all.URL, "/admin/media?token=abc"; got != want {
+		t.Fatalf("all url = %q, want %q", got, want)
+	}
+
+	image := mediaTypeFilterByID(filters, "image")
+	if !image.Active {
+		t.Fatal("image filter should be active")
+	}
+	if image.Count != 1 {
+		t.Fatalf("image count = %d, want 1", image.Count)
+	}
+	if got, want := image.URL, "/admin/media?token=abc&type=image"; got != want {
+		t.Fatalf("image url = %q, want %q", got, want)
+	}
+}
+
+func mediaItemIDs(items []media.Item) []string {
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	return ids
+}
+
+func mediaTypeFilterByID(filters []MediaTypeFilter, id string) MediaTypeFilter {
+	for _, filter := range filters {
+		if filter.ID == id {
+			return filter
+		}
+	}
+	return MediaTypeFilter{}
 }
 
 func containsLog(logs []string, pattern string) bool {

@@ -25,6 +25,13 @@ function apiURL(path) {
   return url.pathname + url.search;
 }
 
+function firstPageURL() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("page");
+  url.searchParams.delete("type");
+  return url.pathname + url.search;
+}
+
 function setMediaStatus(message) {
   if (mediaStatus) mediaStatus.textContent = message;
 }
@@ -83,7 +90,7 @@ if (mediaUpload && mediaFile) {
       return;
     }
     setMediaStatus(tr("media.status.uploaded", "Uploaded"));
-    window.location.reload();
+    window.location.href = firstPageURL();
   });
 }
 

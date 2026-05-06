@@ -61,25 +61,56 @@ type importJob struct {
 }
 
 type ViewData struct {
-	Title       string
-	TitleKey    string
-	Store       *site.Store
-	Appearance  *appearance.Catalog
-	Posts       []*site.Post
-	Pages       []*site.Page
-	Tags        []*site.Tag
-	Post        *site.Post
-	Page        *site.Page
-	Tag         *site.Tag
-	Media       []media.Item
-	Plugin      *appearance.Pack
-	PluginUI    *appearance.PluginUI
-	Home        bool
-	ActiveAdmin string
-	Error       string
-	Remember    bool
-	EditorKind  string
-	EditorSlug  string
+	Title        string
+	TitleKey     string
+	Store        *site.Store
+	Appearance   *appearance.Catalog
+	Posts        []*site.Post
+	Pages        []*site.Page
+	Tags         []*site.Tag
+	Post         *site.Post
+	Page         *site.Page
+	Tag          *site.Tag
+	Media        []media.Item
+	Plugin       *appearance.Pack
+	PluginUI     *appearance.PluginUI
+	MediaFilters []MediaTypeFilter
+	MediaFilter  string
+	Home         bool
+	ActiveAdmin  string
+	Error        string
+	Remember     bool
+	EditorKind   string
+	EditorSlug   string
+	Pagination   Pagination
+}
+
+type Pagination struct {
+	Page       int
+	PageSize   int
+	Total      int
+	TotalPages int
+	StartItem  int
+	EndItem    int
+	PrevURL    string
+	NextURL    string
+	Pages      []PaginationLink
+	Show       bool
+}
+
+type PaginationLink struct {
+	Page    int
+	URL     string
+	Current bool
+}
+
+type MediaTypeFilter struct {
+	ID       string
+	LabelKey string
+	Label    string
+	Count    int
+	URL      string
+	Active   bool
 }
 
 type authConfig struct {
@@ -92,6 +123,7 @@ const (
 	sessionCookieName        = "postizer_session"
 	sessionDuration          = 8 * time.Hour
 	rememberSessionDuration  = 30 * 24 * time.Hour
+	adminListPageSize        = 20
 	maxPluginActionFileBytes = 32 << 20
 	maxPluginMediaBytes      = 64 << 20
 	pluginSettingsUIOutlet   = "admin.plugin"
@@ -406,12 +438,14 @@ func (s *Server) adminEditPost(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin_posts.html", ViewData{Title: "Posts", TitleKey: "title.admin.posts", Store: store, Posts: store.AllPosts, ActiveAdmin: "posts"})
+	posts, pagination := paginateItems(r, store.AllPosts, adminListPageSize)
+	s.render(w, "admin_posts.html", ViewData{Title: "Posts", TitleKey: "title.admin.posts", Store: store, Posts: posts, Pagination: pagination, ActiveAdmin: "posts"})
 }
 
 func (s *Server) adminPages(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin_pages.html", ViewData{Title: "Pages", TitleKey: "title.admin.pages", Store: store, Pages: store.AllPages, ActiveAdmin: "pages"})
+	pages, pagination := paginateItems(r, store.AllPages, adminListPageSize)
+	s.render(w, "admin_pages.html", ViewData{Title: "Pages", TitleKey: "title.admin.pages", Store: store, Pages: pages, Pagination: pagination, ActiveAdmin: "pages"})
 }
 
 func (s *Server) adminNewPage(w http.ResponseWriter, r *http.Request) {
@@ -431,7 +465,20 @@ func (s *Server) adminEditPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminMedia(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "media.html", ViewData{Title: "Media", TitleKey: "title.admin.media", Store: store, Media: s.media.Items(), ActiveAdmin: "media"})
+	allItems := s.media.Items()
+	activeFilter := normalizeMediaTypeFilter(r.URL.Query().Get("type"))
+	filteredItems := filterMediaItemsByType(allItems, activeFilter)
+	items, pagination := paginateItems(r, filteredItems, adminListPageSize)
+	s.render(w, "media.html", ViewData{
+		Title:        "Media",
+		TitleKey:     "title.admin.media",
+		Store:        store,
+		Media:        items,
+		MediaFilters: mediaTypeFilters(r, allItems, activeFilter),
+		MediaFilter:  activeFilter,
+		Pagination:   pagination,
+		ActiveAdmin:  "media",
+	})
 }
 
 func (s *Server) adminAppearance(w http.ResponseWriter, r *http.Request) {
@@ -442,6 +489,175 @@ func (s *Server) adminAppearance(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminPlugins(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	s.render(w, "admin_plugins.html", ViewData{Title: "Plugin Packs", TitleKey: "title.admin.plugins", Store: store, ActiveAdmin: "plugins"})
+}
+
+func paginateItems[T any](r *http.Request, items []T, pageSize int) ([]T, Pagination) {
+	if pageSize <= 0 {
+		pageSize = adminListPageSize
+	}
+	total := len(items)
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
+	if totalPages == 0 {
+		page = 1
+	} else if page > totalPages {
+		page = totalPages
+	}
+
+	start := 0
+	end := 0
+	if total > 0 {
+		start = (page - 1) * pageSize
+		end = start + pageSize
+		if end > total {
+			end = total
+		}
+	}
+
+	pagination := Pagination{
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+		TotalPages: totalPages,
+		Show:       totalPages > 1,
+	}
+	if total > 0 {
+		pagination.StartItem = start + 1
+		pagination.EndItem = end
+	}
+	if page > 1 {
+		pagination.PrevURL = pageURL(r, page-1)
+	}
+	if totalPages > 0 && page < totalPages {
+		pagination.NextURL = pageURL(r, page+1)
+	}
+	if pagination.Show {
+		for _, pageNumber := range visiblePageNumbers(page, totalPages) {
+			pagination.Pages = append(pagination.Pages, PaginationLink{
+				Page:    pageNumber,
+				URL:     pageURL(r, pageNumber),
+				Current: pageNumber == page,
+			})
+		}
+	}
+
+	return items[start:end], pagination
+}
+
+func parsePositiveInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed < 1 {
+		return fallback
+	}
+	return parsed
+}
+
+func visiblePageNumbers(current, total int) []int {
+	if total <= 7 {
+		pages := make([]int, total)
+		for i := 0; i < total; i++ {
+			pages[i] = i + 1
+		}
+		return pages
+	}
+	start := current - 2
+	if start < 1 {
+		start = 1
+	}
+	end := start + 4
+	if end > total {
+		end = total
+		start = end - 4
+	}
+	pages := make([]int, 0, end-start+1)
+	for page := start; page <= end; page++ {
+		pages = append(pages, page)
+	}
+	return pages
+}
+
+func pageURL(r *http.Request, page int) string {
+	values := r.URL.Query()
+	if page <= 1 {
+		values.Del("page")
+	} else {
+		values.Set("page", strconv.Itoa(page))
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return r.URL.Path + "?" + encoded
+	}
+	return r.URL.Path
+}
+
+func filterMediaItemsByType(items []media.Item, filter string) []media.Item {
+	filter = normalizeMediaTypeFilter(filter)
+	if filter == "" {
+		return items
+	}
+	filtered := make([]media.Item, 0, len(items))
+	for _, item := range items {
+		if mediaTypeID(item) == filter {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func mediaTypeFilters(r *http.Request, items []media.Item, active string) []MediaTypeFilter {
+	active = normalizeMediaTypeFilter(active)
+	counts := map[string]int{"": len(items)}
+	for _, item := range items {
+		counts[mediaTypeID(item)]++
+	}
+	filters := make([]MediaTypeFilter, 0, len(mediaTypeFilterSpecs))
+	for _, spec := range mediaTypeFilterSpecs {
+		filters = append(filters, MediaTypeFilter{
+			ID:       spec.ID,
+			LabelKey: spec.LabelKey,
+			Label:    spec.Label,
+			Count:    counts[spec.ID],
+			URL:      mediaTypeFilterURL(r, spec.ID),
+			Active:   spec.ID == active,
+		})
+	}
+	return filters
+}
+
+func mediaTypeFilterURL(r *http.Request, filter string) string {
+	values := r.URL.Query()
+	values.Del("page")
+	if filter == "" {
+		values.Del("type")
+	} else {
+		values.Set("type", filter)
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return r.URL.Path + "?" + encoded
+	}
+	return r.URL.Path
+}
+
+func normalizeMediaTypeFilter(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, spec := range mediaTypeFilterSpecs {
+		if spec.ID != "" && value == spec.ID {
+			return value
+		}
+	}
+	return ""
+}
+
+var mediaTypeFilterSpecs = []MediaTypeFilter{
+	{ID: "", LabelKey: "media.filter.all", Label: "All"},
+	{ID: "image", LabelKey: "media.filter.images", Label: "Images"},
+	{ID: "audio", LabelKey: "media.filter.audio", Label: "Audio"},
+	{ID: "video", LabelKey: "media.filter.video", Label: "Video"},
+	{ID: "document", LabelKey: "media.filter.documents", Label: "Documents"},
+	{ID: "archive", LabelKey: "media.filter.archives", Label: "Archives"},
+	{ID: "other", LabelKey: "media.filter.other", Label: "Other"},
 }
 
 func (s *Server) adminPluginSettings(w http.ResponseWriter, r *http.Request) {
@@ -1871,6 +2087,79 @@ func mediaItemRPC(item media.Item) pluginrpc.MediaItem {
 
 func mediaIsImage(item media.Item) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(item.MIMEType)), "image/")
+}
+
+func mediaTypeID(item media.Item) string {
+	mimeType := strings.ToLower(strings.TrimSpace(item.MIMEType))
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return "image"
+	case strings.HasPrefix(mimeType, "audio/"):
+		return "audio"
+	case strings.HasPrefix(mimeType, "video/"):
+		return "video"
+	case isArchiveMedia(item, mimeType):
+		return "archive"
+	case isDocumentMedia(item, mimeType):
+		return "document"
+	default:
+		return "other"
+	}
+}
+
+func isDocumentMedia(item media.Item, mimeType string) bool {
+	if strings.HasPrefix(mimeType, "text/") {
+		return true
+	}
+	switch mimeType {
+	case "application/pdf",
+		"application/json",
+		"application/msword",
+		"application/rtf",
+		"application/vnd.ms-excel",
+		"application/vnd.ms-powerpoint",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return true
+	}
+	switch mediaFileExtension(item) {
+	case ".csv", ".doc", ".docx", ".epub", ".json", ".md", ".ods", ".odt", ".pdf", ".ppt", ".pptx", ".rtf", ".txt", ".xls", ".xlsx", ".xml":
+		return true
+	default:
+		return false
+	}
+}
+
+func isArchiveMedia(item media.Item, mimeType string) bool {
+	switch mimeType {
+	case "application/gzip",
+		"application/java-archive",
+		"application/vnd.rar",
+		"application/x-7z-compressed",
+		"application/x-bzip",
+		"application/x-bzip2",
+		"application/x-gzip",
+		"application/x-rar-compressed",
+		"application/x-tar",
+		"application/zip":
+		return true
+	}
+	switch mediaFileExtension(item) {
+	case ".7z", ".bz2", ".gz", ".jar", ".rar", ".tar", ".tgz", ".xz", ".zip":
+		return true
+	default:
+		return false
+	}
+}
+
+func mediaFileExtension(item media.Item) string {
+	for _, value := range []string{item.OriginalName, item.Path} {
+		if ext := strings.ToLower(filepath.Ext(value)); ext != "" {
+			return ext
+		}
+	}
+	return ""
 }
 
 func mediaFileLabel(item media.Item) string {

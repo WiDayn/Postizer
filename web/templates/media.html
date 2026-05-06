@@ -1,6 +1,6 @@
 {{define "media.html"}}
 {{template "adminStart" .}}
-<header class="page-header compact">
+<header class="admin-page-header">
   <p class="kicker">{{msg . "admin.kicker"}}</p>
   <h1>{{msg . "media.heading"}}</h1>
 </header>
@@ -21,46 +21,67 @@
     </div>
   </form>
 
-  <div id="mediaLibraryGrid" class="media-grid">
-    {{range .Media}}
-    <figure class="media-item" data-id="{{.ID}}">
-      {{if mediaIsImage .}}
-      <img src="{{.Path}}" alt="{{.Alt}}">
-      {{else}}
-      <div class="media-file-preview">
-        <span>{{mediaFileType .}}</span>
-        <strong data-media-file-label>{{mediaFileLabel .}}</strong>
+  <section class="ui-panel media-library-panel">
+    <div class="ui-panel__head">
+      <h2>{{msg . "media.library.title" "Media Library"}}</h2>
+      <div class="admin-panel-actions">
+        <span>{{.Pagination.Total}}</span>
       </div>
+    </div>
+    <nav class="media-type-filter" aria-label="{{msg . "media.filter.type" "Media type"}}">
+      {{range .MediaFilters}}
+      <a class="media-type-filter__item{{if .Active}} is-active{{end}}" href="{{.URL}}" {{if .Active}}aria-current="page"{{end}}>
+        <span>{{msg $ .LabelKey .Label}}</span>
+        <span class="media-type-filter__count">{{.Count}}</span>
+      </a>
       {{end}}
-      <figcaption>
-        <form class="media-edit-form" data-id="{{.ID}}">
-          <label class="ui-field">
-            <span>{{msg $ "media.name"}}</span>
-            <input class="ui-input" name="original_name" value="{{.OriginalName}}">
-          </label>
-          <label class="ui-field">
-            <span>{{msg $ "media.alt"}}</span>
-            <input class="ui-input" name="alt" value="{{.Alt}}">
-          </label>
-          <label class="ui-field">
-            <span>{{msg $ "media.caption"}}</span>
-            <textarea class="ui-textarea" name="caption" rows="3">{{.Caption}}</textarea>
-          </label>
-          <p class="media-meta">{{mediaMeta .}}</p>
-          <textarea class="media-snippet ui-textarea" rows="5" readonly>{{mediaFigure .}}</textarea>
-          <div class="media-actions">
-            <button class="ui-button ui-button--primary" type="submit">{{msg $ "common.save"}}</button>
-            <button class="ui-button" data-media-copy type="button">{{msg $ "media.copy_snippet" "Copy snippet"}}</button>
-            <button class="ui-button ui-button--danger" data-media-delete type="button">{{msg $ "common.delete"}}</button>
-          </div>
-        </form>
-      </figcaption>
-    </figure>
-    {{else}}
-    <p>{{msg . "media.no_media"}}</p>
-    {{end}}
-  </div>
+    </nav>
+    <div id="mediaLibraryGrid" class="media-grid">
+      {{range .Media}}
+      <figure class="media-item" data-id="{{.ID}}">
+        {{if mediaIsImage .}}
+        <img src="{{.Path}}" alt="{{.Alt}}">
+        {{else}}
+        <div class="media-file-preview">
+          <span>{{mediaFileType .}}</span>
+          <strong data-media-file-label>{{mediaFileLabel .}}</strong>
+        </div>
+        {{end}}
+        <figcaption>
+          <form class="media-edit-form" data-id="{{.ID}}">
+            <label class="ui-field">
+              <span>{{msg $ "media.name"}}</span>
+              <input class="ui-input" name="original_name" value="{{.OriginalName}}">
+            </label>
+            <label class="ui-field">
+              <span>{{msg $ "media.alt"}}</span>
+              <input class="ui-input" name="alt" value="{{.Alt}}">
+            </label>
+            <label class="ui-field">
+              <span>{{msg $ "media.caption"}}</span>
+              <textarea class="ui-textarea" name="caption" rows="3">{{.Caption}}</textarea>
+            </label>
+            <p class="media-meta">{{mediaMeta .}}</p>
+            <textarea class="media-snippet ui-textarea" rows="5" readonly>{{mediaFigure .}}</textarea>
+            <div class="media-actions">
+              <button class="ui-button ui-button--primary" type="submit">{{msg $ "common.save"}}</button>
+              <button class="ui-button" data-media-copy type="button">{{msg $ "media.copy_snippet" "Copy snippet"}}</button>
+              <button class="ui-button ui-button--danger" data-media-delete type="button">{{msg $ "common.delete"}}</button>
+            </div>
+          </form>
+        </figcaption>
+      </figure>
+      {{else}}
+      {{if .MediaFilter}}
+      <p class="media-empty">{{msg . "media.no_filtered_media" "No media matches this type."}}</p>
+      {{else}}
+      <p class="media-empty">{{msg . "media.no_media"}}</p>
+      {{end}}
+      {{end}}
+    </div>
+    {{template "adminPagination" .}}
+  </section>
 </section>
-<script defer src="/static/media-library.js?v=4"></script>
+<script defer src="/static/media-library.js?v=6"></script>
 {{template "adminEnd" .}}
 {{end}}

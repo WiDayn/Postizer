@@ -172,6 +172,12 @@
     text-decoration: none;
   }
 
+  .ui-button.is-disabled {
+    opacity: .42;
+    cursor: default;
+    pointer-events: none;
+  }
+
   .ui-button--primary {
     background: var(--inverse);
     color: var(--inverse-ink);
@@ -711,6 +717,38 @@
   .admin-table-empty {
     color: var(--muted);
     font-style: italic;
+  }
+
+  .admin-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .65rem;
+    align-items: center;
+    justify-content: space-between;
+    padding: .65rem;
+    border-top: 1px solid var(--rule);
+    background: var(--surface-muted);
+    font-family: var(--font-ui);
+    font-size: .78rem;
+  }
+
+  .admin-pagination__summary {
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .admin-pagination__links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .admin-pagination__links .ui-button {
+    min-width: 2.1rem;
+    min-height: 1.9rem;
+    padding: .25rem .5rem;
   }
 
   .settings-form {
@@ -2886,6 +2924,60 @@
   .media-manager {
     display: grid;
     gap: .75rem;
+  }
+
+  .media-library-panel {
+    display: grid;
+    gap: 0;
+  }
+
+  .media-library-panel .media-grid {
+    padding: .75rem;
+  }
+
+  .media-type-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+    padding: .5rem;
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface);
+    font-family: var(--font-ui);
+  }
+
+  .media-type-filter__item,
+  .media-type-filter__item:visited {
+    display: inline-flex;
+    min-height: 2rem;
+    align-items: center;
+    gap: .45rem;
+    padding: .35rem .55rem;
+    border: 1px solid var(--rule);
+    background: var(--surface-muted);
+    color: var(--ink);
+    font-size: .78rem;
+    line-height: 1.1;
+    text-decoration: none;
+  }
+
+  .media-type-filter__item.is-active {
+    background: var(--inverse);
+    color: var(--inverse-ink);
+  }
+
+  .media-type-filter__count {
+    min-width: 1.35rem;
+    padding: .1rem .25rem;
+    border: 1px solid currentColor;
+    text-align: center;
+    font-size: .72rem;
+  }
+
+  .media-empty {
+    margin: 0;
+    padding: .9rem;
+    color: var(--muted);
+    font-family: var(--font-ui);
   }
 
   .media-upload-row {
