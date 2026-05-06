@@ -15,6 +15,11 @@
       "id": "navbar",
       "name": "Navbar",
       "description": "Primary navigation bar"
+    },
+    {
+      "id": "footer",
+      "name": "Footer",
+      "description": "Footer navigation area"
     }
   ],
   "tags": [

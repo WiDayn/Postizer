@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{pageTitle .}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=88">
+  <link rel="stylesheet" href="/static/site.css?v=90">
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
@@ -50,10 +50,10 @@
       <a class="{{if eq .ActiveAdmin "posts"}}is-active{{end}}" href="/admin/posts">{{msg . "nav.posts"}}</a>
       <a class="{{if eq .ActiveAdmin "pages"}}is-active{{end}}" href="/admin/pages">{{msg . "nav.pages" "Pages"}}</a>
       <a class="{{if eq .ActiveAdmin "media"}}is-active{{end}}" href="/admin/media">{{msg . "nav.media"}}</a>
-      <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
-      <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
-      <a class="{{if eq .ActiveAdmin "theme-settings"}}is-active{{end}}" href="/admin/theme-settings">{{msg . "nav.theme_settings" "Theme Settings"}}</a>
       <a class="{{if eq .ActiveAdmin "menus"}}is-active{{end}}" href="/admin/menus">{{msg . "nav.menus" "Custom Menus"}}</a>
+      <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
+      <a class="{{if eq .ActiveAdmin "theme-settings"}}is-active{{end}}" href="/admin/theme-settings">{{msg . "nav.theme_settings" "Theme Settings"}}</a>
+      <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
       <a class="{{if eq .ActiveAdmin "settings"}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>
     </nav>
     <div class="admin-sidebar-footer">
@@ -90,6 +90,13 @@
       <a href="/sitemap.xml">{{msg . "site.feed.sitemap"}}</a>
     </div>
   </aside>
+  {{with menuLinks . "footer"}}
+  <footer class="site-footer">
+    <nav class="site-footer__nav" aria-label="{{msg $ "site.footer.nav_aria" "Footer"}}">
+      {{range .}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
+    </nav>
+  </footer>
+  {{end}}
 </div>
 </body>
 </html>

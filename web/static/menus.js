@@ -8,6 +8,8 @@ const saveThemeMenusButton = document.querySelector("#saveThemeMenus");
 const menuNameInput = document.querySelector("#menuNameInput");
 const menuSourcePanels = document.querySelector("#menuSourcePanels");
 const themeMenuList = document.querySelector("#themeMenuList");
+const saveThemeMenusDefaultLabel = saveThemeMenusButton ? saveThemeMenusButton.textContent : "";
+let saveThemeMenusFeedbackTimer = 0;
 
 function tr(key, fallback) {
   if (window.postizerMessage) return window.postizerMessage(key, fallback);
@@ -24,6 +26,19 @@ function apiURL(path) {
 
 function setThemeMenuStatus(message) {
   if (themeMenuStatus) themeMenuStatus.textContent = message || "";
+}
+
+function setSaveThemeMenusFeedback(message, options = {}) {
+  if (!saveThemeMenusButton) return;
+  window.clearTimeout(saveThemeMenusFeedbackTimer);
+  saveThemeMenusButton.textContent = message || saveThemeMenusDefaultLabel;
+  saveThemeMenusButton.disabled = Boolean(options.disabled);
+  if (options.resetAfter) {
+    saveThemeMenusFeedbackTimer = window.setTimeout(() => {
+      saveThemeMenusButton.textContent = saveThemeMenusDefaultLabel;
+      saveThemeMenusButton.disabled = false;
+    }, options.resetAfter);
+  }
 }
 
 function readInitialData() {
@@ -386,18 +401,29 @@ if (deleteThemeMenuButton) {
 }
 
 async function saveMenus(statusMessage) {
-  setThemeMenuStatus(statusMessage || tr("settings.status.saving", "Saving"));
-  const response = await fetch(apiURL("/admin/api/menus"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload())
-  });
-  if (!response.ok) {
-    setThemeMenuStatus((await response.text()).trim());
+  const savingMessage = statusMessage || tr("settings.status.saving", "Saving");
+  setThemeMenuStatus(savingMessage);
+  setSaveThemeMenusFeedback(savingMessage, { disabled: true });
+  let response;
+  try {
+    response = await fetch(apiURL("/admin/api/menus"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload())
+    });
+  } catch (error) {
+    setThemeMenuStatus(error && error.message ? error.message : tr("settings.status.error", "Error"));
+    setSaveThemeMenusFeedback(tr("settings.status.error", "Error"), { resetAfter: 2000 });
     return false;
   }
+  if (!response.ok) {
+    setThemeMenuStatus((await response.text()).trim());
+    setSaveThemeMenusFeedback(tr("settings.status.error", "Error"), { resetAfter: 2000 });
+    return false;
+  }
+  await response.json().catch(() => null);
   setThemeMenuStatus(tr("settings.status.saved", "Saved"));
-  window.location.reload();
+  setSaveThemeMenusFeedback(tr("settings.status.saved", "Saved"), { resetAfter: 1600 });
   return true;
 }
 
