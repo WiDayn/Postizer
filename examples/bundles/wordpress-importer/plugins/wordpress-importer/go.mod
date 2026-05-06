@@ -1,12 +1,11 @@
-module postizer
+module postizer-wordpress-importer
 
 go 1.26.2
 
 require (
-	github.com/deepteams/webp v1.2.1
-	github.com/yuin/goldmark v1.7.8
 	golang.org/x/net v0.53.0
 	google.golang.org/grpc v1.81.0
+	postizer v0.0.0
 )
 
 require (
@@ -15,3 +14,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace postizer => ../../../../..

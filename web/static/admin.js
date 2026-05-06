@@ -216,6 +216,41 @@ function figureMarkdown(item = {}) {
   return `\n\n\\begin{figure}\n![${markdownImageAlt(alt)}](${path})\n\\caption{${latexBraceText(caption)}}\n\\label{${label}}\n\\end{figure}\n\n`;
 }
 
+function markdownBlock(markdown = "") {
+  const trimmed = String(markdown || "").trim();
+  return trimmed ? `\n\n${trimmed}\n\n` : "";
+}
+
+function markdownLinkText(value) {
+  return String(value || tr("media.file.default_label", "File")).replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+}
+
+function markdownLinkDestination(value) {
+  return String(value || "").replace(/\\/g, "%5C").replace(/\(/g, "%28").replace(/\)/g, "%29");
+}
+
+function isImageItem(item = {}) {
+  return String(item.mime_type || item.MIMEType || item.mimeType || "").toLowerCase().startsWith("image/");
+}
+
+function mediaFileLabel(item = {}) {
+  const path = item.path || item.Path || "";
+  return item.caption || item.Caption || item.alt || item.Alt || item.original_name || item.OriginalName || path.split("/").pop() || tr("media.file.default_label", "File");
+}
+
+function mediaFileType(item = {}) {
+  const value = String(item.original_name || item.OriginalName || item.path || item.Path || "");
+  const match = value.match(/\.([^./\\]+)$/);
+  return match ? match[1].toUpperCase() : "FILE";
+}
+
+function mediaMarkdown(item = {}) {
+  const path = item.path || item.Path || "";
+  if (!path) return "";
+  if (isImageItem(item)) return figureMarkdown(item);
+  return `\n\n[${markdownLinkText(mediaFileLabel(item))}](${markdownLinkDestination(path)})\n\n`;
+}
+
 function selectionWrap(before, after = before, fallback = "") {
   const start = editor.selectionStart || 0;
   const end = editor.selectionEnd || 0;
@@ -446,9 +481,10 @@ async function uploadFile(file, endpoint = "/admin/api/media") {
   const response = await fetch(apiURL(endpoint), { method: "POST", body: data });
   if (!response.ok) throw new Error(await response.text());
   const result = await response.json();
+  const item = result.item || {};
   setStatus(tr("editor.status.uploaded", "Uploaded"));
   await refreshMedia();
-  return figureMarkdown(result.item || {});
+  return !isImageItem(item) && result.markdown ? markdownBlock(result.markdown) : mediaMarkdown(item);
 }
 
 async function refreshMedia() {
@@ -461,13 +497,22 @@ async function refreshMedia() {
     button.type = "button";
     button.className = "ui-media-button";
     button.dataset.path = item.path;
+    button.dataset.mimeType = item.mime_type || "";
+    button.dataset.markdown = isImageItem(item) ? "" : mediaMarkdown(item);
     button.dataset.alt = item.alt || tr("editor.image.default_alt", "Image");
     button.dataset.caption = item.caption || "";
     button.title = item.original_name;
-    const img = document.createElement("img");
-    img.src = item.path;
-    img.alt = item.alt || "";
-    button.appendChild(img);
+    if (isImageItem(item)) {
+      const img = document.createElement("img");
+      img.src = item.path;
+      img.alt = item.alt || "";
+      button.appendChild(img);
+    } else {
+      const fileBadge = document.createElement("span");
+      fileBadge.className = "ui-media-button__file";
+      fileBadge.textContent = mediaFileType(item);
+      button.appendChild(fileBadge);
+    }
     mediaStrip.appendChild(button);
   });
 }
@@ -502,11 +547,21 @@ postLibrary.addEventListener("click", (event) => {
 mediaStrip.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-path]");
   if (button) {
-    insertAtCursor(editor, figureMarkdown({
+    if (String(button.dataset.mimeType || "").toLowerCase().startsWith("image/")) {
+      insertAtCursor(editor, figureMarkdown({
+        path: button.dataset.path,
+        alt: button.dataset.alt,
+        caption: button.dataset.caption
+      }));
+      return;
+    }
+    const markdown = button.dataset.markdown || mediaMarkdown({
       path: button.dataset.path,
+      mime_type: button.dataset.mimeType,
       alt: button.dataset.alt,
       caption: button.dataset.caption
-    }));
+    });
+    insertAtCursor(editor, markdownBlock(markdown));
   }
 });
 

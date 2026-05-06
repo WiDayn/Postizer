@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"postizer/internal/appearance"
 	"postizer/internal/media"
 	"postizer/internal/site"
+	"postizer/pkg/pluginrpc"
 )
 
 func TestLoadTemplatesParsesAdminTemplates(t *testing.T) {
@@ -29,6 +31,15 @@ func TestLoadTemplatesParsesAdminTemplates(t *testing.T) {
 	if _, err := loadTemplates(appearance.Pack{}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func containsLog(logs []string, pattern string) bool {
+	for _, line := range logs {
+		if strings.Contains(line, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHomeImageFromMediaItemUsesMetadata(t *testing.T) {
@@ -69,6 +80,7 @@ func TestMediaFigureMarkdownHasNoOuterBlankLines(t *testing.T) {
 		OriginalName: "example.png",
 		Alt:          "Example",
 		Caption:      "Caption",
+		MIMEType:     "image/png",
 	})
 	if markdown != strings.TrimSpace(markdown) {
 		t.Fatalf("media figure markdown should be trimmed, got %q", markdown)
@@ -78,6 +90,94 @@ func TestMediaFigureMarkdownHasNoOuterBlankLines(t *testing.T) {
 	}
 	if !strings.HasPrefix(markdown, `\begin{figure}`) {
 		t.Fatalf("media figure markdown should start with figure syntax, got %q", markdown)
+	}
+}
+
+func TestMediaFigureMarkdownUsesLinkForNonImage(t *testing.T) {
+	markdown := mediaFigureMarkdown(media.Item{
+		ID:           "file-id",
+		Path:         "/media/2026/05/archive.customext",
+		OriginalName: "archive.customext",
+		Alt:          "Download archive",
+		MIMEType:     "application/octet-stream",
+	})
+
+	if strings.Contains(markdown, `\begin{figure}`) {
+		t.Fatalf("non-image markdown should not use figure syntax, got %q", markdown)
+	}
+	if got, want := markdown, `[Download archive](/media/2026/05/archive.customext)`; got != want {
+		t.Fatalf("non-image markdown = %q, want %q", got, want)
+	}
+}
+
+func TestHostServiceSavesMediaContentAndUpdatesJob(t *testing.T) {
+	contentRoot := t.TempDir()
+	mediaStore, err := media.Open(filepath.Join(contentRoot, "media"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		store:       &site.Store{Settings: site.Settings{}},
+		contentRoot: contentRoot,
+		media:       mediaStore,
+		pluginJobs:  map[string]*importJob{},
+	}
+
+	ctx := context.Background()
+	mediaResponse, err := s.SaveMedia(ctx, &pluginrpc.SaveMediaRequest{
+		OriginalName: "archive.customext",
+		Alt:          "Archive",
+		Body:         []byte("hello"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(mediaResponse.Item.Path, ".customext") {
+		t.Fatalf("media path should keep custom suffix, got %q", mediaResponse.Item.Path)
+	}
+	if mediaResponse.Item.Alt != "Archive" {
+		t.Fatalf("media alt = %q, want Archive", mediaResponse.Item.Alt)
+	}
+
+	postResponse, err := s.SavePost(ctx, &pluginrpc.ContentDraft{
+		Title: "Imported",
+		Slug:  "imported",
+		Date:  "2026-05-06T12:00",
+		Body:  "Body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := postResponse.URL, "/posts/imported"; got != want {
+		t.Fatalf("post URL = %q, want %q", got, want)
+	}
+
+	body, err := os.ReadFile(filepath.Join(contentRoot, "posts", "imported.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Body") {
+		t.Fatalf("post body was not written:\n%s", string(body))
+	}
+
+	job, err := s.CreateJob(ctx, &pluginrpc.CreateJobRequest{Title: "Test job", Total: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = s.UpdateJob(ctx, &pluginrpc.UpdateJobRequest{
+		JobID:  job.ID,
+		Done:   1,
+		Log:    "Halfway",
+		Status: "running",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := job.Done, 1; got != want {
+		t.Fatalf("job done = %d, want %d", got, want)
+	}
+	if !containsLog(job.Logs, "Halfway") {
+		t.Fatalf("job logs should include update: %#v", job.Logs)
 	}
 }
 

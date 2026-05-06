@@ -1,0 +1,37 @@
+{
+  "id": "wordpress-importer",
+  "type": "plugin",
+  "name": "WordPress Importer",
+  "version": "1.0.0",
+  "description": "Import posts, pages, and media from a WordPress WXR XML export.",
+  "runtime": {
+    "kind": "grpc",
+    "command": "${go}",
+    "args": [
+      "run",
+      "./cmd/postizer-wordpress-importer"
+    ]
+  },
+  "services": [
+    {
+      "name": "postizer.plugin.v1.PluginService",
+      "methods": [
+        "Handshake",
+        "InvokeAction",
+        "Shutdown"
+      ]
+    }
+  ],
+  "ui_entries": [
+    {
+      "id": "import",
+      "outlet": "admin.plugin",
+      "path": "ui/import.json"
+    }
+  ],
+  "permissions": [
+    "content.write",
+    "media.write",
+    "network.fetch"
+  ]
+}

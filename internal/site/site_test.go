@@ -427,6 +427,88 @@ func TestSplitFrontMatterRemovesSeparatorBlankLine(t *testing.T) {
 	}
 }
 
+func TestLoadPostUsesMoreTagAsSummaryWhenSummaryEmpty(t *testing.T) {
+	root := t.TempDir()
+	postDir := filepath.Join(root, "posts")
+	if err := os.MkdirAll(postDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := `---
+title: "More Summary"
+slug: "more-summary"
+date: "2026-05-04T08:30"
+summary: ""
+draft: false
+toc: true
+---
+
+Lead **paragraph** with [link](https://example.com).
+
+<!--more-->
+
+Rest of the post.
+`
+	if err := os.WriteFile(filepath.Join(postDir, "more-summary.md"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := store.PostsBySlug["more-summary"]
+	if post == nil {
+		t.Fatal("post not loaded")
+	}
+	if got, want := post.Summary, "Lead paragraph with link."; got != want {
+		t.Fatalf("summary = %q, want %q", got, want)
+	}
+	if strings.Contains(string(post.HTML), "more") {
+		t.Fatalf("MORE tag should not be rendered into post HTML:\n%s", post.HTML)
+	}
+	if !strings.Contains(post.Source, "<!--more-->") {
+		t.Fatalf("editor source should preserve MORE tag: %q", post.Source)
+	}
+}
+
+func TestLoadPostExplicitSummaryOverridesMoreTag(t *testing.T) {
+	root := t.TempDir()
+	postDir := filepath.Join(root, "posts")
+	if err := os.MkdirAll(postDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := `---
+title: "Explicit Summary"
+slug: "explicit-summary"
+date: "2026-05-04T08:30"
+summary: "Manual summary."
+draft: false
+toc: true
+---
+
+Lead from MORE.
+
+<!--more-->
+
+Rest.
+`
+	if err := os.WriteFile(filepath.Join(postDir, "explicit-summary.md"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := store.PostsBySlug["explicit-summary"]
+	if post == nil {
+		t.Fatal("post not loaded")
+	}
+	if got, want := post.Summary, "Manual summary."; got != want {
+		t.Fatalf("summary = %q, want %q", got, want)
+	}
+}
+
 func TestLoadParsesMinuteDatesInConfiguredTimeZone(t *testing.T) {
 	root := t.TempDir()
 	settings := defaultSettings()

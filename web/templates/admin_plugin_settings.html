@@ -1,0 +1,52 @@
+{{define "admin_plugin_settings.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">{{msg . "admin.kicker"}}</p>
+  <h1>{{.Plugin.Name}}</h1>
+</header>
+
+<section class="ui-panel admin-panel plugin-settings-panel" data-plugin-id="{{.Plugin.ID}}">
+  <div class="ui-panel__head">
+    <h2>{{.Plugin.Name}}</h2>
+  </div>
+  {{if .Error}}
+  <p class="ui-status ui-status--error">{{.Error}}</p>
+  {{else}}
+    {{if .Plugin.Description}}
+    <p class="appearance-copy">{{.Plugin.Description}}</p>
+    {{end}}
+
+    {{range .PluginUI.Pages}}
+    <section class="plugin-admin-page">
+      <div class="pack-section__head">
+        <h3>{{.Title}}</h3>
+        {{if .Description}}<p>{{.Description}}</p>{{end}}
+      </div>
+      {{range .Actions}}
+        {{$action := pluginAction $.PluginUI .}}
+        <form class="plugin-action-form" data-plugin-action-form data-action-id="{{$action.ID}}">
+          {{range $action.Fields}}
+          <label class="ui-field">
+            <span>{{.Label}}</span>
+            {{if eq .Type "file"}}
+            <input type="file" name="{{.Name}}" {{if .Accept}}accept="{{.Accept}}"{{end}} {{if .Required}}required{{end}}>
+            {{else}}
+            <input type="{{if .Type}}{{.Type}}{{else}}text{{end}}" name="{{.Name}}" {{if .Required}}required{{end}}>
+            {{end}}
+            {{if .Help}}<small>{{.Help}}</small>{{end}}
+          </label>
+          {{end}}
+          <div class="settings-actions">
+            <button type="submit" class="ui-button ui-button--primary">{{$action.Label}}</button>
+            <span class="ui-status" data-plugin-action-status aria-live="polite"></span>
+          </div>
+        </form>
+      {{end}}
+    </section>
+    {{end}}
+    <div class="plugin-action-result" data-plugin-action-result></div>
+  {{end}}
+</section>
+<script defer src="/static/plugin-admin.js?v=2"></script>
+{{template "adminEnd" .}}
+{{end}}

@@ -107,8 +107,10 @@ if (mediaGrid) {
     const item = result.item || {};
     const figure = form.closest(".media-item");
     const image = figure && figure.querySelector("img");
+    const fileLabel = figure && figure.querySelector("[data-media-file-label]");
     const snippet = form.querySelector(".media-snippet");
     if (image) image.alt = item.alt || "";
+    if (fileLabel) fileLabel.textContent = item.caption || item.alt || item.original_name || tr("media.file.default_label", "File");
     if (snippet) snippet.value = result.markdown || snippet.value;
     setMediaStatus(tr("media.status.saved", "Saved"));
   });

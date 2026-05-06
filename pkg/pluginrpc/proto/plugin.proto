@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package postizer.plugin.v1;
+
+option go_package = "postizer/pkg/pluginrpc/proto;pluginv1";
+
+service PluginService {
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  rpc InvokeAction(InvokeActionRequest) returns (InvokeActionResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+service HostService {
+  rpc CreateJob(CreateJobRequest) returns (ImportJob);
+  rpc UpdateJob(UpdateJobRequest) returns (ImportJob);
+  rpc SaveMedia(SaveMediaRequest) returns (SaveMediaResponse);
+  rpc SavePost(ContentDraft) returns (SaveContentResponse);
+  rpc SavePage(ContentDraft) returns (SaveContentResponse);
+  rpc ReloadRuntime(ReloadRuntimeRequest) returns (ReloadRuntimeResponse);
+}
+
+message HandshakeRequest {
+  string protocol_version = 1;
+  string host_version = 2;
+  string plugin_id = 3;
+}
+
+message HandshakeResponse {
+  string protocol_version = 1;
+  string plugin_id = 2;
+  string plugin_version = 3;
+  bool ready = 4;
+  string message = 5;
+}
+
+message InvokeActionRequest {
+  string plugin_id = 1;
+  string action_id = 2;
+  map<string, string> fields = 3;
+  repeated ActionFile files = 4;
+}
+
+message ActionFile {
+  string name = 1;
+  string filename = 2;
+  string content_type = 3;
+  bytes body = 4;
+}
+
+message InvokeActionResponse {
+  reserved 6;
+
+  string title = 1;
+  string summary = 2;
+  string level = 3;
+  repeated ResultSection sections = 4;
+  repeated NextAction next_actions = 5;
+  ImportJob job = 7;
+}
+
+message ResultSection {
+  string title = 1;
+  string kind = 2;
+  string text = 3;
+  repeated ResultRow rows = 4;
+}
+
+message ResultRow {
+  string label = 1;
+  string value = 2;
+}
+
+message NextAction {
+  string id = 1;
+  string label = 2;
+  string style = 3;
+  string confirm = 4;
+  map<string, string> fields = 5;
+}
+
+message ContentDraft {
+  string title = 1;
+  string slug = 2;
+  string date = 3;
+  string updated = 4;
+  repeated string tags = 5;
+  string summary = 6;
+  bool draft = 7;
+  bool toc = 8;
+  string body = 9;
+}
+
+message ImportJob {
+  string id = 1;
+  string status = 2;
+  int32 done = 3;
+  int32 total = 4;
+  int32 percent = 5;
+  repeated string logs = 6;
+  repeated ResultSection sections = 7;
+}
+
+message CreateJobRequest {
+  string plugin_id = 1;
+  string title = 2;
+  int32 total = 3;
+}
+
+message UpdateJobRequest {
+  string plugin_id = 1;
+  string job_id = 2;
+  string status = 3;
+  int32 done = 4;
+  int32 total = 5;
+  string log = 6;
+  string error = 7;
+  repeated ResultSection sections = 8;
+}
+
+message SaveMediaRequest {
+  string plugin_id = 1;
+  string original_name = 2;
+  string alt = 3;
+  string caption = 4;
+  string content_type = 5;
+  bytes body = 6;
+}
+
+message MediaItem {
+  string id = 1;
+  string path = 2;
+  string original_name = 3;
+  string alt = 4;
+  string caption = 5;
+  string mime_type = 6;
+  int32 width = 7;
+  int32 height = 8;
+}
+
+message SaveMediaResponse {
+  MediaItem item = 1;
+  string markdown = 2;
+}
+
+message SaveContentResponse {
+  string title = 1;
+  string slug = 2;
+  string url = 3;
+}
+
+message ReloadRuntimeRequest {
+  string plugin_id = 1;
+}
+
+message ReloadRuntimeResponse {
+  bool ok = 1;
+}
+
+message ShutdownRequest {
+  string plugin_id = 1;
+}
+
+message ShutdownResponse {
+  bool ok = 1;
+}

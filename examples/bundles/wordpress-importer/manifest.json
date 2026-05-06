@@ -1,0 +1,15 @@
+{
+  "id": "wordpress-importer",
+  "type": "bundle",
+  "name": "WordPress Importer",
+  "version": "1.0.0",
+  "description": "Installable plugin bundle for importing posts, pages, and media from a WordPress WXR XML export.",
+  "packs": [
+    {
+      "path": "plugins/wordpress-importer"
+    }
+  ],
+  "tags": [
+    "importer"
+  ]
+}

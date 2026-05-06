@@ -2,6 +2,7 @@ package appearance
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -39,9 +41,9 @@ const (
 	// maxPackZipFiles 限制一次安装最多可解压的普通文件数，避免异常 zip 生成海量小文件。
 	maxPackZipFiles = 512
 	// maxPackZipSingleFileBytes 限制资源包内单个文件的解压后大小。
-	maxPackZipSingleFileBytes int64 = 16 << 20
+	maxPackZipSingleFileBytes int64 = 64 << 20
 	// maxPackZipTotalBytes 限制资源包整体解压后的总大小，抵御压缩炸弹。
-	maxPackZipTotalBytes int64 = 64 << 20
+	maxPackZipTotalBytes int64 = 256 << 20
 )
 
 // PackType 表示资源包/插件包类型。
@@ -91,6 +93,83 @@ type MenuLocation struct {
 	Description string `json:"description"`
 }
 
+// RuntimeKind describes how an interactive plugin is executed.
+//
+// Empty runtime fields keep the existing static resource-pack behavior:
+// translations, templates, and styles can be loaded without starting a
+// separate process.
+type RuntimeKind string
+
+const (
+	RuntimeStatic RuntimeKind = ""
+	RuntimeGRPC   RuntimeKind = "grpc"
+)
+
+// PluginRuntime describes an optional external process used by a plugin.
+type PluginRuntime struct {
+	Kind      RuntimeKind             `json:"kind"`
+	Command   string                  `json:"command"`
+	Args      []string                `json:"args"`
+	WorkDir   string                  `json:"work_dir"`
+	Env       map[string]string       `json:"env"`
+	Platforms []PluginRuntimePlatform `json:"platforms"`
+}
+
+// PluginRuntimePlatform declares a platform-specific executable for a plugin.
+type PluginRuntimePlatform struct {
+	GOOS    string            `json:"goos"`
+	GOArch  string            `json:"goarch"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	WorkDir string            `json:"work_dir"`
+	Env     map[string]string `json:"env"`
+}
+
+// PluginPermission is a stable capability flag requested by a plugin.
+type PluginPermission string
+
+// PluginService declares a service exposed by an external plugin runtime.
+type PluginService struct {
+	Name    string   `json:"name"`
+	Methods []string `json:"methods"`
+}
+
+type UIEntry struct {
+	ID     string `json:"id"`
+	Outlet string `json:"outlet"`
+	Path   string `json:"path"`
+}
+
+type PluginUI struct {
+	Pages   []PluginUIPage   `json:"pages"`
+	Actions []PluginUIAction `json:"actions"`
+}
+
+type PluginUIPage struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Actions     []string `json:"actions,omitempty"`
+}
+
+type PluginUIAction struct {
+	ID                   string          `json:"id"`
+	Label                string          `json:"label"`
+	Description          string          `json:"description,omitempty"`
+	Kind                 string          `json:"kind,omitempty"`
+	Fields               []PluginUIField `json:"fields,omitempty"`
+	RequiresConfirmation bool            `json:"requires_confirmation,omitempty"`
+}
+
+type PluginUIField struct {
+	Name     string `json:"name"`
+	Label    string `json:"label"`
+	Type     string `json:"type"`
+	Accept   string `json:"accept,omitempty"`
+	Required bool   `json:"required,omitempty"`
+	Help     string `json:"help,omitempty"`
+}
+
 // Manifest 描述一个主题包、插件包或 bundle 资源合集的元信息。
 //
 // 约定：
@@ -99,22 +178,26 @@ type MenuLocation struct {
 // 3. 插件包也可以通过 `translations_dir` 提供多语言覆盖。
 // 4. 旧版 `text` 包使用 `messages_file + lang` 表示“单语言翻译包”。
 type Manifest struct {
-	ID              string         `json:"id"`
-	Type            PackType       `json:"type"`
-	Name            string         `json:"name"`
-	SortName        string         `json:"sort_name"`
-	Version         string         `json:"version"`
-	Description     string         `json:"description"`
-	SourceURL       string         `json:"source_url"`
-	Lang            string         `json:"lang"`
-	DefaultLocale   string         `json:"default_locale"`
-	Tags            []string       `json:"tags"`
-	Styles          []string       `json:"styles"`
-	TemplatesDir    string         `json:"templates_dir"`
-	TranslationsDir string         `json:"translations_dir"`
-	MessagesFile    string         `json:"messages_file"`
-	MenuLocations   []MenuLocation `json:"menu_locations"`
-	Packs           []BundleEntry  `json:"packs"`
+	ID              string             `json:"id"`
+	Type            PackType           `json:"type"`
+	Name            string             `json:"name"`
+	SortName        string             `json:"sort_name"`
+	Version         string             `json:"version"`
+	Description     string             `json:"description"`
+	SourceURL       string             `json:"source_url"`
+	Lang            string             `json:"lang"`
+	DefaultLocale   string             `json:"default_locale"`
+	Tags            []string           `json:"tags"`
+	Styles          []string           `json:"styles"`
+	TemplatesDir    string             `json:"templates_dir"`
+	TranslationsDir string             `json:"translations_dir"`
+	MessagesFile    string             `json:"messages_file"`
+	MenuLocations   []MenuLocation     `json:"menu_locations"`
+	Packs           []BundleEntry      `json:"packs"`
+	Runtime         PluginRuntime      `json:"runtime"`
+	Services        []PluginService    `json:"services"`
+	UIEntries       []UIEntry          `json:"ui_entries"`
+	Permissions     []PluginPermission `json:"permissions"`
 }
 
 // Pack 是运行时可用的主题包、插件包或 bundle 资源合集对象。
@@ -351,6 +434,9 @@ func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (Installe
 		if err := validateBundleInstall(stageDir, manifest); err != nil {
 			return InstalledPack{}, err
 		}
+		if err := pruneBundleRuntimesForCurrentPlatform(stageDir, manifest); err != nil {
+			return InstalledPack{}, err
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(targetDir), 0755); err != nil {
@@ -442,9 +528,204 @@ func validateBundleInstall(bundleDir string, manifest Manifest) error {
 		if seen[child.Type][child.ID] {
 			return fmt.Errorf("bundle contains duplicate %s pack id %q", child.Type, child.ID)
 		}
+		if err := validatePackRuntimeForCurrentPlatform(child); err != nil {
+			return err
+		}
 		seen[child.Type][child.ID] = true
 	}
 	return nil
+}
+
+func validatePackRuntimeForCurrentPlatform(pack Pack) error {
+	if pack.Type != PluginPack || pack.Runtime.Kind != RuntimeGRPC {
+		return nil
+	}
+	selected, hasCurrentPlatform := pluginRuntimeForCurrentPlatform(pack.Runtime)
+	if !hasCurrentPlatform {
+		return fmt.Errorf(
+			"plugin %q does not include a runtime for current platform %s/%s; supported platforms: %s",
+			pack.ID,
+			runtime.GOOS,
+			runtime.GOARCH,
+			runtimeSupportedPlatforms(pack.Runtime),
+		)
+	}
+	if err := validateRuntimeCommandExists(pack.RootDir, selected.Command); err != nil {
+		return fmt.Errorf("plugin %q runtime for %s/%s: %w", pack.ID, runtime.GOOS, runtime.GOARCH, err)
+	}
+	return nil
+}
+
+func pluginRuntimeForCurrentPlatform(runtimeConfig PluginRuntime) (PluginRuntime, bool) {
+	selected := PluginRuntime{
+		Kind:    runtimeConfig.Kind,
+		Command: strings.TrimSpace(runtimeConfig.Command),
+		Args:    append([]string(nil), runtimeConfig.Args...),
+		WorkDir: strings.TrimSpace(runtimeConfig.WorkDir),
+		Env:     cloneStringMap(runtimeConfig.Env),
+	}
+	for _, platform := range runtimeConfig.Platforms {
+		if platform.GOOS == runtime.GOOS && platform.GOArch == runtime.GOARCH {
+			selected.Command = strings.TrimSpace(platform.Command)
+			if platform.Args != nil {
+				selected.Args = append([]string(nil), platform.Args...)
+			}
+			if strings.TrimSpace(platform.WorkDir) != "" {
+				selected.WorkDir = strings.TrimSpace(platform.WorkDir)
+			}
+			selected.Env = mergeStringMap(selected.Env, platform.Env)
+			selected.Platforms = nil
+			return selected, true
+		}
+	}
+	selected.Platforms = nil
+	return selected, selected.Command != ""
+}
+
+func runtimeSupportedPlatforms(runtimeConfig PluginRuntime) string {
+	if len(runtimeConfig.Platforms) == 0 {
+		return "none"
+	}
+	platforms := make([]string, 0, len(runtimeConfig.Platforms))
+	for _, platform := range runtimeConfig.Platforms {
+		platforms = append(platforms, platform.GOOS+"/"+platform.GOArch)
+	}
+	sort.Strings(platforms)
+	return strings.Join(platforms, ", ")
+}
+
+func validateRuntimeCommandExists(root, command string) error {
+	command = strings.TrimSpace(command)
+	if command == "" || command == "${go}" || !strings.ContainsAny(command, `/\`) || filepath.IsAbs(command) {
+		return nil
+	}
+	cleaned, err := cleanPackPath(command)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(cleaned)))
+	if err != nil {
+		return fmt.Errorf("command file %q is not available: %w", command, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("command file %q is a directory", command)
+	}
+	return nil
+}
+
+func pruneBundleRuntimesForCurrentPlatform(bundleDir string, manifest Manifest) error {
+	children, err := scanBundleChildren(bundleDir, SourceUser, manifest, path.Join(DirBundles, manifest.ID), path.Join("/packs", string(SourceUser), DirBundles, manifest.ID), "")
+	if err != nil {
+		return fmt.Errorf("scan bundle children for runtime pruning: %w", err)
+	}
+	for _, child := range children {
+		if err := prunePluginRuntimeForCurrentPlatform(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func prunePluginRuntimeForCurrentPlatform(pack Pack) error {
+	if pack.Type != PluginPack || pack.Runtime.Kind != RuntimeGRPC || len(pack.Runtime.Platforms) == 0 {
+		return nil
+	}
+	selected, ok := pluginRuntimeForCurrentPlatform(pack.Runtime)
+	if !ok {
+		return fmt.Errorf("plugin %q does not include a runtime for current platform %s/%s", pack.ID, runtime.GOOS, runtime.GOARCH)
+	}
+	for _, platform := range pack.Runtime.Platforms {
+		command := strings.TrimSpace(platform.Command)
+		if command == "" || command == selected.Command {
+			continue
+		}
+		if err := removePackCommandFile(pack.RootDir, command); err != nil {
+			return fmt.Errorf("plugin %q remove unused runtime %s/%s: %w", pack.ID, platform.GOOS, platform.GOArch, err)
+		}
+	}
+	manifest := pack.Manifest
+	manifest.Runtime = selected
+	if err := writeManifestFile(filepath.Join(pack.RootDir, "manifest.json"), manifest); err != nil {
+		return fmt.Errorf("write pruned plugin manifest %q: %w", pack.ID, err)
+	}
+	removeEmptyDirs(filepath.Join(pack.RootDir, "bin"))
+	return nil
+}
+
+func removePackCommandFile(root, command string) error {
+	command = strings.TrimSpace(command)
+	if command == "" || command == "${go}" || !strings.ContainsAny(command, `/\`) || filepath.IsAbs(command) {
+		return nil
+	}
+	cleaned, err := cleanPackPath(command)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(root, filepath.FromSlash(cleaned))
+	info, err := os.Stat(target)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return nil
+	}
+	return os.Remove(target)
+}
+
+func removeEmptyDirs(root string) {
+	var dirs []string
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || !entry.IsDir() {
+			return nil
+		}
+		dirs = append(dirs, path)
+		return nil
+	}); err != nil {
+		return
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		return len(dirs[i]) > len(dirs[j])
+	})
+	for _, dir := range dirs {
+		_ = os.Remove(dir)
+	}
+}
+
+func writeManifestFile(path string, manifest Manifest) error {
+	body, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	body = append(body, '\n')
+	return os.WriteFile(path, body, 0644)
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := map[string]string{}
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func mergeStringMap(base, overlay map[string]string) map[string]string {
+	if len(overlay) == 0 {
+		return base
+	}
+	merged := cloneStringMap(base)
+	if merged == nil {
+		merged = map[string]string{}
+	}
+	for key, value := range overlay {
+		merged[key] = value
+	}
+	return merged
 }
 
 // LocaleLabel 把语言代码格式化成适合展示的名称。
@@ -1022,7 +1303,7 @@ func scanPackRoot(root string, source PackSource, packType PackType) ([]Pack, er
 		}
 
 		var manifest Manifest
-		if err := json.Unmarshal(body, &manifest); err != nil {
+		if err := json.Unmarshal(stripUTF8BOM(body), &manifest); err != nil {
 			return nil, fmt.Errorf("parse manifest %s: %w", manifestPath, err)
 		}
 		if err := validateManifest(manifest); err != nil {
@@ -1490,6 +1771,9 @@ func validateManifest(manifest Manifest) error {
 	if strings.TrimSpace(manifest.Name) == "" {
 		return errors.New("pack name is required")
 	}
+	if err := validatePluginRuntime(manifest); err != nil {
+		return err
+	}
 	if err := validateManifestSourceURL(manifest); err != nil {
 		return err
 	}
@@ -1499,6 +1783,40 @@ func validateManifest(manifest Manifest) error {
 		}
 	}
 	return validateManifestPaths(manifest)
+}
+
+func validatePluginRuntime(manifest Manifest) error {
+	switch manifest.Runtime.Kind {
+	case RuntimeStatic:
+		return nil
+	case RuntimeGRPC:
+		if manifest.Type != PluginPack {
+			return errors.New("runtime is only supported on plugin packs")
+		}
+		if strings.TrimSpace(manifest.Runtime.Command) == "" && len(manifest.Runtime.Platforms) == 0 {
+			return errors.New("runtime.command or runtime.platforms is required for grpc plugins")
+		}
+		seen := map[string]bool{}
+		for index, platform := range manifest.Runtime.Platforms {
+			if !validPlatformToken(platform.GOOS) {
+				return fmt.Errorf("runtime.platforms[%d].goos: invalid platform value %q", index, platform.GOOS)
+			}
+			if !validPlatformToken(platform.GOArch) {
+				return fmt.Errorf("runtime.platforms[%d].goarch: invalid platform value %q", index, platform.GOArch)
+			}
+			if strings.TrimSpace(platform.Command) == "" {
+				return fmt.Errorf("runtime.platforms[%d].command is required", index)
+			}
+			key := platform.GOOS + "/" + platform.GOArch
+			if seen[key] {
+				return fmt.Errorf("runtime.platforms[%d]: duplicate platform %q", index, key)
+			}
+			seen[key] = true
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid runtime kind %q", manifest.Runtime.Kind)
+	}
 }
 
 // validateManifestSourceURL 校验 bundle 的来源链接字段。
@@ -1561,6 +1879,19 @@ func validPackID(value string) bool {
 	return true
 }
 
+func validPlatformToken(value string) bool {
+	if strings.TrimSpace(value) == "" {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func validateManifestPaths(manifest Manifest) error {
 	for _, field := range []struct {
 		name  string
@@ -1569,9 +1900,21 @@ func validateManifestPaths(manifest Manifest) error {
 		{name: "templates_dir", value: manifest.TemplatesDir},
 		{name: "translations_dir", value: manifest.TranslationsDir},
 		{name: "messages_file", value: manifest.MessagesFile},
+		{name: "runtime.work_dir", value: manifest.Runtime.WorkDir},
 	} {
 		if _, err := cleanPackPath(field.value); err != nil {
 			return fmt.Errorf("%s: %w", field.name, err)
+		}
+	}
+	if err := validateRuntimeCommandPath("runtime.command", manifest.Runtime.Command); err != nil {
+		return err
+	}
+	for index, platform := range manifest.Runtime.Platforms {
+		if err := validateRuntimeCommandPath(fmt.Sprintf("runtime.platforms[%d].command", index), platform.Command); err != nil {
+			return err
+		}
+		if _, err := cleanPackPath(platform.WorkDir); err != nil {
+			return fmt.Errorf("runtime.platforms[%d].work_dir: %w", index, err)
 		}
 	}
 	for index, style := range manifest.Styles {
@@ -1583,6 +1926,34 @@ func validateManifestPaths(manifest Manifest) error {
 		if _, err := cleanPackPath(pack.Path); err != nil {
 			return fmt.Errorf("packs[%d].path: %w", index, err)
 		}
+	}
+	for index, entry := range manifest.UIEntries {
+		if !validPackID(entry.ID) {
+			return fmt.Errorf("ui_entries[%d].id: invalid ui entry id %q", index, entry.ID)
+		}
+		if strings.TrimSpace(entry.Outlet) == "" {
+			return fmt.Errorf("ui_entries[%d].outlet is required", index)
+		}
+		if strings.TrimSpace(entry.Path) == "" {
+			return fmt.Errorf("ui_entries[%d].path is required", index)
+		}
+		if _, err := cleanPackPath(entry.Path); err != nil {
+			return fmt.Errorf("ui_entries[%d].path: %w", index, err)
+		}
+	}
+	return nil
+}
+
+func validateRuntimeCommandPath(name, command string) error {
+	command = strings.TrimSpace(command)
+	if command == "" || command == "${go}" {
+		return nil
+	}
+	if !strings.ContainsAny(command, `/\`) {
+		return nil
+	}
+	if _, err := cleanPackPath(command); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
 	}
 	return nil
 }
@@ -1674,7 +2045,7 @@ func readMessagesFile(path string) (map[string]string, error) {
 		return nil, fmt.Errorf("read messages %s: %w", path, err)
 	}
 	var messages map[string]string
-	if err := json.Unmarshal(body, &messages); err != nil {
+	if err := json.Unmarshal(stripUTF8BOM(body), &messages); err != nil {
 		return nil, fmt.Errorf("parse messages %s: %w", path, err)
 	}
 	if messages == nil {
@@ -1689,7 +2060,7 @@ func readManifestFile(path string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("read manifest %s: %w", path, err)
 	}
 	var manifest Manifest
-	if err := json.Unmarshal(body, &manifest); err != nil {
+	if err := json.Unmarshal(stripUTF8BOM(body), &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("parse manifest %s: %w", path, err)
 	}
 	return manifest, nil
@@ -1745,11 +2116,19 @@ func readZipManifest(file *zip.File) (Manifest, error) {
 	}
 	defer reader.Close()
 
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("read manifest: %w", err)
+	}
 	var manifest Manifest
-	if err := json.NewDecoder(reader).Decode(&manifest); err != nil {
+	if err := json.Unmarshal(stripUTF8BOM(body), &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("parse manifest: %w", err)
 	}
 	return manifest, nil
+}
+
+func stripUTF8BOM(body []byte) []byte {
+	return bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
 }
 
 func zipRelativePath(name, prefix string) (string, bool) {

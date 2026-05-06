@@ -1,0 +1,36 @@
+{
+  "pages": [
+    {
+      "id": "import",
+      "title": "WordPress XML Import",
+      "description": "Upload a WordPress eXtended RSS export file, inspect it, then import the selected content.",
+      "actions": [
+        "inspect_wxr"
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "inspect_wxr",
+      "label": "Inspect XML",
+      "description": "Parse the WXR file without writing content.",
+      "kind": "form",
+      "fields": [
+        {
+          "name": "wxr_file",
+          "label": "WordPress XML",
+          "type": "file",
+          "accept": ".xml,text/xml,application/xml",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "import_wxr",
+      "label": "Import Now",
+      "description": "Import content and media from the inspected WXR file.",
+      "kind": "action",
+      "requires_confirmation": true
+    }
+  ]
+}

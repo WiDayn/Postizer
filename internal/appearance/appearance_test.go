@@ -3,9 +3,12 @@ package appearance
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -79,6 +82,60 @@ func TestLoadCatalogMergesThemeLocaleAndPluginPriority(t *testing.T) {
 	}
 	if len(catalog.ActivePlugins) != 2 {
 		t.Fatalf("active plugins = %d, want 2", len(catalog.ActivePlugins))
+	}
+}
+
+func TestValidateManifestAcceptsPlatformRuntime(t *testing.T) {
+	err := validateManifest(Manifest{
+		ID:      "binary-plugin",
+		Type:    PluginPack,
+		Name:    "Binary Plugin",
+		Version: "1.0.0",
+		Runtime: PluginRuntime{
+			Kind: RuntimeGRPC,
+			Platforms: []PluginRuntimePlatform{
+				{
+					GOOS:    "windows",
+					GOArch:  "amd64",
+					Command: "bin/windows-amd64/binary-plugin.exe",
+				},
+				{
+					GOOS:    "linux",
+					GOArch:  "arm64",
+					Command: "bin/linux-arm64/binary-plugin",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateManifestRejectsDuplicatePlatformRuntime(t *testing.T) {
+	err := validateManifest(Manifest{
+		ID:      "binary-plugin",
+		Type:    PluginPack,
+		Name:    "Binary Plugin",
+		Version: "1.0.0",
+		Runtime: PluginRuntime{
+			Kind: RuntimeGRPC,
+			Platforms: []PluginRuntimePlatform{
+				{
+					GOOS:    "linux",
+					GOArch:  "amd64",
+					Command: "bin/linux-amd64/binary-plugin",
+				},
+				{
+					GOOS:    "linux",
+					GOArch:  "amd64",
+					Command: "bin/linux-amd64/binary-plugin-copy",
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("duplicate runtime platform should be rejected")
 	}
 }
 
@@ -574,6 +631,231 @@ func TestInstallPackZIPInstallsBundleWithThemesAndPlugins(t *testing.T) {
 	}
 	if got, want := catalog.Messages["site.edition_line"], "Footer Plugin"; got != want {
 		t.Fatalf("second bundled plugin message = %q, want %q", got, want)
+	}
+}
+
+func TestInstallPackZIPRejectsUnsupportedPluginRuntimePlatform(t *testing.T) {
+	root := t.TempDir()
+	userRoot := filepath.Join(root, "user")
+	goos, goarch := unsupportedRuntimePlatform()
+	body := buildPackZip(t, map[string]func(io.Writer){
+		"manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, `{
+  "id": "unsupported-runtime",
+  "type": "bundle",
+  "name": "Unsupported Runtime",
+  "version": "1.0.0",
+  "description": "Bundle with unsupported plugin runtime"
+}`)
+		},
+		"plugins/importer/manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, fmt.Sprintf(`{
+  "id": "importer-plugin",
+  "type": "plugin",
+  "name": "Importer Plugin",
+  "version": "1.0.0",
+  "description": "Unsupported runtime plugin",
+  "runtime": {
+    "kind": "grpc",
+    "platforms": [
+      {
+        "goos": %q,
+        "goarch": %q,
+        "command": "bin/%s-%s/importer"
+      }
+    ]
+  }
+}`, goos, goarch, goos, goarch))
+		},
+	})
+
+	_, err := InstallPackZIP(bytes.NewReader(body), int64(len(body)), userRoot)
+	if err == nil {
+		t.Fatal("InstallPackZIP should reject a plugin without the current runtime platform")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "does not include a runtime for current platform") {
+		t.Fatalf("error = %q, want current platform message", message)
+	}
+	if !strings.Contains(message, runtime.GOOS+"/"+runtime.GOARCH) {
+		t.Fatalf("error = %q, want current platform %s/%s", message, runtime.GOOS, runtime.GOARCH)
+	}
+}
+
+func TestInstallPackZIPAcceptsCurrentPluginRuntimePlatform(t *testing.T) {
+	root := t.TempDir()
+	userRoot := filepath.Join(root, "user")
+	label := runtime.GOOS + "-" + runtime.GOARCH
+	binaryName := "importer"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	command := "bin/" + label + "/" + binaryName
+	body := buildPackZip(t, map[string]func(io.Writer){
+		"manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, `{
+  "id": "supported-runtime",
+  "type": "bundle",
+  "name": "Supported Runtime",
+  "version": "1.0.0",
+  "description": "Bundle with supported plugin runtime"
+}`)
+		},
+		"plugins/importer/manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, fmt.Sprintf(`{
+  "id": "importer-plugin",
+  "type": "plugin",
+  "name": "Importer Plugin",
+  "version": "1.0.0",
+  "description": "Supported runtime plugin",
+  "runtime": {
+    "kind": "grpc",
+    "platforms": [
+      {
+        "goos": %q,
+        "goarch": %q,
+        "command": %q
+      }
+    ]
+  }
+}`, runtime.GOOS, runtime.GOARCH, command))
+		},
+		"plugins/importer/" + command: func(w io.Writer) {
+			_, _ = io.WriteString(w, "binary")
+		},
+	})
+
+	if _, err := InstallPackZIP(bytes.NewReader(body), int64(len(body)), userRoot); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallPackZIPPrunesOtherPluginRuntimePlatforms(t *testing.T) {
+	root := t.TempDir()
+	userRoot := filepath.Join(root, "user")
+	currentLabel := runtime.GOOS + "-" + runtime.GOARCH
+	otherGOOS, otherGOArch := unsupportedRuntimePlatform()
+	otherLabel := otherGOOS + "-" + otherGOArch
+	currentBinary := "importer"
+	otherBinary := "importer"
+	if runtime.GOOS == "windows" {
+		currentBinary += ".exe"
+	}
+	if otherGOOS == "windows" {
+		otherBinary += ".exe"
+	}
+	currentCommand := "bin/" + currentLabel + "/" + currentBinary
+	otherCommand := "bin/" + otherLabel + "/" + otherBinary
+	body := buildPackZip(t, map[string]func(io.Writer){
+		"manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, `{
+  "id": "multi-runtime",
+  "type": "bundle",
+  "name": "Multi Runtime",
+  "version": "1.0.0",
+  "description": "Bundle with multiple plugin runtimes"
+}`)
+		},
+		"plugins/importer/manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, fmt.Sprintf(`{
+  "id": "importer-plugin",
+  "type": "plugin",
+  "name": "Importer Plugin",
+  "version": "1.0.0",
+  "description": "Multi runtime plugin",
+  "runtime": {
+    "kind": "grpc",
+    "platforms": [
+      {
+        "goos": %q,
+        "goarch": %q,
+        "command": %q
+      },
+      {
+        "goos": %q,
+        "goarch": %q,
+        "command": %q
+      }
+    ]
+  }
+}`, runtime.GOOS, runtime.GOARCH, currentCommand, otherGOOS, otherGOArch, otherCommand))
+		},
+		"plugins/importer/" + currentCommand: func(w io.Writer) {
+			_, _ = io.WriteString(w, "current")
+		},
+		"plugins/importer/" + otherCommand: func(w io.Writer) {
+			_, _ = io.WriteString(w, "other")
+		},
+	})
+
+	if _, err := InstallPackZIP(bytes.NewReader(body), int64(len(body)), userRoot); err != nil {
+		t.Fatal(err)
+	}
+	pluginRoot := filepath.Join(userRoot, DirBundles, "multi-runtime", DirPlugins, "importer")
+	if _, err := os.Stat(filepath.Join(pluginRoot, filepath.FromSlash(currentCommand))); err != nil {
+		t.Fatalf("current runtime binary should be kept: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(pluginRoot, filepath.FromSlash(otherCommand))); !os.IsNotExist(err) {
+		t.Fatalf("other runtime binary should be pruned, stat err = %v", err)
+	}
+	manifest, err := readManifestFile(filepath.Join(pluginRoot, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := manifest.Runtime.Command, currentCommand; got != want {
+		t.Fatalf("installed runtime command = %q, want %q", got, want)
+	}
+	if len(manifest.Runtime.Platforms) != 0 {
+		t.Fatalf("installed runtime platforms = %d, want 0", len(manifest.Runtime.Platforms))
+	}
+}
+
+func TestInstallPackZIPAcceptsUTF8BOMManifests(t *testing.T) {
+	root := t.TempDir()
+	userRoot := filepath.Join(root, "user")
+	body := buildPackZip(t, map[string]func(io.Writer){
+		"manifest.json": func(w io.Writer) {
+			writeUTF8BOM(t, w)
+			_, _ = io.WriteString(w, `{
+  "id": "bom-pack",
+  "type": "bundle",
+  "name": "BOM Pack",
+  "version": "1.0.0",
+  "description": "Bundle with BOM manifests"
+}`)
+		},
+		"plugins/bom/manifest.json": func(w io.Writer) {
+			writeUTF8BOM(t, w)
+			_, _ = io.WriteString(w, `{
+  "id": "bom-plugin",
+  "type": "plugin",
+  "name": "BOM Plugin",
+  "version": "1.0.0",
+  "description": "Plugin manifest with BOM",
+  "translations_dir": "translations"
+}`)
+		},
+		"plugins/bom/translations/en.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, `{}`)
+		},
+	})
+
+	if _, err := InstallPackZIP(bytes.NewReader(body), int64(len(body)), userRoot); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func unsupportedRuntimePlatform() (string, string) {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		return "windows", "amd64"
+	}
+	return "linux", "amd64"
+}
+
+func writeUTF8BOM(t *testing.T, w io.Writer) {
+	t.Helper()
+	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+		t.Fatal(err)
 	}
 }
 

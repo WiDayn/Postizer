@@ -40,6 +40,12 @@ If `POSTIZER_SESSION_SECRET` is not set, Postizer creates `content/.session_secr
 
 Posts and pages use YAML-like front matter followed by Markdown.
 
+## Plugins
+
+Postizer supports static resource plugins and gRPC process plugins. Static plugins can contain only translations, templates, or styles and do not need an executable. gRPC plugins declare a `runtime.kind` of `grpc` in their manifest; Postizer starts the plugin as a separate process and calls its `PluginService` over gRPC. Plugin admin UI is declared through manifest `ui_entries` pointing at static JSON files, so settings pages can render without starting the plugin process. Process plugins can import the public `pkg/pluginrpc` SDK and call the host `HostService` for generic operations such as job progress, media saves, post/page saves, and runtime reloads.
+
+The WordPress importer is kept as an external example bundle under `examples/bundles/wordpress-importer`, not as part of the main application. Package that bundle and install it through `/admin/plugins`; installed user plugins live under `content/bundles`.
+
 ## Media
 
 Images are uploaded into `media/public/{year}/{month}/`. The admin editor supports pasting an image from the clipboard and inserts a numbered figure at the current cursor position:

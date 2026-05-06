@@ -119,6 +119,25 @@
       </div>
     </div>
   </section>
+
+  {{with pluginTools .Appearance}}
+  <section class="ui-panel admin-panel plugin-tools">
+    <div class="ui-panel__head">
+      <h2>Plugin Settings</h2>
+    </div>
+    <div class="plugin-tools-list">
+      {{range .}}
+      <article class="local-pack-item plugin-tool-item">
+        <div class="local-pack-item__copy">
+          <strong>{{.Name}}</strong>
+          <span>{{.Description}}</span>
+        </div>
+        <a class="ui-button ui-button--ghost" href="/admin/plugins/{{.ID}}">Settings</a>
+      </article>
+      {{end}}
+    </div>
+  </section>
+  {{end}}
 </form>
 <script defer src="/static/admin-settings.js?v=37"></script>
 {{template "adminEnd" .}}

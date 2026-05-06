@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -25,7 +26,9 @@ import (
 
 	"postizer/internal/appearance"
 	"postizer/internal/media"
+	"postizer/internal/pluginhost"
 	"postizer/internal/site"
+	"postizer/pkg/pluginrpc"
 )
 
 type Server struct {
@@ -37,8 +40,24 @@ type Server struct {
 	userContentRoot    string
 	userBundlesRoot    string
 	templates          *template.Template
+	pluginHost         *pluginhost.Host
+	pluginUploads      map[string]pluginrpc.ActionFile
+	pluginJobs         map[string]*importJob
 	auth               authConfig
 	mu                 sync.RWMutex
+	pluginUploadMu     sync.Mutex
+	pluginJobMu        sync.RWMutex
+}
+
+type importJob struct {
+	mu       sync.Mutex
+	id       string
+	status   string
+	done     int
+	total    int
+	errors   int
+	logs     []string
+	sections []pluginrpc.ResultSection
 }
 
 type ViewData struct {
@@ -53,6 +72,8 @@ type ViewData struct {
 	Page        *site.Page
 	Tag         *site.Tag
 	Media       []media.Item
+	Plugin      *appearance.Pack
+	PluginUI    *appearance.PluginUI
 	Home        bool
 	ActiveAdmin string
 	Error       string
@@ -68,9 +89,12 @@ type authConfig struct {
 }
 
 const (
-	sessionCookieName       = "postizer_session"
-	sessionDuration         = 8 * time.Hour
-	rememberSessionDuration = 30 * 24 * time.Hour
+	sessionCookieName        = "postizer_session"
+	sessionDuration          = 8 * time.Hour
+	rememberSessionDuration  = 30 * 24 * time.Hour
+	maxPluginActionFileBytes = 32 << 20
+	maxPluginMediaBytes      = 64 << 20
+	pluginSettingsUIOutlet   = "admin.plugin"
 )
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
@@ -81,8 +105,11 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 		builtinBundlesRoot: filepath.Join("internal", "bundles"),
 		userContentRoot:    contentRoot,
 		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+		pluginUploads:      map[string]pluginrpc.ActionFile{},
+		pluginJobs:         map[string]*importJob{},
 		auth:               newAuthConfig(contentRoot),
 	}
+	s.pluginHost = pluginhost.New(".", s)
 	if err := s.reloadRuntime(); err != nil {
 		return nil, err
 	}
@@ -118,6 +145,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/media", s.requireAdmin(http.HandlerFunc(s.adminMedia)))
 	mux.Handle("GET /admin/appearance", s.requireAdmin(http.HandlerFunc(s.adminAppearance)))
 	mux.Handle("GET /admin/plugins", s.requireAdmin(http.HandlerFunc(s.adminPlugins)))
+	mux.Handle("GET /admin/plugins/{id}", s.requireAdmin(http.HandlerFunc(s.adminPluginSettings)))
 	mux.Handle("GET /admin/menus", s.requireAdmin(http.HandlerFunc(s.adminMenus)))
 	mux.Handle("GET /admin/theme-settings", s.requireAdmin(http.HandlerFunc(s.adminThemeSettings)))
 	mux.Handle("GET /admin/settings", s.requireAdmin(http.HandlerFunc(s.adminSettings)))
@@ -144,6 +172,8 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/resource-packs", s.requireAdmin(http.HandlerFunc(s.uploadResourcePack)))
 	mux.Handle("DELETE /admin/api/resource-packs/{type}/{id}", s.requireAdmin(http.HandlerFunc(s.deleteResourcePack)))
 	mux.Handle("POST /admin/api/resource-packs/apply", s.requireAdmin(http.HandlerFunc(s.applyResourcePacks)))
+	mux.Handle("POST /admin/api/plugins/{id}/actions/{action}", s.requireAdmin(http.HandlerFunc(s.invokePluginAction)))
+	mux.Handle("GET /admin/api/plugin-jobs/{id}", s.requireAdmin(http.HandlerFunc(s.pluginJobStatus)))
 
 	return timing(securityHeaders(mux)), nil
 }
@@ -162,6 +192,18 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 		"mediaFigure": func(item media.Item) string {
 			return mediaFigureMarkdown(item)
 		},
+		"mediaIsImage": func(item media.Item) bool {
+			return mediaIsImage(item)
+		},
+		"mediaFileLabel": func(item media.Item) string {
+			return mediaFileLabel(item)
+		},
+		"mediaFileType": func(item media.Item) string {
+			return mediaFileType(item)
+		},
+		"mediaMeta": func(item media.Item) string {
+			return mediaMeta(item)
+		},
 		"defaultThemePackID": func() string {
 			return appearance.DefaultThemePackID
 		},
@@ -176,6 +218,12 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 		},
 		"packTypeMessageKey": func(pack appearance.Pack) string {
 			return packTypeMessageKey(pack)
+		},
+		"pluginTools": func(catalog *appearance.Catalog) []appearance.Pack {
+			return pluginTools(catalog)
+		},
+		"pluginAction": func(ui *appearance.PluginUI, id string) appearance.PluginUIAction {
+			return pluginAction(ui, id)
 		},
 		"localeLabel": func(code string) string {
 			return appearance.LocaleLabel(code)
@@ -391,6 +439,34 @@ func (s *Server) adminAppearance(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminPlugins(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	s.render(w, "admin_plugins.html", ViewData{Title: "Plugin Packs", TitleKey: "title.admin.plugins", Store: store, ActiveAdmin: "plugins"})
+}
+
+func (s *Server) adminPluginSettings(w http.ResponseWriter, r *http.Request) {
+	pack, ok := s.findPlugin(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	ui, err := pluginUI(pack, pluginSettingsUIOutlet)
+	if err != nil {
+		store := s.currentStore()
+		s.render(w, "admin_plugin_settings.html", ViewData{
+			Title:       pack.Name,
+			Store:       store,
+			Plugin:      &pack,
+			ActiveAdmin: "plugins",
+			Error:       err.Error(),
+		})
+		return
+	}
+	store := s.currentStore()
+	s.render(w, "admin_plugin_settings.html", ViewData{
+		Title:       pack.Name,
+		Store:       store,
+		Plugin:      &pack,
+		PluginUI:    ui,
+		ActiveAdmin: "plugins",
+	})
 }
 
 func (s *Server) adminMenus(w http.ResponseWriter, r *http.Request) {
@@ -937,8 +1013,225 @@ func (s *Server) applyResourcePacks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resolvedPackSelection 把前端提交的资源包 ID 转换成安全的存储值。
-// 如果提交了空值或未知值，会自动回退到默认包，避免 settings 中写入悬空选择。
+func (s *Server) invokePluginAction(w http.ResponseWriter, r *http.Request) {
+	pack, ok := s.findPlugin(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if pack.Runtime.Kind != appearance.RuntimeGRPC {
+		http.Error(w, "plugin does not expose a grpc runtime", http.StatusBadRequest)
+		return
+	}
+
+	req, uploadToken, err := s.pluginActionRequest(w, r, pack.ID, r.PathValue("action"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	response, err := s.pluginHost.InvokeAction(ctx, pack, req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if uploadToken != "" {
+		replaceUploadToken(response, uploadToken)
+	}
+	writeJSON(w, response)
+}
+
+func (s *Server) pluginJobStatus(w http.ResponseWriter, r *http.Request) {
+	job, ok := s.importJob(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, job.snapshot())
+}
+
+func (s *Server) pluginActionRequest(w http.ResponseWriter, r *http.Request, pluginID, actionID string) (*pluginrpc.InvokeActionRequest, string, error) {
+	fields := map[string]string{}
+	var files []pluginrpc.ActionFile
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
+		if err := r.ParseMultipartForm(64 << 20); err != nil {
+			return nil, "", err
+		}
+		for key, values := range r.MultipartForm.Value {
+			if len(values) > 0 {
+				fields[key] = values[len(values)-1]
+			}
+		}
+		for fieldName, headers := range r.MultipartForm.File {
+			for _, header := range headers {
+				file, err := header.Open()
+				if err != nil {
+					return nil, "", err
+				}
+				body, readErr := readLimited(file, maxPluginActionFileBytes)
+				closeErr := file.Close()
+				if readErr != nil {
+					return nil, "", readErr
+				}
+				if closeErr != nil {
+					return nil, "", closeErr
+				}
+				files = append(files, pluginrpc.ActionFile{
+					Name:        fieldName,
+					Filename:    header.Filename,
+					ContentType: header.Header.Get("Content-Type"),
+					Body:        body,
+				})
+			}
+		}
+	} else {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		var payload struct {
+			Fields map[string]string `json:"fields"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+			return nil, "", err
+		}
+		for key, value := range payload.Fields {
+			fields[key] = value
+		}
+	}
+
+	if token := strings.TrimSpace(fields["upload_token"]); token != "" {
+		file, ok := s.pluginUpload(token)
+		if !ok {
+			return nil, "", fmt.Errorf("uploaded file token has expired")
+		}
+		files = append(files, file)
+	}
+
+	uploadToken := ""
+	if len(files) > 0 && strings.TrimSpace(fields["upload_token"]) == "" {
+		token, err := randomUploadToken()
+		if err != nil {
+			return nil, "", err
+		}
+		s.storePluginUpload(token, files[0])
+		uploadToken = token
+	}
+	return &pluginrpc.InvokeActionRequest{
+		PluginID: pluginID,
+		ActionID: actionID,
+		Fields:   fields,
+		Files:    files,
+	}, uploadToken, nil
+}
+
+func (s *Server) CreateJob(_ context.Context, req *pluginrpc.CreateJobRequest) (*pluginrpc.ImportJob, error) {
+	id, err := randomUploadToken()
+	if err != nil {
+		return nil, err
+	}
+	total := req.Total
+	if total == 0 {
+		total = 1
+	}
+	job := &importJob{
+		id:     id,
+		status: "running",
+		total:  total,
+	}
+	job.log(fallbackString(req.Title, "Plugin job created."))
+
+	s.pluginJobMu.Lock()
+	s.pluginJobs[id] = job
+	s.pluginJobMu.Unlock()
+
+	return job.snapshot(), nil
+}
+
+func (s *Server) UpdateJob(_ context.Context, req *pluginrpc.UpdateJobRequest) (*pluginrpc.ImportJob, error) {
+	job, ok := s.importJob(req.JobID)
+	if !ok {
+		return nil, fmt.Errorf("plugin job %q not found", req.JobID)
+	}
+	job.update(req)
+	return job.snapshot(), nil
+}
+
+func (s *Server) SaveMedia(_ context.Context, req *pluginrpc.SaveMediaRequest) (*pluginrpc.SaveMediaResponse, error) {
+	if len(req.Body) == 0 {
+		return nil, fmt.Errorf("media body is empty")
+	}
+	if int64(len(req.Body)) > maxPluginMediaBytes {
+		return nil, fmt.Errorf("media file exceeds %d bytes", maxPluginMediaBytes)
+	}
+	item, err := s.media.SaveUploadWithOptions(bytes.NewReader(req.Body), fallbackString(req.OriginalName, "plugin-media.bin"), s.mediaProcessingOptions())
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.Alt) != "" || strings.TrimSpace(req.Caption) != "" {
+		item, err = s.media.Update(item.ID, media.Update{
+			OriginalName: item.OriginalName,
+			Alt:          req.Alt,
+			Caption:      req.Caption,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &pluginrpc.SaveMediaResponse{Item: mediaItemRPC(item), Markdown: mediaFigureMarkdown(item)}, nil
+}
+
+func (s *Server) SavePost(_ context.Context, draft *pluginrpc.ContentDraft) (*pluginrpc.SaveContentResponse, error) {
+	saved, err := site.SaveImportedPost(s.contentRoot, site.PostDraft{
+		Title:   draft.Title,
+		Slug:    draft.Slug,
+		Date:    draft.Date,
+		Updated: draft.Updated,
+		Tags:    draft.Tags,
+		Summary: draft.Summary,
+		Draft:   draft.Draft,
+		TOC:     draft.TOC,
+		Body:    draft.Body,
+	}, false)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpc.SaveContentResponse{Title: saved.Title, Slug: saved.Slug, URL: "/posts/" + saved.Slug}, nil
+}
+
+func (s *Server) SavePage(_ context.Context, draft *pluginrpc.ContentDraft) (*pluginrpc.SaveContentResponse, error) {
+	saved, err := site.SaveImportedPage(s.contentRoot, site.PageDraft{
+		Title:   draft.Title,
+		Slug:    draft.Slug,
+		Date:    draft.Date,
+		Updated: draft.Updated,
+		Summary: draft.Summary,
+		Draft:   draft.Draft,
+		TOC:     draft.TOC,
+		Body:    draft.Body,
+	}, false)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpc.SaveContentResponse{Title: saved.Title, Slug: saved.Slug, URL: "/pages/" + saved.Slug}, nil
+}
+
+func (s *Server) ReloadRuntime(context.Context, *pluginrpc.ReloadRuntimeRequest) (*pluginrpc.ReloadRuntimeResponse, error) {
+	if err := s.reloadRuntime(); err != nil {
+		return nil, err
+	}
+	return &pluginrpc.ReloadRuntimeResponse{OK: true}, nil
+}
+
+func (s *Server) importJob(id string) (*importJob, bool) {
+	s.pluginJobMu.RLock()
+	defer s.pluginJobMu.RUnlock()
+	job, ok := s.pluginJobs[id]
+	return job, ok
+}
+
+// resolvedPackSelection 鎶婂墠绔彁浜ょ殑璧勬簮鍖?ID 杞崲鎴愬畨鍏ㄧ殑瀛樺偍鍊笺€?// 濡傛灉鎻愪氦浜嗙┖鍊兼垨鏈煡鍊硷紝浼氳嚜鍔ㄥ洖閫€鍒伴粯璁ゅ寘锛岄伩鍏?settings 涓啓鍏ユ偓绌洪€夋嫨銆?
 func resolvedPackSelection(requestedID, defaultID string, packs []appearance.Pack) appearance.Selection {
 	requestedID = strings.TrimSpace(requestedID)
 	if requestedID == "" {
@@ -1007,14 +1300,10 @@ func packExists(packs []appearance.Pack, id string) bool {
 	return false
 }
 
-// parseResourcePackType 把 URL 中的类型片段转换成 appearance.PackType。
-//
-// 参数：
-// - value: 路由中的 `{type}`，前端会提交 manifest 使用的 bundle/theme/plugin/text。
-//
-// 返回值：
-// - 第一个返回值是规范化后的资源包类型。
-// - 第二个返回值表示类型是否受支持；不支持时调用方应返回 400。
+// parseResourcePackType 鎶?URL 涓殑绫诲瀷鐗囨杞崲鎴?appearance.PackType銆?//
+// 鍙傛暟锛?// - value: 璺敱涓殑 `{type}`锛屽墠绔細鎻愪氦 manifest 浣跨敤鐨?bundle/theme/plugin/text銆?//
+// 杩斿洖鍊硷細
+// - 绗竴涓繑鍥炲€兼槸瑙勮寖鍖栧悗鐨勮祫婧愬寘绫诲瀷銆?// - 绗簩涓繑鍥炲€艰〃绀虹被鍨嬫槸鍚﹀彈鏀寔锛涗笉鏀寔鏃惰皟鐢ㄦ柟搴旇繑鍥?400銆?
 func parseResourcePackType(value string) (appearance.PackType, bool) {
 	switch appearance.PackType(strings.TrimSpace(value)) {
 	case appearance.BundlePack:
@@ -1030,18 +1319,11 @@ func parseResourcePackType(value string) (appearance.PackType, bool) {
 	}
 }
 
-// userInstalledPacks 返回当前目录中所有由用户本地安装的资源包。
-//
-// 参数：
-// - catalog: 当前运行时外观目录快照。
-//
-// 返回值：
-// - 只包含 SourceUser 的 bundle、独立主题包、独立插件包以及兼容旧版 text 包。
-// - bundle 内部的子主题/子插件不会在本地资源包列表重复出现，因为删除单位是父 bundle。
-//
-// 排序策略：
-// 1. 主题包排在插件/文字包前面，符合“样式优先”的设置页阅读顺序。
-// 2. 同类型内按名称排序；名称相同时用 ID 保持稳定结果。
+// userInstalledPacks 杩斿洖褰撳墠鐩綍涓墍鏈夌敱鐢ㄦ埛鏈湴瀹夎鐨勮祫婧愬寘銆?//
+// 鍙傛暟锛?// - catalog: 褰撳墠杩愯鏃跺瑙傜洰褰曞揩鐓с€?//
+// 杩斿洖鍊硷細
+// - 鍙寘鍚?SourceUser 鐨?bundle銆佺嫭绔嬩富棰樺寘銆佺嫭绔嬫彃浠跺寘浠ュ強鍏煎鏃х増 text 鍖呫€?// - bundle 鍐呴儴鐨勫瓙涓婚/瀛愭彃浠朵笉浼氬湪鏈湴璧勬簮鍖呭垪琛ㄩ噸澶嶅嚭鐜帮紝鍥犱负鍒犻櫎鍗曚綅鏄埗 bundle銆?//
+// 鎺掑簭绛栫暐锛?// 1. 涓婚鍖呮帓鍦ㄦ彃浠?鏂囧瓧鍖呭墠闈紝绗﹀悎鈥滄牱寮忎紭鍏堚€濈殑璁剧疆椤甸槄璇婚『搴忋€?// 2. 鍚岀被鍨嬪唴鎸夊悕绉版帓搴忥紱鍚嶇О鐩稿悓鏃剁敤 ID 淇濇寔绋冲畾缁撴灉銆?
 func userInstalledPacks(catalog *appearance.Catalog) []appearance.Pack {
 	if catalog == nil {
 		return nil
@@ -1108,16 +1390,10 @@ func packTypeMessageKey(pack appearance.Pack) string {
 	}
 }
 
-// packInUse 判断资源包是否正在参与当前外观。
-//
-// 参数：
-// - pack: 要检查的资源包。
-// - catalog: 当前运行时外观目录快照。
-//
-// 返回值：
-// - bundle 内的当前主题或任一启用插件正在使用时返回 true。
-// - 主题包 ID 与 ActiveTheme 一致时返回 true。
-// - 插件包或旧版 text 包 ID 出现在 PluginOrder 中时返回 true。
+// packInUse 鍒ゆ柇璧勬簮鍖呮槸鍚︽鍦ㄥ弬涓庡綋鍓嶅瑙傘€?//
+// 鍙傛暟锛?// - pack: 瑕佹鏌ョ殑璧勬簮鍖呫€?// - catalog: 褰撳墠杩愯鏃跺瑙傜洰褰曞揩鐓с€?//
+// 杩斿洖鍊硷細
+// - bundle 鍐呯殑褰撳墠涓婚鎴栦换涓€鍚敤鎻掍欢姝ｅ湪浣跨敤鏃惰繑鍥?true銆?// - 涓婚鍖?ID 涓?ActiveTheme 涓€鑷存椂杩斿洖 true銆?// - 鎻掍欢鍖呮垨鏃х増 text 鍖?ID 鍑虹幇鍦?PluginOrder 涓椂杩斿洖 true銆?
 func packInUse(pack appearance.Pack, catalog *appearance.Catalog) bool {
 	if catalog == nil {
 		return false
@@ -1144,16 +1420,10 @@ func packInUse(pack appearance.Pack, catalog *appearance.Catalog) bool {
 	return false
 }
 
-// findUserPack 从当前目录快照中查找一个可删除的用户包。
-//
-// 参数：
-// - catalog: 当前运行时外观目录快照。
-// - packType: URL 指定的资源包类型。
-// - id: URL 指定的资源包 ID。
-//
-// 返回值：
-// - 找到 SourceUser 且类型/ID 都匹配的包时返回该包和 true。
-// - 官方包、未知包或类型不匹配时返回 false。
+// findUserPack 浠庡綋鍓嶇洰褰曞揩鐓т腑鏌ユ壘涓€涓彲鍒犻櫎鐨勭敤鎴峰寘銆?//
+// 鍙傛暟锛?// - catalog: 褰撳墠杩愯鏃跺瑙傜洰褰曞揩鐓с€?// - packType: URL 鎸囧畾鐨勮祫婧愬寘绫诲瀷銆?// - id: URL 鎸囧畾鐨勮祫婧愬寘 ID銆?//
+// 杩斿洖鍊硷細
+// - 鎵惧埌 SourceUser 涓旂被鍨?ID 閮藉尮閰嶇殑鍖呮椂杩斿洖璇ュ寘鍜?true銆?// - 瀹樻柟鍖呫€佹湭鐭ュ寘鎴栫被鍨嬩笉鍖归厤鏃惰繑鍥?false銆?
 func findUserPack(catalog *appearance.Catalog, packType appearance.PackType, id string) (appearance.Pack, bool) {
 	for _, pack := range userInstalledPacks(catalog) {
 		if pack.Type == packType && pack.ID == id {
@@ -1163,22 +1433,11 @@ func findUserPack(catalog *appearance.Catalog, packType appearance.PackType, id 
 	return appearance.Pack{}, false
 }
 
-// settingsAfterDeletingPack 计算删除资源包后应该写回的设置。
-//
-// 参数：
-// - settings: 当前站点设置。
-// - pack: 即将删除的用户资源包。
-// - defaultLocale: 默认主题包的默认语言，用于主题包被删除时一并恢复。
-//
-// 返回值：
-// - 第一个返回值是删除后应保存的设置。
-// - 第二个返回值表示设置是否发生变化；只有 true 时才需要 SaveSettings。
-//
-// 行为：
-// - 删除正在使用的主题包时，主题恢复到系统默认主题，并把主题语言恢复为默认主题语言。
-// - 删除 bundle 时，如果当前主题来自该 bundle，则恢复默认主题；如果启用插件来自该 bundle，则从顺序中移除。
-// - 删除正在使用的插件包或旧版 text 包时，从插件启用顺序中移除该 ID。
-// - 删除未启用的包时不改变设置。
+// settingsAfterDeletingPack 璁＄畻鍒犻櫎璧勬簮鍖呭悗搴旇鍐欏洖鐨勮缃€?//
+// 鍙傛暟锛?// - settings: 褰撳墠绔欑偣璁剧疆銆?// - pack: 鍗冲皢鍒犻櫎鐨勭敤鎴疯祫婧愬寘銆?// - defaultLocale: 榛樿涓婚鍖呯殑榛樿璇█锛岀敤浜庝富棰樺寘琚垹闄ゆ椂涓€骞舵仮澶嶃€?//
+// 杩斿洖鍊硷細
+// - 绗竴涓繑鍥炲€兼槸鍒犻櫎鍚庡簲淇濆瓨鐨勮缃€?// - 绗簩涓繑鍥炲€艰〃绀鸿缃槸鍚﹀彂鐢熷彉鍖栵紱鍙湁 true 鏃舵墠闇€瑕?SaveSettings銆?//
+// 琛屼负锛?// - 鍒犻櫎姝ｅ湪浣跨敤鐨勪富棰樺寘鏃讹紝涓婚鎭㈠鍒扮郴缁熼粯璁や富棰橈紝骞舵妸涓婚璇█鎭㈠涓洪粯璁や富棰樿瑷€銆?// - 鍒犻櫎 bundle 鏃讹紝濡傛灉褰撳墠涓婚鏉ヨ嚜璇?bundle锛屽垯鎭㈠榛樿涓婚锛涘鏋滃惎鐢ㄦ彃浠舵潵鑷 bundle锛屽垯浠庨『搴忎腑绉婚櫎銆?// - 鍒犻櫎姝ｅ湪浣跨敤鐨勬彃浠跺寘鎴栨棫鐗?text 鍖呮椂锛屼粠鎻掍欢鍚敤椤哄簭涓Щ闄よ ID銆?// - 鍒犻櫎鏈惎鐢ㄧ殑鍖呮椂涓嶆敼鍙樿缃€?
 func settingsAfterDeletingPack(settings site.Settings, pack appearance.Pack, defaultLocale string) (site.Settings, bool) {
 	changed := false
 	if strings.TrimSpace(defaultLocale) == "" {
@@ -1219,14 +1478,10 @@ func settingsAfterDeletingPack(settings site.Settings, pack appearance.Pack, def
 	return settings, changed
 }
 
-// bundleContainsPackID 判断一个 bundle 子包 ID 列表中是否包含目标 ID。
-//
-// 参数：
-// - ids: bundle 扫描阶段记录下来的主题或插件 ID 列表。
-// - target: 当前设置中保存的主题/插件 ID。
-//
-// 返回值：
-// - 找到完全匹配的 ID 时返回 true；空字符串或未命中返回 false。
+// bundleContainsPackID 鍒ゆ柇涓€涓?bundle 瀛愬寘 ID 鍒楄〃涓槸鍚﹀寘鍚洰鏍?ID銆?//
+// 鍙傛暟锛?// - ids: bundle 鎵弿闃舵璁板綍涓嬫潵鐨勪富棰樻垨鎻掍欢 ID 鍒楄〃銆?// - target: 褰撳墠璁剧疆涓繚瀛樼殑涓婚/鎻掍欢 ID銆?//
+// 杩斿洖鍊硷細
+// - 鎵惧埌瀹屽叏鍖归厤鐨?ID 鏃惰繑鍥?true锛涚┖瀛楃涓叉垨鏈懡涓繑鍥?false銆?
 func bundleContainsPackID(ids []string, target string) bool {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -1240,30 +1495,19 @@ func bundleContainsPackID(ids []string, target string) bool {
 	return false
 }
 
-// fallbackActiveBundleWithoutChildren 兼容极旧的 bundle 快照。
-//
-// 参数：
-// - pack: 即将删除的 bundle 包。
-//
-// 返回值：
-// - 当包被标记为 active，但没有记录任何子主题/子插件 ID 时返回 true。
-//
-// 设计说明：
-// 正常情况下 bundle 都会携带 BundledThemeIDs/BundledPluginIDs，删除逻辑可以精确清理。
-// 这个兜底分支只用于避免旧运行时快照缺少子 ID 时无法恢复默认主题。
+// fallbackActiveBundleWithoutChildren 鍏煎鏋佹棫鐨?bundle 蹇収銆?//
+// 鍙傛暟锛?// - pack: 鍗冲皢鍒犻櫎鐨?bundle 鍖呫€?//
+// 杩斿洖鍊硷細
+// - 褰撳寘琚爣璁颁负 active锛屼絾娌℃湁璁板綍浠讳綍瀛愪富棰?瀛愭彃浠?ID 鏃惰繑鍥?true銆?//
+// 璁捐璇存槑锛?// 姝ｅ父鎯呭喌涓?bundle 閮戒細鎼哄甫 BundledThemeIDs/BundledPluginIDs锛屽垹闄ら€昏緫鍙互绮剧‘娓呯悊銆?// 杩欎釜鍏滃簳鍒嗘敮鍙敤浜庨伩鍏嶆棫杩愯鏃跺揩鐓х己灏戝瓙 ID 鏃舵棤娉曟仮澶嶉粯璁や富棰樸€?
 func fallbackActiveBundleWithoutChildren(pack appearance.Pack) bool {
 	return pack.Active && len(pack.BundledThemeIDs) == 0 && len(pack.BundledPluginIDs) == 0
 }
 
-// filterPluginOrder 从插件启用顺序中移除指定插件 ID。
-//
-// 参数：
-// - order: 当前 settings.PluginOrder。
-// - deletedIDs: 即将删除的独立插件 ID，或某个 bundle 内的所有插件 ID。
-//
-// 返回值：
-// - 第一个返回值是过滤后的插件顺序。
-// - 第二个返回值表示是否真的移除了至少一个 ID。
+// filterPluginOrder 浠庢彃浠跺惎鐢ㄩ『搴忎腑绉婚櫎鎸囧畾鎻掍欢 ID銆?//
+// 鍙傛暟锛?// - order: 褰撳墠 settings.PluginOrder銆?// - deletedIDs: 鍗冲皢鍒犻櫎鐨勭嫭绔嬫彃浠?ID锛屾垨鏌愪釜 bundle 鍐呯殑鎵€鏈夋彃浠?ID銆?//
+// 杩斿洖鍊硷細
+// - 绗竴涓繑鍥炲€兼槸杩囨护鍚庣殑鎻掍欢椤哄簭銆?// - 绗簩涓繑鍥炲€艰〃绀烘槸鍚︾湡鐨勭Щ闄や簡鑷冲皯涓€涓?ID銆?
 func filterPluginOrder(order []string, deletedIDs []string) ([]string, bool) {
 	deleted := map[string]bool{}
 	for _, id := range deletedIDs {
@@ -1298,6 +1542,245 @@ func defaultThemeLocale(catalog *appearance.Catalog) string {
 		}
 	}
 	return "en"
+}
+
+func pluginTools(catalog *appearance.Catalog) []appearance.Pack {
+	if catalog == nil {
+		return nil
+	}
+	var plugins []appearance.Pack
+	for _, plugin := range catalog.Plugins {
+		if hasUIOutlet(plugin, pluginSettingsUIOutlet) {
+			plugins = append(plugins, plugin)
+		}
+	}
+	return plugins
+}
+
+func hasUIOutlet(pack appearance.Pack, outlet string) bool {
+	outlet = strings.TrimSpace(outlet)
+	for _, entry := range pack.UIEntries {
+		if strings.TrimSpace(entry.Outlet) == outlet && strings.TrimSpace(entry.Path) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func pluginAction(ui *appearance.PluginUI, id string) appearance.PluginUIAction {
+	if ui == nil {
+		return appearance.PluginUIAction{}
+	}
+	for _, action := range ui.Actions {
+		if action.ID == id {
+			return action
+		}
+	}
+	return appearance.PluginUIAction{}
+}
+
+func pluginUI(pack appearance.Pack, outlet string) (*appearance.PluginUI, error) {
+	var merged appearance.PluginUI
+	found := false
+	for _, entry := range pack.UIEntries {
+		if strings.TrimSpace(entry.Outlet) != outlet {
+			continue
+		}
+		found = true
+		ui, err := readPluginUI(pack, entry)
+		if err != nil {
+			return nil, err
+		}
+		merged.Pages = append(merged.Pages, ui.Pages...)
+		merged.Actions = append(merged.Actions, ui.Actions...)
+	}
+	if !found {
+		return nil, fmt.Errorf("plugin %q does not declare a %s UI entry", pack.ID, outlet)
+	}
+	return &merged, nil
+}
+
+func readPluginUI(pack appearance.Pack, entry appearance.UIEntry) (appearance.PluginUI, error) {
+	cleaned := filepath.Clean(strings.ReplaceAll(strings.TrimSpace(entry.Path), "\\", "/"))
+	if cleaned == "." || cleaned == "" || filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) || cleaned == ".." {
+		return appearance.PluginUI{}, fmt.Errorf("plugin ui entry %q escapes pack root", entry.ID)
+	}
+	fullPath := filepath.Join(pack.RootDir, cleaned)
+	body, err := os.ReadFile(fullPath)
+	if err != nil {
+		return appearance.PluginUI{}, fmt.Errorf("read plugin ui %q: %w", entry.ID, err)
+	}
+	var ui appearance.PluginUI
+	if err := json.Unmarshal(body, &ui); err != nil {
+		return appearance.PluginUI{}, fmt.Errorf("parse plugin ui %q: %w", entry.ID, err)
+	}
+	return ui, nil
+}
+
+func (s *Server) findPlugin(id string) (appearance.Pack, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return appearance.Pack{}, false
+	}
+	catalog := s.currentAppearance()
+	if catalog == nil {
+		return appearance.Pack{}, false
+	}
+	for _, plugin := range catalog.Plugins {
+		if plugin.ID == id {
+			return plugin, true
+		}
+	}
+	return appearance.Pack{}, false
+}
+
+func randomUploadToken() (string, error) {
+	var raw [24]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+func (s *Server) storePluginUpload(token string, file pluginrpc.ActionFile) {
+	s.pluginUploadMu.Lock()
+	defer s.pluginUploadMu.Unlock()
+	s.pluginUploads[token] = file
+}
+
+func (s *Server) pluginUpload(token string) (pluginrpc.ActionFile, bool) {
+	s.pluginUploadMu.Lock()
+	defer s.pluginUploadMu.Unlock()
+	file, ok := s.pluginUploads[token]
+	return file, ok
+}
+
+func (j *importJob) log(message string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.logs = append(j.logs, time.Now().Format("15:04:05")+" "+message)
+}
+
+func (j *importJob) fail(message string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.errors++
+	j.logs = append(j.logs, time.Now().Format("15:04:05")+" "+message)
+}
+
+func (j *importJob) update(req *pluginrpc.UpdateJobRequest) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	if req.Total > 0 {
+		j.total = req.Total
+	}
+	if j.total <= 0 {
+		j.total = 1
+	}
+	if req.Done > 0 {
+		j.done = req.Done
+		if j.done > j.total {
+			j.done = j.total
+		}
+	}
+	now := time.Now().Format("15:04:05")
+	if message := strings.TrimSpace(req.Log); message != "" {
+		j.logs = append(j.logs, now+" "+message)
+	}
+	if message := strings.TrimSpace(req.Error); message != "" {
+		j.errors++
+		j.logs = append(j.logs, now+" "+message)
+	}
+	if req.Sections != nil {
+		j.sections = append([]pluginrpc.ResultSection(nil), req.Sections...)
+	}
+	if status := strings.TrimSpace(req.Status); status != "" {
+		j.status = status
+	}
+}
+
+func (j *importJob) step() {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.done < j.total {
+		j.done++
+	}
+}
+
+func (j *importJob) setSections(sections []pluginrpc.ResultSection) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.sections = sections
+}
+
+func (j *importJob) finish() {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.done = j.total
+	if j.errors > 0 {
+		j.status = "completed_with_errors"
+		j.logs = append(j.logs, time.Now().Format("15:04:05")+" Import completed with "+strconv.Itoa(j.errors)+" error(s).")
+		return
+	}
+	j.status = "completed"
+	j.logs = append(j.logs, time.Now().Format("15:04:05")+" Import completed.")
+}
+
+func (j *importJob) snapshot() *pluginrpc.ImportJob {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	percent := 0
+	if j.total > 0 {
+		percent = (j.done * 100) / j.total
+	}
+	logs := append([]string(nil), j.logs...)
+	sections := append([]pluginrpc.ResultSection(nil), j.sections...)
+	return &pluginrpc.ImportJob{
+		ID:       j.id,
+		Status:   j.status,
+		Done:     j.done,
+		Total:    j.total,
+		Percent:  percent,
+		Logs:     logs,
+		Sections: sections,
+	}
+}
+
+func replaceUploadToken(response *pluginrpc.InvokeActionResponse, token string) {
+	if response == nil || token == "" {
+		return
+	}
+	for actionIndex := range response.NextActions {
+		if response.NextActions[actionIndex].Fields == nil {
+			response.NextActions[actionIndex].Fields = map[string]string{}
+		}
+		for key, value := range response.NextActions[actionIndex].Fields {
+			if value == "__HOST_UPLOAD_TOKEN__" {
+				response.NextActions[actionIndex].Fields[key] = token
+			}
+		}
+	}
+}
+
+func readLimited(reader io.Reader, maxBytes int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, fmt.Errorf("file exceeds %d bytes", maxBytes)
+	}
+	return body, nil
+}
+
+func fallbackString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "item"
 }
 
 func (s *Server) uploadMedia(w http.ResponseWriter, r *http.Request) {
@@ -1350,6 +1833,9 @@ func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 func mediaFigureMarkdown(item media.Item) string {
+	if !mediaIsImage(item) {
+		return fmt.Sprintf("[%s](%s)", escapeMarkdownLinkText(mediaFileLabel(item)), escapeMarkdownLinkDestination(item.Path))
+	}
 	caption := strings.TrimSpace(item.Caption)
 	if caption == "" {
 		caption = item.Alt
@@ -1367,9 +1853,68 @@ func mediaFigureMarkdown(item media.Item) string {
 	)
 }
 
+func mediaItemRPC(item media.Item) pluginrpc.MediaItem {
+	return pluginrpc.MediaItem{
+		ID:           item.ID,
+		Path:         item.Path,
+		OriginalName: item.OriginalName,
+		Alt:          item.Alt,
+		Caption:      item.Caption,
+		MIMEType:     item.MIMEType,
+		Width:        item.Width,
+		Height:       item.Height,
+	}
+}
+
+func mediaIsImage(item media.Item) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(item.MIMEType)), "image/")
+}
+
+func mediaFileLabel(item media.Item) string {
+	for _, value := range []string{item.Caption, item.Alt, item.OriginalName, filepath.Base(item.Path)} {
+		if label := strings.TrimSpace(value); label != "" && label != "." && label != string(filepath.Separator) {
+			return label
+		}
+	}
+	return "File"
+}
+
+func mediaFileType(item media.Item) string {
+	for _, value := range []string{item.OriginalName, item.Path} {
+		if ext := strings.TrimPrefix(strings.ToUpper(filepath.Ext(value)), "."); ext != "" {
+			return ext
+		}
+	}
+	return "FILE"
+}
+
+func mediaMeta(item media.Item) string {
+	parts := []string{}
+	if mediaIsImage(item) && item.Width > 0 && item.Height > 0 {
+		parts = append(parts, fmt.Sprintf("%dx%d", item.Width, item.Height))
+	}
+	if mimeType := strings.TrimSpace(item.MIMEType); mimeType != "" {
+		parts = append(parts, mimeType)
+	}
+	if len(parts) == 0 {
+		return mediaFileType(item)
+	}
+	return strings.Join(parts, " / ")
+}
+
 func escapeMarkdownImageAlt(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	return strings.ReplaceAll(value, `]`, `\]`)
+}
+
+func escapeMarkdownLinkText(value string) string {
+	return escapeMarkdownImageAlt(value)
+}
+
+func escapeMarkdownLinkDestination(value string) string {
+	value = strings.ReplaceAll(value, `\`, `%5C`)
+	value = strings.ReplaceAll(value, `(`, `%28`)
+	return strings.ReplaceAll(value, `)`, `%29`)
 }
 
 func escapeLatexBraceText(value string) string {
@@ -1456,10 +2001,8 @@ func (s *Server) replaceRuntime(store *site.Store, catalog *appearance.Catalog, 
 	s.templates = templates
 }
 
-// reloadRuntime 在设置或资源包发生变化后重新装载站点运行时状态。
-//
-// 这里把内容数据、资源包目录、模板集合看作一个整体快照统一替换，
-// 避免主题切换后出现“内容已更新但模板还是旧的”这类半刷新状态。
+// reloadRuntime 鍦ㄨ缃垨璧勬簮鍖呭彂鐢熷彉鍖栧悗閲嶆柊瑁呰浇绔欑偣杩愯鏃剁姸鎬併€?//
+// 杩欓噷鎶婂唴瀹规暟鎹€佽祫婧愬寘鐩綍銆佹ā鏉块泦鍚堢湅浣滀竴涓暣浣撳揩鐓х粺涓€鏇挎崲锛?// 閬垮厤涓婚鍒囨崲鍚庡嚭鐜扳€滃唴瀹瑰凡鏇存柊浣嗘ā鏉胯繕鏄棫鐨勨€濊繖绫诲崐鍒锋柊鐘舵€併€?
 func (s *Server) reloadRuntime() error {
 	store, err := site.Load(s.contentRoot)
 	if err != nil {

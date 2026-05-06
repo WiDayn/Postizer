@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	stdhtml "html"
 	"html/template"
 	"io/fs"
 	"os"
@@ -19,7 +20,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
-	"github.com/yuin/goldmark/renderer/html"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 )
 
 const (
@@ -29,7 +30,20 @@ const (
 	legacyDateOnlyLayout = "2006-01-02"
 )
 
-var slugPattern = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}-]*$`)
+var (
+	slugPattern             = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}-]*$`)
+	moreTagPattern          = regexp.MustCompile(`(?is)<!--\s*more\s*-->`)
+	summaryFencePattern     = regexp.MustCompile("(?s)```.*?```")
+	summaryHTMLComment      = regexp.MustCompile(`(?s)<!--.*?-->`)
+	summaryImagePattern     = regexp.MustCompile(`!\[([^\]]*)\]\([^)]+\)`)
+	summaryLinkPattern      = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	summaryHeadingPattern   = regexp.MustCompile(`(?m)^\s{0,3}#{1,6}\s+`)
+	summaryQuotePattern     = regexp.MustCompile(`(?m)^\s*>\s?`)
+	summaryListPattern      = regexp.MustCompile(`(?m)^\s*(?:[-*+]\s+|\d+[.]\s+)`)
+	summaryHTMLTagPattern   = regexp.MustCompile(`(?s)<[^>]+>`)
+	summaryEmphasisPattern  = regexp.MustCompile(`[*_~]{1,3}`)
+	summaryLineBreakPattern = regexp.MustCompile(`(?m)\s{2,}$`)
+)
 
 type Store struct {
 	Posts          []*Post
@@ -601,7 +615,8 @@ func loadPosts(dir string, md goldmark.Markdown, store *Store, location *time.Lo
 		if !slugPattern.MatchString(slug) {
 			return fmt.Errorf("invalid post slug %q in %s", slug, path)
 		}
-		htmlBody, err := renderMarkdown(md, markdown)
+		renderSource := stripMoreTags(markdown)
+		htmlBody, err := renderMarkdown(md, renderSource)
 		if err != nil {
 			return err
 		}
@@ -611,13 +626,13 @@ func loadPosts(dir string, md goldmark.Markdown, store *Store, location *time.Lo
 			Date:        parseDate(fm.get("date", ""), location),
 			Updated:     parseDate(fm.get("updated", ""), location),
 			Tags:        parseList(fm.get("tags", "")),
-			Summary:     fm.get("summary", ""),
+			Summary:     contentSummary(fm, markdown),
 			Draft:       fm.get("draft", "false") == "true",
 			TOC:         fm.get("toc", "true") != "false",
 			HTML:        htmlBody,
 			Source:      string(markdown),
 			FilePath:    path,
-			ReadingTime: readingTime(markdown),
+			ReadingTime: readingTime(renderSource),
 		}
 		store.AllPosts = append(store.AllPosts, post)
 		store.AllPostsBySlug[post.Slug] = post
@@ -646,7 +661,8 @@ func loadPages(dir string, md goldmark.Markdown, store *Store, location *time.Lo
 		if !slugPattern.MatchString(slug) {
 			return fmt.Errorf("invalid page slug %q in %s", slug, path)
 		}
-		htmlBody, err := renderMarkdown(md, markdown)
+		renderSource := stripMoreTags(markdown)
+		htmlBody, err := renderMarkdown(md, renderSource)
 		if err != nil {
 			return err
 		}
@@ -660,7 +676,7 @@ func loadPages(dir string, md goldmark.Markdown, store *Store, location *time.Lo
 			Slug:     slug,
 			Date:     date,
 			Updated:  updated,
-			Summary:  fm.get("summary", ""),
+			Summary:  contentSummary(fm, markdown),
 			Draft:    fm.get("draft", "false") == "true",
 			TOC:      fm.get("toc", "false") == "true",
 			HTML:     htmlBody,
@@ -1391,6 +1407,60 @@ func SavePage(root string, draft PageDraft) (PageDraft, error) {
 	return draft, nil
 }
 
+func SaveImportedPost(root string, draft PostDraft, overwrite bool) (PostDraft, error) {
+	if strings.TrimSpace(draft.Title) == "" {
+		return PostDraft{}, fmt.Errorf("title is required")
+	}
+	draft.Slug = NormalizeSlug(draft.Slug)
+	if draft.Slug == "" {
+		draft.Slug = NormalizeSlug(draft.Title)
+	}
+	if !ValidSlug(draft.Slug) {
+		return PostDraft{}, fmt.Errorf("invalid post slug %q", draft.Slug)
+	}
+	draft, err := normalizeImportedPostDates(root, draft)
+	if err != nil {
+		return PostDraft{}, err
+	}
+	if !overwrite {
+		draft.Slug, err = uniqueContentSlug(root, "posts", draft.Slug, "")
+		if err != nil {
+			return PostDraft{}, err
+		}
+	}
+	if err := writeContentFile(root, "posts", draft.Slug, serializePost(draft)); err != nil {
+		return PostDraft{}, err
+	}
+	return draft, nil
+}
+
+func SaveImportedPage(root string, draft PageDraft, overwrite bool) (PageDraft, error) {
+	if strings.TrimSpace(draft.Title) == "" {
+		return PageDraft{}, fmt.Errorf("title is required")
+	}
+	draft.Slug = NormalizeSlug(draft.Slug)
+	if draft.Slug == "" {
+		draft.Slug = NormalizeSlug(draft.Title)
+	}
+	if !ValidSlug(draft.Slug) {
+		return PageDraft{}, fmt.Errorf("invalid page slug %q", draft.Slug)
+	}
+	draft, err := normalizeImportedPageDates(root, draft)
+	if err != nil {
+		return PageDraft{}, err
+	}
+	if !overwrite {
+		draft.Slug, err = uniqueContentSlug(root, "pages", draft.Slug, "")
+		if err != nil {
+			return PageDraft{}, err
+		}
+	}
+	if err := writeContentFile(root, "pages", draft.Slug, serializePage(draft)); err != nil {
+		return PageDraft{}, err
+	}
+	return draft, nil
+}
+
 func DeletePost(root, slug string) error {
 	return deleteContentFile(root, "posts", slug)
 }
@@ -1546,7 +1616,7 @@ func newMarkdown() goldmark.Markdown {
 	return goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.Footnote, extension.Typographer),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
-		goldmark.WithRendererOptions(html.WithXHTML()),
+		goldmark.WithRendererOptions(gmhtml.WithXHTML()),
 	)
 }
 
@@ -1573,6 +1643,47 @@ func splitFrontMatter(body []byte) (frontMatter, []byte) {
 	}
 	markdown := strings.TrimPrefix(parts[1], "\n")
 	return fm, []byte(markdown)
+}
+
+func contentSummary(fm frontMatter, markdown []byte) string {
+	if summary := fm.get("summary", ""); summary != "" {
+		return summary
+	}
+	return summaryFromMoreTag(markdown)
+}
+
+func summaryFromMoreTag(markdown []byte) string {
+	text := normalizeMarkdownNewlines(string(markdown))
+	match := moreTagPattern.FindStringIndex(text)
+	if match == nil {
+		return ""
+	}
+	return markdownSummaryText(text[:match[0]])
+}
+
+func stripMoreTags(markdown []byte) []byte {
+	text := normalizeMarkdownNewlines(string(markdown))
+	return []byte(moreTagPattern.ReplaceAllString(text, ""))
+}
+
+func normalizeMarkdownNewlines(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	return strings.ReplaceAll(value, "\r", "\n")
+}
+
+func markdownSummaryText(value string) string {
+	value = summaryFencePattern.ReplaceAllString(value, " ")
+	value = summaryHTMLComment.ReplaceAllString(value, " ")
+	value = summaryImagePattern.ReplaceAllString(value, "$1")
+	value = summaryLinkPattern.ReplaceAllString(value, "$1")
+	value = summaryHeadingPattern.ReplaceAllString(value, "")
+	value = summaryQuotePattern.ReplaceAllString(value, "")
+	value = summaryListPattern.ReplaceAllString(value, "")
+	value = summaryHTMLTagPattern.ReplaceAllString(value, " ")
+	value = summaryEmphasisPattern.ReplaceAllString(value, "")
+	value = summaryLineBreakPattern.ReplaceAllString(value, " ")
+	value = strings.NewReplacer("`", "", `\`, "").Replace(value)
+	return strings.Join(strings.Fields(stdhtml.UnescapeString(value)), " ")
 }
 
 func (fm frontMatter) get(key, fallback string) string {
@@ -1612,6 +1723,62 @@ func parseContentTime(value string, location *time.Location) (time.Time, error) 
 		}
 	}
 	return time.Time{}, fmt.Errorf("unsupported time %q", value)
+}
+
+func normalizeImportedPostDates(root string, draft PostDraft) (PostDraft, error) {
+	settings, err := LoadSettings(root)
+	if err != nil {
+		return PostDraft{}, err
+	}
+	location := TimeLocation(settings)
+	now := time.Now().In(location).Truncate(time.Minute)
+	if strings.TrimSpace(draft.Date) == "" {
+		draft.Date = FormatInputDateTime(now)
+	} else {
+		date, err := parseContentTime(draft.Date, location)
+		if err != nil {
+			return PostDraft{}, fmt.Errorf("invalid date %q", draft.Date)
+		}
+		draft.Date = FormatInputDateTime(date)
+	}
+	if strings.TrimSpace(draft.Updated) == "" {
+		draft.Updated = draft.Date
+	} else {
+		updated, err := parseContentTime(draft.Updated, location)
+		if err != nil {
+			return PostDraft{}, fmt.Errorf("invalid updated date %q", draft.Updated)
+		}
+		draft.Updated = FormatInputDateTime(updated)
+	}
+	return draft, nil
+}
+
+func normalizeImportedPageDates(root string, draft PageDraft) (PageDraft, error) {
+	settings, err := LoadSettings(root)
+	if err != nil {
+		return PageDraft{}, err
+	}
+	location := TimeLocation(settings)
+	now := time.Now().In(location).Truncate(time.Minute)
+	if strings.TrimSpace(draft.Date) == "" {
+		draft.Date = FormatInputDateTime(now)
+	} else {
+		date, err := parseContentTime(draft.Date, location)
+		if err != nil {
+			return PageDraft{}, fmt.Errorf("invalid date %q", draft.Date)
+		}
+		draft.Date = FormatInputDateTime(date)
+	}
+	if strings.TrimSpace(draft.Updated) == "" {
+		draft.Updated = draft.Date
+	} else {
+		updated, err := parseContentTime(draft.Updated, location)
+		if err != nil {
+			return PageDraft{}, fmt.Errorf("invalid updated date %q", draft.Updated)
+		}
+		draft.Updated = FormatInputDateTime(updated)
+	}
+	return draft, nil
 }
 
 func FormatInputDateTime(t time.Time) string {

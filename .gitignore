@@ -3,3 +3,5 @@
 /run.sh
 /stop.sh
 /attach.sh
+/dist
+/*.log

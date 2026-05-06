@@ -1,0 +1,184 @@
+(() => {
+  const panel = document.querySelector("[data-plugin-id]");
+  if (!panel) return;
+
+  const pluginID = panel.dataset.pluginId;
+  const resultBox = document.querySelector("[data-plugin-action-result]");
+
+  function apiURL(actionID) {
+    return `/admin/api/plugins/${encodeURIComponent(pluginID)}/actions/${encodeURIComponent(actionID)}`;
+  }
+
+  function jobURL(jobID) {
+    return `/admin/api/plugin-jobs/${encodeURIComponent(jobID)}`;
+  }
+
+  function setStatus(form, text, error = false) {
+    const status = form.querySelector("[data-plugin-action-status]");
+    if (!status) return;
+    status.textContent = text;
+    status.classList.toggle("is-error", error);
+  }
+
+  async function invoke(actionID, formData, form) {
+    setStatus(form, "Working...");
+    const response = await fetch(apiURL(actionID), {
+      method: "POST",
+      body: formData
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(text || response.statusText);
+    }
+    return JSON.parse(text || "{}");
+  }
+
+  function renderResult(result) {
+    if (!resultBox) return;
+    resultBox.innerHTML = "";
+    if (!result) return;
+
+    const fragment = document.createDocumentFragment();
+    if (result.title || result.summary) {
+      const header = document.createElement("div");
+      header.className = "plugin-result-header";
+      if (result.title) {
+        const title = document.createElement("h3");
+        title.textContent = result.title;
+        header.appendChild(title);
+      }
+      if (result.summary) {
+        const summary = document.createElement("p");
+        summary.textContent = result.summary;
+        header.appendChild(summary);
+      }
+      fragment.appendChild(header);
+    }
+
+    if (result.job) {
+      fragment.appendChild(renderJob(result.job));
+      pollJob(result.job.id);
+    }
+
+    (result.sections || []).forEach((section) => fragment.appendChild(renderSection(section)));
+
+    if (result.next_actions && result.next_actions.length) {
+      const actions = document.createElement("div");
+      actions.className = "settings-actions";
+      result.next_actions.forEach((action) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `ui-button ${action.style === "primary" ? "ui-button--primary" : "ui-button--ghost"}`;
+        button.textContent = action.label || action.id;
+        button.addEventListener("click", async () => {
+          if (action.confirm && !window.confirm(action.confirm)) return;
+          const formData = new FormData();
+          Object.entries(action.fields || {}).forEach(([key, value]) => formData.set(key, value));
+          button.disabled = true;
+          try {
+            const nextResult = await invoke(action.id, formData, panel);
+            renderResult(nextResult);
+          } catch (error) {
+            renderResult({ title: "Action failed", summary: error.message, level: "error" });
+          } finally {
+            button.disabled = false;
+          }
+        });
+        actions.appendChild(button);
+      });
+      fragment.appendChild(actions);
+    }
+
+    resultBox.appendChild(fragment);
+  }
+
+  function renderSection(section) {
+    const block = document.createElement("section");
+    block.className = "plugin-result-section";
+    if (section.title) {
+      const title = document.createElement("h4");
+      title.textContent = section.title;
+      block.appendChild(title);
+    }
+    if (section.text) {
+      const text = document.createElement("p");
+      text.textContent = section.text;
+      block.appendChild(text);
+    }
+    if (section.rows && section.rows.length) {
+      const list = document.createElement("dl");
+      section.rows.forEach((row) => {
+        const dt = document.createElement("dt");
+        dt.textContent = row.label;
+        const dd = document.createElement("dd");
+        dd.textContent = row.value;
+        list.append(dt, dd);
+      });
+      block.appendChild(list);
+    }
+    return block;
+  }
+
+  function renderJob(job) {
+    const shell = document.createElement("section");
+    shell.className = "plugin-job";
+    shell.dataset.jobId = job.id;
+
+    const top = document.createElement("div");
+    top.className = "plugin-job__top";
+    const title = document.createElement("h4");
+    title.textContent = `Import ${job.status || "running"}`;
+    const meta = document.createElement("span");
+    meta.textContent = `${job.done || 0}/${job.total || 0}`;
+    top.append(title, meta);
+
+    const progress = document.createElement("progress");
+    progress.max = 100;
+    progress.value = job.percent || 0;
+
+    const log = document.createElement("ol");
+    log.className = "plugin-job-log";
+    (job.logs || []).forEach((line) => {
+      const item = document.createElement("li");
+      item.textContent = line;
+      log.appendChild(item);
+    });
+
+    shell.append(top, progress, log);
+    (job.sections || []).forEach((section) => shell.appendChild(renderSection(section)));
+    return shell;
+  }
+
+  async function pollJob(jobID) {
+    if (!jobID) return;
+    const response = await fetch(jobURL(jobID));
+    if (!response.ok) return;
+    const job = await response.json();
+    const existing = resultBox && resultBox.querySelector(`[data-job-id="${CSS.escape(jobID)}"]`);
+    if (existing) {
+      existing.replaceWith(renderJob(job));
+    }
+    if (job.status === "running") {
+      window.setTimeout(() => pollJob(jobID), 1000);
+    }
+  }
+
+  document.querySelectorAll("[data-plugin-action-form]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const actionID = form.dataset.actionId;
+      const formData = new FormData(form);
+      const submitter = form.querySelector("button[type='submit']");
+      if (submitter) submitter.disabled = true;
+      try {
+        const result = await invoke(actionID, formData, form);
+        setStatus(form, "Done");
+        renderResult(result);
+      } catch (error) {
+        setStatus(form, error.message, true);
+      } finally {
+        if (submitter) submitter.disabled = false;
+      }
+    });
+  });
+})();

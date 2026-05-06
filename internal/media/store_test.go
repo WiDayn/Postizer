@@ -63,6 +63,26 @@ func requireStoreFile(t *testing.T, store *Store, publicPath string) string {
 	return path
 }
 
+func TestSaveUploadAllowsArbitraryExtension(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	item, err := store.SaveUpload(bytes.NewReader([]byte("custom payload")), "backup.customext")
+	if err != nil {
+		t.Fatalf("save arbitrary extension: %v", err)
+	}
+
+	if !strings.HasSuffix(item.Path, ".customext") {
+		t.Fatalf("path = %q, want .customext suffix", item.Path)
+	}
+	if item.MIMEType == "" {
+		t.Fatal("mime type should be recorded")
+	}
+	requireStoreFile(t, store, item.Path)
+}
+
 func TestSaveUploadReadsWebPDimensions(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {
