@@ -18,6 +18,7 @@
     if (!status) return;
     status.textContent = text;
     status.classList.toggle("is-error", error);
+    status.classList.toggle("ui-status--error", error);
   }
 
   async function invoke(actionID, formData, form) {
@@ -36,12 +37,17 @@
   function renderResult(result) {
     if (!resultBox) return;
     resultBox.innerHTML = "";
-    if (!result) return;
+    resultBox.classList.toggle("is-empty", !result);
+    if (!result) {
+      resultBox.appendChild(renderEmptyResult());
+      return;
+    }
 
     const fragment = document.createDocumentFragment();
     if (result.title || result.summary) {
       const header = document.createElement("div");
       header.className = "plugin-result-header";
+      if (result.level) header.dataset.level = result.level;
       if (result.title) {
         const title = document.createElement("h3");
         title.textContent = result.title;
@@ -92,6 +98,17 @@
     resultBox.appendChild(fragment);
   }
 
+  function renderEmptyResult() {
+    const empty = document.createElement("div");
+    empty.className = "plugin-result-empty";
+    const title = document.createElement("h3");
+    title.textContent = "No results yet";
+    const text = document.createElement("p");
+    text.textContent = "Action output will appear here.";
+    empty.append(title, text);
+    return empty;
+  }
+
   function renderSection(section) {
     const block = document.createElement("section");
     block.className = "plugin-result-section";
@@ -107,6 +124,7 @@
     }
     if (section.rows && section.rows.length) {
       const list = document.createElement("dl");
+      list.className = "plugin-result-list";
       section.rows.forEach((row) => {
         const dt = document.createElement("dt");
         dt.textContent = row.label;
@@ -135,6 +153,7 @@
     const progress = document.createElement("progress");
     progress.max = 100;
     progress.value = job.percent || 0;
+    progress.textContent = `${job.percent || 0}%`;
 
     const log = document.createElement("ol");
     log.className = "plugin-job-log";
@@ -170,13 +189,16 @@
       const formData = new FormData(form);
       const submitter = form.querySelector("button[type='submit']");
       if (submitter) submitter.disabled = true;
+      form.classList.add("is-working");
       try {
         const result = await invoke(actionID, formData, form);
         setStatus(form, "Done");
         renderResult(result);
       } catch (error) {
         setStatus(form, error.message, true);
+        renderResult({ title: "Action failed", summary: error.message, level: "error" });
       } finally {
+        form.classList.remove("is-working");
         if (submitter) submitter.disabled = false;
       }
     });

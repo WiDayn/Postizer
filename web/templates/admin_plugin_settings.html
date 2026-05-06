@@ -1,52 +1,80 @@
 {{define "admin_plugin_settings.html"}}
 {{template "adminStart" .}}
-<header class="admin-page-header">
-  <p class="kicker">{{msg . "admin.kicker"}}</p>
-  <h1>{{.Plugin.Name}}</h1>
+<header class="admin-page-header plugin-settings-header">
+  <div>
+    <p class="kicker">{{msg . "admin.kicker"}}</p>
+    <h1>{{.Plugin.Name}}</h1>
+  </div>
+  <a class="ui-button ui-button--ghost" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
 </header>
 
 <section class="ui-panel admin-panel plugin-settings-panel" data-plugin-id="{{.Plugin.ID}}">
-  <div class="ui-panel__head">
-    <h2>{{.Plugin.Name}}</h2>
+  <div class="ui-panel__head plugin-settings-panel__head">
+    <div>
+      <h2>{{.Plugin.Name}}</h2>
+      <span>{{.Plugin.ID}} · v{{.Plugin.Version}}</span>
+    </div>
   </div>
   {{if .Error}}
   <p class="ui-status ui-status--error">{{.Error}}</p>
   {{else}}
     {{if .Plugin.Description}}
-    <p class="appearance-copy">{{.Plugin.Description}}</p>
+    <p class="plugin-settings-copy">{{.Plugin.Description}}</p>
     {{end}}
 
     {{range .PluginUI.Pages}}
     <section class="plugin-admin-page">
-      <div class="pack-section__head">
-        <h3>{{.Title}}</h3>
-        {{if .Description}}<p>{{.Description}}</p>{{end}}
-      </div>
+      <header class="plugin-admin-page__head">
+        <div>
+          <h3>{{.Title}}</h3>
+          {{if .Description}}<p>{{.Description}}</p>{{end}}
+        </div>
+      </header>
+      <div class="plugin-action-list">
       {{range .Actions}}
         {{$action := pluginAction $.PluginUI .}}
-        <form class="plugin-action-form" data-plugin-action-form data-action-id="{{$action.ID}}">
-          {{range $action.Fields}}
-          <label class="ui-field">
-            <span>{{.Label}}</span>
-            {{if eq .Type "file"}}
-            <input type="file" name="{{.Name}}" {{if .Accept}}accept="{{.Accept}}"{{end}} {{if .Required}}required{{end}}>
-            {{else}}
-            <input type="{{if .Type}}{{.Type}}{{else}}text{{end}}" name="{{.Name}}" {{if .Required}}required{{end}}>
-            {{end}}
-            {{if .Help}}<small>{{.Help}}</small>{{end}}
-          </label>
-          {{end}}
-          <div class="settings-actions">
-            <button type="submit" class="ui-button ui-button--primary">{{$action.Label}}</button>
-            <span class="ui-status" data-plugin-action-status aria-live="polite"></span>
+        <article class="plugin-action-panel">
+          <div class="plugin-action-panel__head">
+            <div>
+              <h4>{{$action.Label}}</h4>
+              {{if $action.Description}}<p>{{$action.Description}}</p>{{end}}
+            </div>
           </div>
-        </form>
+          <form class="plugin-action-form" data-plugin-action-form data-action-id="{{$action.ID}}">
+            {{range $action.Fields}}
+              {{if eq .Type "file"}}
+              <label class="ui-file-drop plugin-file-drop" data-file-drop>
+                <input class="ui-file-drop__input" type="file" name="{{.Name}}" {{if .Accept}}accept="{{.Accept}}"{{end}} {{if .Required}}required{{end}}>
+                <span class="ui-file-drop__title">{{.Label}}</span>
+                <span class="ui-file-drop__meta">{{if .Help}}{{.Help}}{{else}}{{if .Accept}}{{.Accept}}{{else}}Select a file{{end}}{{end}}</span>
+                <span class="ui-file-drop__name" data-file-name></span>
+              </label>
+              {{else}}
+              <label class="ui-field plugin-action-field">
+                <span>{{.Label}}</span>
+                <input class="ui-input" type="{{if .Type}}{{.Type}}{{else}}text{{end}}" name="{{.Name}}" {{if .Required}}required{{end}}>
+                {{if .Help}}<small>{{.Help}}</small>{{end}}
+              </label>
+              {{end}}
+            {{end}}
+            <footer class="plugin-action-footer">
+              <button type="submit" class="ui-button ui-button--primary">{{$action.Label}}</button>
+              <span class="ui-status plugin-action-status" data-plugin-action-status aria-live="polite"></span>
+            </footer>
+          </form>
+        </article>
       {{end}}
+      </div>
     </section>
     {{end}}
-    <div class="plugin-action-result" data-plugin-action-result></div>
+    <section class="plugin-action-result" data-plugin-action-result aria-live="polite">
+      <div class="plugin-result-empty">
+        <h3>No results yet</h3>
+        <p>Action output will appear here.</p>
+      </div>
+    </section>
   {{end}}
 </section>
-<script defer src="/static/plugin-admin.js?v=2"></script>
+<script defer src="/static/plugin-admin.js?v=3"></script>
 {{template "adminEnd" .}}
 {{end}}
