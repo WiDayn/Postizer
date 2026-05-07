@@ -5,5 +5,16 @@
   "site.hero.hide_image": "Hide cover image",
   "home.lead_kicker": "Articles",
   "menus.location.navbar": "Navbar",
-  "menus.location.navbar.description": "Primary navigation bar"
+  "menus.location.navbar.description": "Primary navigation bar",
+  "theme_settings.menus.title": "Menu Placement",
+  "theme_settings.menus.help": "Assign custom menus to locations provided by the active theme.",
+  "theme_settings.locations.title": "Theme Locations",
+  "theme_settings.locations.empty": "The active theme does not declare menu locations.",
+  "theme_settings.locations.default": "Default menu",
+  "theme_settings.locations.none": "No menu",
+  "theme_settings.pure_white.home.title": "Home Settings",
+  "theme_settings.pure_white.home.content.label": "Home article content",
+  "theme_settings.pure_white.home.content.description": "Control whether the Pure White home page shows full article content.",
+  "theme_settings.pure_white.home.content.show": "Show",
+  "theme_settings.pure_white.home.content.hide": "Hide"
 }

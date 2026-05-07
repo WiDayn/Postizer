@@ -1,0 +1,210 @@
+{{define "admin_theme_settings.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">{{msg . "admin.kicker"}}</p>
+  <h1>{{msg . "theme_settings.heading" "Theme Settings"}}</h1>
+</header>
+
+<section id="themeSettings" class="ui-panel admin-panel theme-settings-panel">
+  <div class="ui-panel__head">
+    <h2>{{msg . "theme_settings.menus.title" "Menu Placement"}}</h2>
+    <span id="themeSettingsStatus" class="ui-status">{{msg . "settings.status.ready" "Ready"}}</span>
+  </div>
+  <div class="theme-settings-copy">
+    <p>{{msg . "theme_settings.menus.help" "Assign custom menus to locations provided by the active theme."}}</p>
+  </div>
+  <section class="theme-settings-section">
+    <h3>{{msg . "theme_settings.locations.title" "Theme Locations"}}</h3>
+    <div id="themeLocationList" class="theme-location-list"></div>
+  </section>
+  <section class="theme-settings-section">
+    <h3>{{msg . "theme_settings.pure_white.home.title" "Home Settings"}}</h3>
+    <label class="theme-location-row">
+      <span class="theme-location-row__copy">
+        <strong>{{msg . "theme_settings.pure_white.home.content.label" "Home article content"}}</strong>
+        <span>{{msg . "theme_settings.pure_white.home.content.description" "Control whether the Pure White home page shows full article content."}}</span>
+      </span>
+      <select id="pureWhiteHomeContent" class="ui-input">
+        <option value="show">{{msg . "theme_settings.pure_white.home.content.show" "Show"}}</option>
+        <option value="hide">{{msg . "theme_settings.pure_white.home.content.hide" "Hide"}}</option>
+      </select>
+    </label>
+  </section>
+  <div class="settings-actions theme-settings-actions">
+    <button id="saveThemeSettings" class="ui-button ui-button--primary" type="button">{{msg . "theme_settings.save" "Save Theme Settings"}}</button>
+  </div>
+</section>
+
+<script id="themeSettingsInitialData" type="application/json">{{toScriptJSON (themeSettingsData .)}}</script>
+<script>
+(() => {
+  const themeSettingsRoot = document.querySelector("#themeSettings");
+  const themeSettingsStatus = document.querySelector("#themeSettingsStatus");
+  const themeLocationList = document.querySelector("#themeLocationList");
+  const homeContentSelect = document.querySelector("#pureWhiteHomeContent");
+  const saveThemeSettingsButton = document.querySelector("#saveThemeSettings");
+  const homeContentLocation = "home-content";
+  const messages = readPostizerMessages();
+
+  /**
+   * 从公共模板注入的 JSON script 标签中读取当前语言文案。
+   * 这个主题页使用内联脚本，执行时间早于 defer 加载的 site.js，
+   * 因此不能只依赖 window.postizerMessage。
+   * @returns {object} 返回当前主题语言合并后的翻译表。
+   */
+  function readPostizerMessages() {
+    const script = document.querySelector("#postizerMessages");
+    if (!script) return {};
+    try {
+      return JSON.parse(script.textContent || "{}");
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /**
+   * 读取后台注入的翻译文案，优先使用公共翻译函数。
+   * @param {string} key - 翻译键名。
+   * @param {string} fallback - 没有翻译时显示的默认文案。
+   * @returns {string} 返回当前语言下的文案。
+   */
+  function tr(key, fallback) {
+    if (window.postizerMessage) return window.postizerMessage(key, fallback);
+    const value = messages[key];
+    if (typeof value === "string" && value.trim() !== "") return value;
+    return fallback;
+  }
+
+  /**
+   * 为需要管理员 token 的页面保留当前 token 参数。
+   * @param {string} path - 后台 API 路径。
+   * @returns {string} 返回带 token 的 API URL。
+   */
+  function apiURL(path) {
+    const token = new URLSearchParams(window.location.search).get("token");
+    if (!token) return path;
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set("token", token);
+    return url.pathname + url.search;
+  }
+
+  /**
+   * 从页面中的 JSON script 标签读取主题设置初始值。
+   * @returns {object} 返回后台提供的主题设置数据。
+   */
+  function readInitialData() {
+    const script = document.querySelector("#themeSettingsInitialData");
+    if (!script) return {};
+    try {
+      return JSON.parse(script.textContent || "{}");
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /**
+   * 规范化后台设置，避免无效菜单 ID 被再次提交。
+   * @param {object} settings - 后台保存的主题设置对象。
+   * @returns {object} 返回包含 menus 和 menu_locations 的可编辑状态。
+   */
+  function normalizeState(settings = {}) {
+    const menus = Array.isArray(settings.menus) ? settings.menus : [];
+    const menuIDs = new Set(menus.map((menu) => String(menu.id || "")));
+    const menuLocations = {};
+    Object.entries(settings.menu_locations || {}).forEach(([location, menuID]) => {
+      const value = String(menuID || "");
+      if (location === homeContentLocation || value === "" || menuIDs.has(value)) menuLocations[location] = value;
+    });
+    return { menus, menu_locations: menuLocations };
+  }
+
+  /**
+   * 渲染普通菜单位置，例如 Pure White 的导航栏。
+   * 首页文章内容不是菜单位置，所以单独放在“首页设置”中渲染。
+   */
+  function renderMenuLocations() {
+    if (!themeLocationList) return;
+    themeLocationList.innerHTML = "";
+    if (!data.locations.length) {
+      const empty = document.createElement("p");
+      empty.className = "theme-settings-empty";
+      empty.textContent = tr("theme_settings.locations.empty", "The active theme does not declare menu locations.");
+      themeLocationList.appendChild(empty);
+      return;
+    }
+    data.locations.forEach((location) => {
+      const label = document.createElement("label");
+      label.className = "theme-location-row";
+      const copy = document.createElement("span");
+      copy.className = "theme-location-row__copy";
+      const name = document.createElement("strong");
+      name.textContent = tr(`menus.location.${location.id}`, location.name || location.id);
+      const description = document.createElement("span");
+      description.textContent = tr(`menus.location.${location.id}.description`, location.description || location.id);
+      copy.append(name, description);
+
+      const select = document.createElement("select");
+      select.className = "ui-input";
+      select.dataset.locationId = location.id;
+      select.appendChild(new Option(tr("theme_settings.locations.default", "Default menu"), "__default__"));
+      select.appendChild(new Option(tr("theme_settings.locations.none", "No menu"), "__none__"));
+      state.menus.forEach((menu) => {
+        select.appendChild(new Option(menu.name || menu.id, menu.id));
+      });
+      if (Object.prototype.hasOwnProperty.call(state.menu_locations, location.id)) {
+        select.value = state.menu_locations[location.id] === "" ? "__none__" : state.menu_locations[location.id];
+      } else {
+        select.value = "__default__";
+      }
+      select.addEventListener("change", () => {
+        if (select.value === "__default__") delete state.menu_locations[location.id];
+        else if (select.value === "__none__") state.menu_locations[location.id] = "";
+        else state.menu_locations[location.id] = select.value;
+      });
+      label.append(copy, select);
+      themeLocationList.appendChild(label);
+    });
+  }
+
+  /**
+   * 渲染 Pure White 首页正文开关。
+   * 默认不保存任何值，表示“显示”；保存空字符串表示“隐藏”。
+   */
+  function renderHomeContentSetting() {
+    if (!homeContentSelect) return;
+    homeContentSelect.value = state.menu_locations[homeContentLocation] === "" ? "hide" : "show";
+    homeContentSelect.addEventListener("change", () => {
+      if (homeContentSelect.value === "hide") state.menu_locations[homeContentLocation] = "";
+      else delete state.menu_locations[homeContentLocation];
+    });
+  }
+
+  const data = readInitialData();
+  const state = normalizeState(data.settings || {});
+  data.locations = Array.isArray(data.locations) ? data.locations : [];
+
+  if (saveThemeSettingsButton) {
+    saveThemeSettingsButton.addEventListener("click", async () => {
+      if (themeSettingsStatus) themeSettingsStatus.textContent = tr("settings.status.saving", "Saving");
+      const response = await fetch(apiURL("/admin/api/theme-settings"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ menu_locations: { ...state.menu_locations } })
+      });
+      if (!response.ok) {
+        if (themeSettingsStatus) themeSettingsStatus.textContent = (await response.text()).trim();
+        return;
+      }
+      if (themeSettingsStatus) themeSettingsStatus.textContent = tr("settings.status.saved", "Saved");
+      window.location.reload();
+    });
+  }
+
+  if (themeSettingsRoot) {
+    renderMenuLocations();
+    renderHomeContentSetting();
+  }
+})();
+</script>
+{{template "adminEnd" .}}
+{{end}}

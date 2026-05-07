@@ -5,5 +5,16 @@
   "site.hero.hide_image": "隐藏顶部图片",
   "home.lead_kicker": "文章",
   "menus.location.navbar": "导航栏",
-  "menus.location.navbar.description": "顶部主导航"
+  "menus.location.navbar.description": "顶部主导航",
+  "theme_settings.menus.title": "菜单投放",
+  "theme_settings.menus.help": "把自定义菜单分配到当前主题提供的位置。",
+  "theme_settings.locations.title": "主题位置",
+  "theme_settings.locations.empty": "当前主题没有声明菜单位置。",
+  "theme_settings.locations.default": "默认菜单",
+  "theme_settings.locations.none": "不使用菜单",
+  "theme_settings.pure_white.home.title": "首页设置",
+  "theme_settings.pure_white.home.content.label": "首页文章内容",
+  "theme_settings.pure_white.home.content.description": "控制 Pure White 首页是否展示完整文章正文。",
+  "theme_settings.pure_white.home.content.show": "显示",
+  "theme_settings.pure_white.home.content.hide": "隐藏"
 }
