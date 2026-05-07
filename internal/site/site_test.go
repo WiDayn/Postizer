@@ -904,6 +904,94 @@ func TestLoadSettingsPreservesExplicitEmptyMenuLocation(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsPreservesThemeCustomPrimitiveSettings(t *testing.T) {
+	root := t.TempDir()
+	body := []byte(`{
+  "theme_settings": {
+    "custom": {
+      "pure-white": {
+        "hero_title": "Hello",
+        "items_per_page": 7,
+        "opacity": 0.65,
+        "unsupported": true
+      }
+    }
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), body, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := settings.ThemeSettings.Custom["pure-white"]
+	if got, want := values["hero_title"].StringValue(), "Hello"; got != want {
+		t.Fatalf("hero_title = %q, want %q", got, want)
+	}
+	if got, want := values["items_per_page"].IntegerValue(), int64(7); got != want {
+		t.Fatalf("items_per_page = %d, want %d", got, want)
+	}
+	if got, want := values["opacity"].FloatValue(), 0.65; got != want {
+		t.Fatalf("opacity = %v, want %v", got, want)
+	}
+	if _, ok := values["unsupported"]; ok {
+		t.Fatal("unsupported custom theme setting should be discarded")
+	}
+
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(filepath.Join(root, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedText := string(saved)
+	for _, snippet := range []string{
+		`"hero_title": "Hello"`,
+		`"items_per_page": 7`,
+		`"opacity": 0.65`,
+	} {
+		if !strings.Contains(savedText, snippet) {
+			t.Fatalf("saved settings should contain %s:\n%s", snippet, savedText)
+		}
+	}
+}
+
+func TestLoadSettingsMigratesLegacyPureWhiteHeroTextSettings(t *testing.T) {
+	root := t.TempDir()
+	settings := defaultSettings()
+	settings.ThemeSettings = ThemeSettings{
+		MenuLocations: map[string]string{
+			"navbar":                                "",
+			"pure-white-hero-title-48656c6c6f":      "",
+			"pure-white-hero-subtitle-e4bda0e5a5bd": "",
+		},
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := loaded.ThemeSettings.Custom["pure-white"]
+	if got, want := values["hero_title"].StringValue(), "Hello"; got != want {
+		t.Fatalf("migrated hero_title = %q, want %q", got, want)
+	}
+	if got, want := values["hero_subtitle"].StringValue(), "你好"; got != want {
+		t.Fatalf("migrated hero_subtitle = %q, want %q", got, want)
+	}
+	if _, ok := loaded.ThemeSettings.MenuLocations["pure-white-hero-title-48656c6c6f"]; ok {
+		t.Fatal("legacy Pure White title key should be removed from menu_locations")
+	}
+	if _, ok := loaded.ThemeSettings.MenuLocations["navbar"]; !ok {
+		t.Fatal("normal menu location should be preserved")
+	}
+}
+
 func TestValidMenuURLAllowsPublicTargetsOnly(t *testing.T) {
 	cases := []struct {
 		value string
