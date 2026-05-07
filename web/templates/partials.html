@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{pageTitle .}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=98">
+  <link rel="stylesheet" href="/static/site.css?v=99">
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
@@ -117,13 +117,18 @@
       <a href="/sitemap.xml">{{msg . "site.feed.sitemap"}}</a>
     </div>
   </aside>
-  {{with menuLinks . "footer"}}
+  {{$footerLinks := menuLinks . "footer"}}
   <footer class="site-footer">
-    <nav class="site-footer__nav" aria-label="{{msg $ "site.footer.nav_aria" "Footer"}}">
-      {{range .}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
+    <div class="site-footer__meta">
+      <a class="site-footer__brand" href="/">Postizer</a>
+      <span class="site-footer__powered">{{msg . "site.footer.powered_by" "Powered by Postizer"}}</span>
+    </div>
+    {{if $footerLinks}}
+    <nav class="site-footer__nav" aria-label="{{msg . "site.footer.nav_aria" "Footer"}}">
+      {{range $footerLinks}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
     </nav>
+    {{end}}
   </footer>
-  {{end}}
 </div>
 </body>
 </html>

@@ -17,9 +17,7 @@ func TestHostStartsGRPCPluginAndInvokesAction(t *testing.T) {
 	defer host.Close()
 	pluginRoot := filepath.Join("..", "..", "examples", "bundles", "wordpress-importer", "plugins", "wordpress-importer")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-	result, err := host.InvokeAction(ctx, appearance.Pack{
+	pack := appearance.Pack{
 		Manifest: appearance.Manifest{
 			ID:      "wordpress-importer",
 			Type:    appearance.PluginPack,
@@ -35,7 +33,33 @@ func TestHostStartsGRPCPluginAndInvokesAction(t *testing.T) {
 			},
 		},
 		RootDir: pluginRoot,
-	}, &pluginrpc.InvokeActionRequest{
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	result, err := host.InvokeAction(ctx, pack, inspectRequest())
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Title, "WordPress export inspected") {
+		t.Fatalf("unexpected action result: %#v", result)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	ctx, cancel = context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	result, err = host.InvokeAction(ctx, pack, inspectRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Title, "WordPress export inspected") {
+		t.Fatalf("unexpected action result: %#v", result)
+	}
+}
+
+func inspectRequest() *pluginrpc.InvokeActionRequest {
+	return &pluginrpc.InvokeActionRequest{
 		PluginID: "wordpress-importer",
 		ActionID: "inspect_wxr",
 		Files: []pluginrpc.ActionFile{
@@ -46,12 +70,6 @@ func TestHostStartsGRPCPluginAndInvokesAction(t *testing.T) {
 				Body:        []byte(`<?xml version="1.0"?><rss><channel><title>Fixture</title><item><title>Hello</title><wp:post_type xmlns:wp="http://wordpress.org/export/1.2/">post</wp:post_type><wp:status xmlns:wp="http://wordpress.org/export/1.2/">publish</wp:status></item></channel></rss>`),
 			},
 		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result.Title, "WordPress export inspected") {
-		t.Fatalf("unexpected action result: %#v", result)
 	}
 }
 
@@ -102,8 +120,36 @@ func TestHostSelectsPlatformRuntimeCommand(t *testing.T) {
 	}
 
 	resolved := host.resolveCommand(pack, selected.command)
-	want := filepath.Join(pack.RootDir, "bin", runtime.GOOS+"-"+runtime.GOARCH, "plugin")
+	want, err := filepath.Abs(filepath.Join(pack.RootDir, "bin", runtime.GOOS+"-"+runtime.GOARCH, "plugin"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if resolved != want {
 		t.Fatalf("resolved command = %q, want %q", resolved, want)
+	}
+}
+
+func TestHostResolvesRelativeRuntimePathsToAbsolutePaths(t *testing.T) {
+	root := t.TempDir()
+	host := New(".")
+	pack := appearance.Pack{
+		Manifest: appearance.Manifest{ID: "binary-plugin"},
+		RootDir:  filepath.Join(root, "content", "bundles", "plugin"),
+	}
+
+	command := host.resolveCommand(pack, "bin/windows-amd64/plugin.exe")
+	if !filepath.IsAbs(command) {
+		t.Fatalf("resolved command should be absolute, got %q", command)
+	}
+	if got, want := command, filepath.Join(pack.RootDir, "bin", "windows-amd64", "plugin.exe"); got != want {
+		t.Fatalf("resolved command = %q, want %q", got, want)
+	}
+
+	workDir := host.workDir(pack, "")
+	if !filepath.IsAbs(workDir) {
+		t.Fatalf("work dir should be absolute, got %q", workDir)
+	}
+	if got, want := workDir, pack.RootDir; got != want {
+		t.Fatalf("work dir = %q, want %q", got, want)
 	}
 }

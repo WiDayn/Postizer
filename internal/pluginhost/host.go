@@ -41,6 +41,7 @@ type Host struct {
 type client struct {
 	pack         appearance.Pack
 	cmd          *exec.Cmd
+	done         <-chan struct{}
 	conn         *grpc.ClientConn
 	service      pluginrpc.PluginServiceClient
 	hostServer   *grpc.Server
@@ -99,7 +100,7 @@ func (h *Host) client(ctx context.Context, pack appearance.Pack) (pluginrpc.Plug
 
 	h.mu.Lock()
 	if existing := h.clients[pack.ID]; existing != nil {
-		if existing.cmd.ProcessState == nil {
+		if pluginRunning(existing) {
 			service := existing.service
 			h.mu.Unlock()
 			return service, nil
@@ -133,7 +134,7 @@ func (h *Host) start(ctx context.Context, pack appearance.Pack) (*client, error)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, command, runtimeCommand.args...)
+	cmd := exec.Command(command, runtimeCommand.args...)
 	cmd.Dir = h.workDir(pack, runtimeCommand.workDir)
 	cmd.Env = h.env(pack, runtimeCommand.env, command, hostEndpoint)
 
@@ -149,11 +150,12 @@ func (h *Host) start(ctx context.Context, pack appearance.Pack) (*client, error)
 		stopHostService(hostServer, hostListener)
 		return nil, fmt.Errorf("start plugin %q: %w", pack.ID, err)
 	}
+	processDone := waitForProcess(cmd)
 	go logPluginStderr(pack.ID, stderr)
 
 	endpoint, err := readEndpoint(stdout)
 	if err != nil {
-		_ = cmd.Process.Kill()
+		stopProcess(cmd, processDone)
 		stopHostService(hostServer, hostListener)
 		return nil, fmt.Errorf("start plugin %q: %w", pack.ID, err)
 	}
@@ -170,13 +172,13 @@ func (h *Host) start(ctx context.Context, pack appearance.Pack) (*client, error)
 		),
 	)
 	if err != nil {
-		_ = cmd.Process.Kill()
+		stopProcess(cmd, processDone)
 		stopHostService(hostServer, hostListener)
 		return nil, fmt.Errorf("dial plugin %q: %w", pack.ID, err)
 	}
 	if err := waitForReady(dialCtx, endpoint); err != nil {
 		_ = conn.Close()
-		_ = cmd.Process.Kill()
+		stopProcess(cmd, processDone)
 		stopHostService(hostServer, hostListener)
 		return nil, fmt.Errorf("connect plugin %q: %w", pack.ID, err)
 	}
@@ -189,18 +191,18 @@ func (h *Host) start(ctx context.Context, pack appearance.Pack) (*client, error)
 	})
 	if err != nil {
 		_ = conn.Close()
-		_ = cmd.Process.Kill()
+		stopProcess(cmd, processDone)
 		stopHostService(hostServer, hostListener)
 		return nil, fmt.Errorf("handshake plugin %q: %w", pack.ID, err)
 	}
 	if handshake.ProtocolVersion != pluginrpc.ProtocolVersion || !handshake.Ready {
 		_ = conn.Close()
-		_ = cmd.Process.Kill()
+		stopProcess(cmd, processDone)
 		stopHostService(hostServer, hostListener)
 		return nil, fmt.Errorf("plugin %q rejected protocol: %s", pack.ID, handshake.Message)
 	}
 
-	return &client{pack: pack, cmd: cmd, conn: conn, service: service, hostServer: hostServer, hostListener: hostListener}, nil
+	return &client{pack: pack, cmd: cmd, done: processDone, conn: conn, service: service, hostServer: hostServer, hostListener: hostListener}, nil
 }
 
 func (h *Host) startHostService() (*grpc.Server, net.Listener, string, error) {
@@ -272,7 +274,7 @@ func (h *Host) resolveCommand(pack appearance.Pack, command string) string {
 		return command
 	}
 	if strings.ContainsAny(command, `/\`) {
-		return filepath.Join(pack.RootDir, filepath.FromSlash(command))
+		return h.absPath(filepath.Join(pack.RootDir, filepath.FromSlash(command)))
 	}
 	return command
 }
@@ -280,12 +282,12 @@ func (h *Host) resolveCommand(pack appearance.Pack, command string) string {
 func (h *Host) workDir(pack appearance.Pack, configured string) string {
 	workDir := strings.TrimSpace(configured)
 	if workDir == "" {
-		return pack.RootDir
+		return h.absPath(pack.RootDir)
 	}
 	if filepath.IsAbs(workDir) {
 		return workDir
 	}
-	return filepath.Join(pack.RootDir, filepath.FromSlash(workDir))
+	return h.absPath(filepath.Join(pack.RootDir, filepath.FromSlash(workDir)))
 }
 
 func (h *Host) env(pack appearance.Pack, runtimeEnv map[string]string, command, hostEndpoint string) []string {
@@ -293,7 +295,7 @@ func (h *Host) env(pack appearance.Pack, runtimeEnv map[string]string, command, 
 	env = append(env,
 		"POSTIZER_PLUGIN_ADDR=127.0.0.1:0",
 		"POSTIZER_PLUGIN_ID="+pack.ID,
-		"POSTIZER_PLUGIN_ROOT="+pack.RootDir,
+		"POSTIZER_PLUGIN_ROOT="+h.absPath(pack.RootDir),
 	)
 	if strings.TrimSpace(hostEndpoint) != "" {
 		env = append(env, "POSTIZER_HOST_ADDR="+hostEndpoint)
@@ -310,6 +312,18 @@ func (h *Host) env(pack appearance.Pack, runtimeEnv map[string]string, command, 
 		}
 	}
 	return env
+}
+
+func (h *Host) absPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return absolute
 }
 
 func readEndpoint(stdout io.Reader) (string, error) {
@@ -369,6 +383,27 @@ func waitForReady(ctx context.Context, endpoint string) error {
 	}
 }
 
+func pluginRunning(client *client) bool {
+	if client == nil || client.cmd == nil || client.cmd.Process == nil {
+		return false
+	}
+	select {
+	case <-client.done:
+		return false
+	default:
+		return true
+	}
+}
+
+func waitForProcess(cmd *exec.Cmd) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	return done
+}
+
 func closeClient(client *client) {
 	if client == nil {
 		return
@@ -382,9 +417,22 @@ func closeClient(client *client) {
 		_ = client.conn.Close()
 	}
 	stopHostService(client.hostServer, client.hostListener)
-	if client.cmd != nil && client.cmd.Process != nil && client.cmd.ProcessState == nil {
-		_ = client.cmd.Process.Kill()
-		_, _ = client.cmd.Process.Wait()
+	stopProcess(client.cmd, client.done)
+}
+
+func stopProcess(cmd *exec.Cmd, done <-chan struct{}) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	select {
+	case <-done:
+		return
+	default:
+	}
+	_ = cmd.Process.Kill()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
 	}
 }
 

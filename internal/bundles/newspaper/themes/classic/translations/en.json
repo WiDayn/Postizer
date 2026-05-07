@@ -44,6 +44,7 @@
   "site.feed.rss": "RSS",
   "site.feed.sitemap": "Sitemap",
   "site.footer.nav_aria": "Footer",
+  "site.footer.powered_by": "Powered by Postizer",
   "common.ready": "Ready",
   "common.enabled": "Enabled",
   "common.not_set": "Not set",
