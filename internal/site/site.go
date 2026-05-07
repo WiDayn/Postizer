@@ -2,18 +2,22 @@ package site
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	stdhtml "html"
 	"html/template"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"postizer/internal/appearance"
 
@@ -43,6 +47,17 @@ var (
 	summaryHTMLTagPattern   = regexp.MustCompile(`(?s)<[^>]+>`)
 	summaryEmphasisPattern  = regexp.MustCompile(`[*_~]{1,3}`)
 	summaryLineBreakPattern = regexp.MustCompile(`(?m)\s{2,}$`)
+	themeSettingKeyPattern  = regexp.MustCompile(`[^a-z0-9_]+`)
+	themeSettingKeyDivider  = regexp.MustCompile(`_+`)
+)
+
+const (
+	ThemeSettingTypeString  = "string"
+	ThemeSettingTypeInteger = "integer"
+	ThemeSettingTypeFloat   = "float"
+
+	legacyPureWhiteHeroTitlePrefix    = "pure-white-hero-title-"
+	legacyPureWhiteHeroSubtitlePrefix = "pure-white-hero-subtitle-"
 )
 
 type Store struct {
@@ -86,8 +101,144 @@ type MediaProcessing struct {
 }
 
 type ThemeSettings struct {
-	Menus         []Menu            `json:"menus"`
-	MenuLocations map[string]string `json:"menu_locations"`
+	Menus         []Menu              `json:"menus"`
+	MenuLocations map[string]string   `json:"menu_locations"`
+	Custom        ThemeCustomSettings `json:"custom,omitempty"`
+}
+
+// ThemeCustomSettings 保存主题专属的轻量配置。
+//
+// 数据结构按主题 ID 分组，第二层 key 是主题自己的设置名。值只允许 JSON 原生
+// 字符串、整数和浮点数，既方便手动查看 settings.json，也避免主题设置混入
+// 任意复杂对象导致后续迁移困难。
+type ThemeCustomSettings map[string]map[string]ThemeSettingValue
+
+// ThemeSettingValue 表示一个主题自定义设置值。
+//
+// Type 用于在 Go 侧保留数字类型差异；JSON 保存时仍直接写出原生值：
+// - string  保存为 "text"
+// - integer 保存为 12
+// - float   保存为 12.5
+type ThemeSettingValue struct {
+	Type    string  `json:"-"`
+	String  string  `json:"-"`
+	Integer int64   `json:"-"`
+	Float   float64 `json:"-"`
+}
+
+// StringThemeSetting 创建字符串类型的主题设置值。
+//
+// @param value 字符串设置内容。
+// @returns 返回可保存到 ThemeCustomSettings 的字符串设置值。
+func StringThemeSetting(value string) ThemeSettingValue {
+	return ThemeSettingValue{Type: ThemeSettingTypeString, String: value}
+}
+
+// IntegerThemeSetting 创建整数类型的主题设置值。
+//
+// @param value 整数设置内容。
+// @returns 返回可保存到 ThemeCustomSettings 的整数设置值。
+func IntegerThemeSetting(value int64) ThemeSettingValue {
+	return ThemeSettingValue{Type: ThemeSettingTypeInteger, Integer: value}
+}
+
+// FloatThemeSetting 创建浮点类型的主题设置值。
+//
+// @param value 浮点设置内容。
+// @returns 返回可保存到 ThemeCustomSettings 的浮点设置值。
+func FloatThemeSetting(value float64) ThemeSettingValue {
+	return ThemeSettingValue{Type: ThemeSettingTypeFloat, Float: value}
+}
+
+// UnmarshalJSON 从 JSON 原生值解析主题设置。
+//
+// 设计说明：
+//   - 字符串直接进入 string 类型。
+//   - 不带小数点/指数的数字进入 integer 类型。
+//   - 带小数点或科学计数法的数字进入 float 类型。
+//   - 其他 JSON 类型不报错，但会在 normalizeThemeSettings 阶段被丢弃，
+//     这样手动编辑 settings.json 出错时不会让整个站点加载失败。
+func (value *ThemeSettingValue) UnmarshalJSON(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var raw any
+	if err := decoder.Decode(&raw); err != nil {
+		return err
+	}
+	switch typed := raw.(type) {
+	case string:
+		*value = StringThemeSetting(typed)
+	case json.Number:
+		number := typed.String()
+		if strings.ContainsAny(number, ".eE") {
+			parsed, err := strconv.ParseFloat(number, 64)
+			if err == nil {
+				*value = FloatThemeSetting(parsed)
+			}
+			return nil
+		}
+		parsed, err := strconv.ParseInt(number, 10, 64)
+		if err == nil {
+			*value = IntegerThemeSetting(parsed)
+			return nil
+		}
+		if parsedFloat, floatErr := strconv.ParseFloat(number, 64); floatErr == nil {
+			*value = FloatThemeSetting(parsedFloat)
+		}
+	default:
+		*value = ThemeSettingValue{}
+	}
+	return nil
+}
+
+// MarshalJSON 把主题设置写回 JSON 原生值。
+//
+// @returns 返回字符串、整数或浮点数的 JSON 表示。
+func (value ThemeSettingValue) MarshalJSON() ([]byte, error) {
+	switch value.Type {
+	case ThemeSettingTypeString:
+		return json.Marshal(value.String)
+	case ThemeSettingTypeInteger:
+		return json.Marshal(value.Integer)
+	case ThemeSettingTypeFloat:
+		return json.Marshal(value.Float)
+	default:
+		return []byte("null"), nil
+	}
+}
+
+// StringValue 返回字符串设置值。
+//
+// @returns 当设置类型为 string 时返回保存的字符串，否则返回空字符串。
+func (value ThemeSettingValue) StringValue() string {
+	if value.Type != ThemeSettingTypeString {
+		return ""
+	}
+	return value.String
+}
+
+// IntegerValue 返回整数设置值。
+//
+// @returns 当设置类型为 integer 时返回保存的整数，否则返回 0。
+func (value ThemeSettingValue) IntegerValue() int64 {
+	if value.Type != ThemeSettingTypeInteger {
+		return 0
+	}
+	return value.Integer
+}
+
+// FloatValue 返回浮点设置值。
+//
+// @returns float 设置直接返回浮点值；integer 设置会转换为浮点值；其他类型返回 0。
+func (value ThemeSettingValue) FloatValue() float64 {
+	switch value.Type {
+	case ThemeSettingTypeFloat:
+		return value.Float
+	case ThemeSettingTypeInteger:
+		return float64(value.Integer)
+	default:
+		return 0
+	}
 }
 
 type Menu struct {
@@ -269,6 +420,77 @@ func (s *Store) MenuLocationAssigned(location string) bool {
 	}
 	_, ok := s.Settings.ThemeSettings.MenuLocations[location]
 	return ok
+}
+
+// ThemeSetting 读取指定主题的自定义设置。
+//
+// @param themeID 主题包 ID，例如 pure-white。
+// @param key 主题设置键名，例如 hero_title。
+// @returns 返回设置值以及是否存在。
+func (s *Store) ThemeSetting(themeID string, key string) (ThemeSettingValue, bool) {
+	if s == nil {
+		return ThemeSettingValue{}, false
+	}
+	themeID = normalizeMenuID(themeID)
+	key = normalizeThemeSettingKey(key)
+	if themeID == "" || key == "" {
+		return ThemeSettingValue{}, false
+	}
+	values := s.Settings.ThemeSettings.Custom[themeID]
+	if values == nil {
+		return ThemeSettingValue{}, false
+	}
+	value, ok := values[key]
+	return value, ok
+}
+
+// ThemeStringSetting 读取字符串类型的主题设置。
+//
+// @param themeID 主题包 ID。
+// @param key 设置键名。
+// @param fallback 未设置或类型不匹配时返回的默认值。
+// @returns 返回字符串设置值。
+func (s *Store) ThemeStringSetting(themeID string, key string, fallback string) string {
+	value, ok := s.ThemeSetting(themeID, key)
+	if !ok || value.Type != ThemeSettingTypeString {
+		return fallback
+	}
+	return value.String
+}
+
+// ThemeIntegerSetting 读取整数类型的主题设置。
+//
+// @param themeID 主题包 ID。
+// @param key 设置键名。
+// @param fallback 未设置或类型不匹配时返回的默认值。
+// @returns 返回整数设置值。
+func (s *Store) ThemeIntegerSetting(themeID string, key string, fallback int64) int64 {
+	value, ok := s.ThemeSetting(themeID, key)
+	if !ok || value.Type != ThemeSettingTypeInteger {
+		return fallback
+	}
+	return value.Integer
+}
+
+// ThemeFloatSetting 读取浮点类型的主题设置。
+//
+// @param themeID 主题包 ID。
+// @param key 设置键名。
+// @param fallback 未设置或类型不匹配时返回的默认值。
+// @returns 返回浮点设置值；整数设置会自动转换为浮点数。
+func (s *Store) ThemeFloatSetting(themeID string, key string, fallback float64) float64 {
+	value, ok := s.ThemeSetting(themeID, key)
+	if !ok {
+		return fallback
+	}
+	switch value.Type {
+	case ThemeSettingTypeFloat:
+		return value.Float
+	case ThemeSettingTypeInteger:
+		return float64(value.Integer)
+	default:
+		return fallback
+	}
 }
 
 func (s *Store) resolveMenuItem(item MenuItem) (MenuLink, bool) {
@@ -533,11 +755,14 @@ func normalizeThemeSettings(settings ThemeSettings) ThemeSettings {
 		})
 	}
 
+	custom := normalizeThemeCustomSettings(settings.Custom)
+	custom = migrateLegacyPureWhiteHeroSettings(settings.MenuLocations, custom)
+
 	locations := map[string]string{}
 	for location, menuID := range settings.MenuLocations {
 		location = normalizeMenuID(location)
 		menuID = normalizeMenuID(menuID)
-		if location == "" {
+		if location == "" || legacyPureWhiteHeroLocation(location) {
 			continue
 		}
 		if menuID == "" {
@@ -550,7 +775,149 @@ func normalizeThemeSettings(settings ThemeSettings) ThemeSettings {
 		locations[location] = menuID
 	}
 
-	return ThemeSettings{Menus: menus, MenuLocations: locations}
+	return ThemeSettings{Menus: menus, MenuLocations: locations, Custom: custom}
+}
+
+// normalizeThemeCustomSettings 清洗主题自定义设置。
+//
+// 设计说明：
+// - 第一层主题 ID 使用和主题包一致的小写短横线格式。
+// - 第二层设置名使用 snake_case，方便 settings.json 手动阅读。
+// - 设置值只保留 string、integer、float 三类。
+func normalizeThemeCustomSettings(settings ThemeCustomSettings) ThemeCustomSettings {
+	custom := ThemeCustomSettings{}
+	for themeID, values := range settings {
+		themeID = normalizeMenuID(themeID)
+		if themeID == "" || len(values) == 0 {
+			continue
+		}
+		normalizedValues := map[string]ThemeSettingValue{}
+		for key, value := range values {
+			key = normalizeThemeSettingKey(key)
+			if key == "" {
+				continue
+			}
+			normalizedValue, ok := normalizeThemeSettingValue(value)
+			if !ok {
+				continue
+			}
+			normalizedValues[key] = normalizedValue
+		}
+		if len(normalizedValues) > 0 {
+			custom[themeID] = normalizedValues
+		}
+	}
+	if len(custom) == 0 {
+		return nil
+	}
+	return custom
+}
+
+// normalizeThemeSettingValue 校验单个主题设置值。
+//
+// @param value 待清洗的设置值。
+// @returns 返回清洗后的设置值，以及该值是否有效。
+func normalizeThemeSettingValue(value ThemeSettingValue) (ThemeSettingValue, bool) {
+	switch value.Type {
+	case ThemeSettingTypeString:
+		return StringThemeSetting(value.String), true
+	case ThemeSettingTypeInteger:
+		return IntegerThemeSetting(value.Integer), true
+	case ThemeSettingTypeFloat:
+		if math.IsNaN(value.Float) || math.IsInf(value.Float, 0) {
+			return ThemeSettingValue{}, false
+		}
+		return FloatThemeSetting(value.Float), true
+	default:
+		return ThemeSettingValue{}, false
+	}
+}
+
+// normalizeThemeSettingKey 把主题设置名归一为 snake_case。
+//
+// @param value 原始设置名。
+// @returns 返回可持久化的设置名。
+func normalizeThemeSettingKey(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = themeSettingKeyPattern.ReplaceAllString(value, "_")
+	value = themeSettingKeyDivider.ReplaceAllString(value, "_")
+	return strings.Trim(value, "_")
+}
+
+// migrateLegacyPureWhiteHeroSettings 迁移早期 Pure White 主题内编码存储。
+//
+// 之前为了只修改主题文件，封面标题/副标题曾经被十六进制编码进
+// menu_locations 的 key 中。现在后端支持主题自定义设置后，读取旧数据时
+// 自动迁移到 custom.pure-white.hero_title / hero_subtitle。
+func migrateLegacyPureWhiteHeroSettings(locations map[string]string, custom ThemeCustomSettings) ThemeCustomSettings {
+	for location := range locations {
+		location = normalizeMenuID(location)
+		var key, encoded string
+		switch {
+		case strings.HasPrefix(location, legacyPureWhiteHeroTitlePrefix):
+			key = "hero_title"
+			encoded = strings.TrimPrefix(location, legacyPureWhiteHeroTitlePrefix)
+		case strings.HasPrefix(location, legacyPureWhiteHeroSubtitlePrefix):
+			key = "hero_subtitle"
+			encoded = strings.TrimPrefix(location, legacyPureWhiteHeroSubtitlePrefix)
+		default:
+			continue
+		}
+		value := decodeLegacyHexThemeSetting(encoded)
+		if value == "" {
+			continue
+		}
+		custom = setDefaultThemeStringSetting(custom, "pure-white", key, value)
+	}
+	if len(custom) == 0 {
+		return nil
+	}
+	return custom
+}
+
+// setDefaultThemeStringSetting 在目标设置不存在时写入字符串默认值。
+//
+// 这个函数用于迁移旧数据，显式的新 custom 配置优先级更高。
+func setDefaultThemeStringSetting(custom ThemeCustomSettings, themeID string, key string, value string) ThemeCustomSettings {
+	themeID = normalizeMenuID(themeID)
+	key = normalizeThemeSettingKey(key)
+	if themeID == "" || key == "" {
+		return custom
+	}
+	if custom == nil {
+		custom = ThemeCustomSettings{}
+	}
+	values := custom[themeID]
+	if values == nil {
+		values = map[string]ThemeSettingValue{}
+		custom[themeID] = values
+	}
+	if _, exists := values[key]; exists {
+		return custom
+	}
+	values[key] = StringThemeSetting(value)
+	return custom
+}
+
+// decodeLegacyHexThemeSetting 解码旧版十六进制主题设置。
+//
+// @param value 不带前缀的十六进制字符串。
+// @returns 返回 UTF-8 文本；格式无效时返回空字符串。
+func decodeLegacyHexThemeSetting(value string) string {
+	body, err := hex.DecodeString(value)
+	if err != nil || !utf8.Valid(body) {
+		return ""
+	}
+	return string(body)
+}
+
+// legacyPureWhiteHeroLocation 判断 menu location 是否为 Pure White 旧版私有设置。
+//
+// @param location 已归一化的 menu location。
+// @returns 如果应从 menu_locations 中移除则返回 true。
+func legacyPureWhiteHeroLocation(location string) bool {
+	return strings.HasPrefix(location, legacyPureWhiteHeroTitlePrefix) ||
+		strings.HasPrefix(location, legacyPureWhiteHeroSubtitlePrefix)
 }
 
 func normalizeMenuItems(items []MenuItem) []MenuItem {

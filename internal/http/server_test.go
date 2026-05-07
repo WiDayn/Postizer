@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"net/http/httptest"
 	"os"
@@ -327,6 +328,61 @@ func TestHostServiceSavesMediaContentAndUpdatesJob(t *testing.T) {
 	}
 	if !containsLog(job.Logs, "Halfway") {
 		t.Fatalf("job logs should include update: %#v", job.Logs)
+	}
+}
+
+func TestUpdateThemeSettingsSavesCustomPrimitiveSettings(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/theme-settings", bytes.NewBufferString(`{
+  "menu_locations": {"navbar": ""},
+  "custom": {
+    "pure-white": {
+      "hero_title": "Hello",
+      "items_per_page": 6,
+      "opacity": 0.75
+    }
+  }
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateThemeSettings(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateThemeSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := settings.ThemeSettings.Custom["pure-white"]
+	if got, want := values["hero_title"].StringValue(), "Hello"; got != want {
+		t.Fatalf("hero_title = %q, want %q", got, want)
+	}
+	if got, want := values["items_per_page"].IntegerValue(), int64(6); got != want {
+		t.Fatalf("items_per_page = %d, want %d", got, want)
+	}
+	if got, want := values["opacity"].FloatValue(), 0.75; got != want {
+		t.Fatalf("opacity = %v, want %v", got, want)
 	}
 }
 

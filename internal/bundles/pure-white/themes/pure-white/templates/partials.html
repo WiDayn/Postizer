@@ -1,10 +1,14 @@
 {{define "chromeStart"}}
 {{template "head" .}}
-<div class="site-shell"{{if .Store.Settings.HomeImage.Enabled}} style="--home-image-src: url('{{.Store.Settings.HomeImage.Src}}');"{{end}}>
+{{$pureWhiteBrand := .Store.ThemeStringSetting "pure-white" "hero_title" (msg . "site.brand" "Postizer")}}
+{{$pureWhiteEditionLine := .Store.ThemeStringSetting "pure-white" "hero_subtitle" (msg . "site.edition_line")}}
+{{$pureWhiteBrandScale := .Store.ThemeFloatSetting "pure-white" "hero_title_scale" 1}}
+{{$pureWhiteEditionLineScale := .Store.ThemeFloatSetting "pure-white" "hero_subtitle_scale" 1}}
+<div class="site-shell" style="--pure-brand-scale: {{$pureWhiteBrandScale}}; --pure-edition-scale: {{$pureWhiteEditionLineScale}};{{if .Store.Settings.HomeImage.Enabled}} --home-image-src: url('{{.Store.Settings.HomeImage.Src}}');{{end}}">
   <header class="newspaper-header">
-    <a class="brand compact-brand" href="/">{{msg . "site.brand" "Postizer"}}</a>
+    <a class="brand compact-brand" href="/">{{$pureWhiteBrand}}</a>
     <div class="edition-line">
-      <span>{{msg . "site.edition_line"}}</span>
+      <span>{{$pureWhiteEditionLine}}</span>
     </div>
   </header>
   {{if .Store.Settings.HomeImage.Enabled}}
