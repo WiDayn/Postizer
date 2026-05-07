@@ -26,7 +26,7 @@
         </div>
         <button id="togglePostLibrary" class="ui-button ui-button--ghost editor-collapse-button" type="button" aria-controls="postLibrary" aria-expanded="true" title="{{msg . "editor.library.collapse"}}">&lt;</button>
       </div>
-      <ol id="postLibrary" class="editor-post-list">
+      <ol id="postLibrary" class="editor-post-list" data-batch-size="40" data-empty-text="{{if $isPage}}{{msg . "editor.library.pages_empty" "No pages"}}{{else}}{{msg . "editor.library.empty"}}{{end}}">
         {{if $isPage}}
         {{range .Store.AllPages}}
         <li>
@@ -120,7 +120,7 @@
         </label>
       </section>
 
-      <section class="settings-panel ui-panel">
+      <section class="settings-panel ui-panel editor-media-panel">
         <div class="ui-panel__head">
           <h2>{{msg . "editor.settings.media"}}</h2>
         </div>
@@ -132,7 +132,7 @@
             <span class="ui-file-drop__name" data-file-name></span>
           </label>
         </form>
-        <div id="mediaStrip" class="media-strip">
+        <div id="mediaStrip" class="media-strip" data-empty-text="{{msg . "editor.settings.no_media"}}" data-page-size="12">
           {{range .Media}}
           <button type="button" class="ui-media-button" data-path="{{.Path}}" data-alt="{{.Alt}}" data-caption="{{.Caption}}" data-mime-type="{{.MIMEType}}" data-markdown="{{mediaFigure .}}" title="{{.OriginalName}}">
             {{if mediaIsImage .}}
@@ -145,10 +145,15 @@
           <p>{{msg . "editor.settings.no_media"}}</p>
           {{end}}
         </div>
+        <nav id="mediaPager" class="media-pager" aria-label="{{msg . "editor.media.pagination" "Media pages"}}" hidden>
+          <button id="mediaPrev" class="ui-button ui-button--ghost" type="button">{{msg . "pagination.previous" "Previous"}}</button>
+          <span id="mediaPageInfo" class="media-pager__info"></span>
+          <button id="mediaNext" class="ui-button ui-button--ghost" type="button">{{msg . "pagination.next" "Next"}}</button>
+        </nav>
       </section>
     </aside>
   </div>
 </section>
-<script defer src="/static/admin.js?v=17"></script>
+<script defer src="/static/admin.js?v=19"></script>
 {{template "adminEnd" .}}
 {{end}}

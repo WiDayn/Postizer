@@ -176,6 +176,8 @@
   "editor.settings.media": "媒体",
   "editor.settings.library": "素材库",
   "editor.settings.no_media": "暂无媒体",
+  "editor.media.pagination": "\u5a92\u4f53\u5206\u9875",
+  "editor.media.page_info": "\u7b2c {page} / {pages} \u9875",
   "editor.status.loading": "加载中",
   "editor.status.new": "新建中",
   "editor.status.title_required": "请填写标题",

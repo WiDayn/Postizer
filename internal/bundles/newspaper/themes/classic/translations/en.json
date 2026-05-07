@@ -165,6 +165,8 @@
   "editor.settings.media": "Media",
   "editor.settings.library": "Library",
   "editor.settings.no_media": "No media",
+  "editor.media.pagination": "Media pages",
+  "editor.media.page_info": "Page {page} / {pages}",
   "editor.status.loading": "Loading",
   "editor.status.new": "New",
   "editor.status.title_required": "Title required",

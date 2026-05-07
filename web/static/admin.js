@@ -13,6 +13,10 @@ const postLibrary = document.querySelector("#postLibrary");
 const postLibraryToggle = document.querySelector("#togglePostLibrary");
 const deletePostButton = document.querySelector("#deletePostButton");
 const mediaStrip = document.querySelector("#mediaStrip");
+const mediaPager = document.querySelector("#mediaPager");
+const mediaPrev = document.querySelector("#mediaPrev");
+const mediaNext = document.querySelector("#mediaNext");
+const mediaPageInfo = document.querySelector("#mediaPageInfo");
 const contentKind = root && root.dataset.contentKind === "page" ? "page" : "post";
 const isPageEditor = contentKind === "page";
 const contentPlural = isPageEditor ? "pages" : "posts";
@@ -37,6 +41,13 @@ let updatedTouched = false;
 let previewTimer = 0;
 let dirty = false;
 const postsCollapsedKey = `postizer.editor.${contentPlural}Collapsed`;
+const postLibraryBatchSize = Math.max(10, Number(postLibrary && postLibrary.dataset.batchSize) || 40);
+const mediaPageSize = Math.max(1, Number(mediaStrip && mediaStrip.dataset.pageSize) || 12);
+let postLibraryItems = [];
+let postLibraryRendered = 0;
+let postLibraryActiveSlug = "";
+let mediaItems = [];
+let mediaPage = 1;
 
 function tr(key, fallback) {
   if (window.postizerMessage) return window.postizerMessage(key, fallback);
@@ -251,6 +262,163 @@ function mediaMarkdown(item = {}) {
   return `\n\n[${markdownLinkText(mediaFileLabel(item))}](${markdownLinkDestination(path)})\n\n`;
 }
 
+function postLibraryItemFromButton(button) {
+  return {
+    slug: button.dataset.slug || "",
+    title: (button.querySelector("strong") && button.querySelector("strong").textContent) || "",
+    meta: (button.querySelector("span") && button.querySelector("span").textContent) || ""
+  };
+}
+
+function renderPostLibraryItem(item = {}) {
+  const li = document.createElement("li");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ui-list-button";
+  button.dataset.slug = item.slug || "";
+  button.classList.toggle("is-active", item.slug === postLibraryActiveSlug);
+  button.innerHTML = "<strong></strong><span></span>";
+  button.querySelector("strong").textContent = item.title || "";
+  button.querySelector("span").textContent = item.meta || "";
+  li.appendChild(button);
+  return li;
+}
+
+function renderPostLibraryEmpty() {
+  const li = document.createElement("li");
+  li.className = "empty";
+  li.textContent = postLibrary.dataset.emptyText || tr("editor.library.empty", "No posts");
+  postLibrary.appendChild(li);
+}
+
+function appendPostLibraryItems(count = postLibraryBatchSize) {
+  if (!postLibrary) return;
+  if (!postLibraryItems.length) {
+    postLibrary.innerHTML = "";
+    renderPostLibraryEmpty();
+    return;
+  }
+  const start = postLibraryRendered;
+  const end = Math.min(postLibraryItems.length, start + count);
+  if (start >= end) return;
+  const fragment = document.createDocumentFragment();
+  postLibraryItems.slice(start, end).forEach((item) => {
+    fragment.appendChild(renderPostLibraryItem(item));
+  });
+  postLibrary.appendChild(fragment);
+  postLibraryRendered = end;
+}
+
+function updatePostLibraryActive(slug = postLibraryActiveSlug) {
+  postLibraryActiveSlug = slug || "";
+  if (!postLibrary) return;
+  postLibrary.querySelectorAll("button[data-slug]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.slug === postLibraryActiveSlug);
+  });
+}
+
+function renderPostLibrary(activeSlug = postLibraryActiveSlug) {
+  if (!postLibrary) return;
+  postLibraryActiveSlug = activeSlug || "";
+  postLibrary.innerHTML = "";
+  postLibraryRendered = 0;
+  appendPostLibraryItems(postLibraryBatchSize);
+  updatePostLibraryActive(postLibraryActiveSlug);
+}
+
+function captureInitialPostLibrary() {
+  if (!postLibrary) return;
+  postLibraryItems = Array.from(postLibrary.querySelectorAll("button[data-slug]")).map(postLibraryItemFromButton);
+  renderPostLibrary(initialSlug);
+}
+
+function maybeLoadMorePostLibrary() {
+  if (!postLibrary || postLibraryRendered >= postLibraryItems.length) return;
+  const remaining = postLibrary.scrollHeight - postLibrary.scrollTop - postLibrary.clientHeight;
+  if (remaining < 120) appendPostLibraryItems(postLibraryBatchSize);
+}
+
+function normalizeMediaItem(item = {}) {
+  return {
+    path: item.path || item.Path || "",
+    mime_type: item.mime_type || item.MIMEType || item.mimeType || "",
+    markdown: item.markdown || item.Markdown || "",
+    alt: item.alt || item.Alt || "",
+    caption: item.caption || item.Caption || "",
+    original_name: item.original_name || item.OriginalName || ""
+  };
+}
+
+function mediaItemFromButton(button) {
+  return normalizeMediaItem({
+    path: button.dataset.path,
+    mime_type: button.dataset.mimeType,
+    markdown: button.dataset.markdown,
+    alt: button.dataset.alt,
+    caption: button.dataset.caption,
+    original_name: button.title
+  });
+}
+
+function renderMediaButton(item = {}) {
+  const normalized = normalizeMediaItem(item);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ui-media-button";
+  button.dataset.path = normalized.path;
+  button.dataset.mimeType = normalized.mime_type || "";
+  button.dataset.markdown = isImageItem(normalized) ? "" : (normalized.markdown || mediaMarkdown(normalized));
+  button.dataset.alt = normalized.alt || tr("editor.image.default_alt", "Image");
+  button.dataset.caption = normalized.caption || "";
+  button.title = normalized.original_name || normalized.path;
+  if (isImageItem(normalized)) {
+    const img = document.createElement("img");
+    img.src = normalized.path;
+    img.alt = normalized.alt || "";
+    button.appendChild(img);
+  } else {
+    const fileBadge = document.createElement("span");
+    fileBadge.className = "ui-media-button__file";
+    fileBadge.textContent = mediaFileType(normalized);
+    button.appendChild(fileBadge);
+  }
+  return button;
+}
+
+function renderMediaPage(page = mediaPage) {
+  if (!mediaStrip) return;
+  const total = mediaItems.length;
+  const totalPages = Math.max(1, Math.ceil(total / mediaPageSize));
+  mediaPage = Math.min(Math.max(1, page), totalPages);
+  mediaStrip.innerHTML = "";
+  if (!total) {
+    const empty = document.createElement("p");
+    empty.className = "media-strip-empty";
+    empty.textContent = mediaStrip.dataset.emptyText || tr("editor.settings.no_media", "No media");
+    mediaStrip.appendChild(empty);
+  } else {
+    const start = (mediaPage - 1) * mediaPageSize;
+    mediaItems.slice(start, start + mediaPageSize).forEach((item) => {
+      mediaStrip.appendChild(renderMediaButton(item));
+    });
+  }
+  if (mediaPager) mediaPager.hidden = total <= mediaPageSize;
+  if (mediaPrev) mediaPrev.disabled = mediaPage <= 1;
+  if (mediaNext) mediaNext.disabled = mediaPage >= totalPages;
+  if (mediaPageInfo) {
+    mediaPageInfo.textContent = formatMessage("editor.media.page_info", "Page {page} / {pages}", {
+      page: mediaPage,
+      pages: totalPages
+    });
+  }
+}
+
+function captureInitialMedia() {
+  if (!mediaStrip) return;
+  mediaItems = Array.from(mediaStrip.querySelectorAll("button[data-path]")).map(mediaItemFromButton);
+  renderMediaPage(1);
+}
+
 function selectionWrap(before, after = before, fallback = "") {
   const start = editor.selectionStart || 0;
   const end = editor.selectionEnd || 0;
@@ -333,9 +501,7 @@ async function loadPost(slug) {
   const response = await fetch(apiURL(`${apiBase}/${slug}`));
   if (!response.ok) throw new Error(await response.text());
   fillForm(await response.json());
-  postLibrary.querySelectorAll("button").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.slug === slug);
-  });
+  updatePostLibraryActive(slug);
   if (slug) history.replaceState(null, "", `${adminBase}/${slug}/edit`);
   setStatus(tr("editor.status.ready", "Ready"));
 }
@@ -353,7 +519,7 @@ function newPost() {
     body: "## Notes\n\n"
   });
   currentSlug = "";
-  postLibrary.querySelectorAll("button").forEach((button) => button.classList.remove("is-active"));
+  updatePostLibraryActive("");
   history.replaceState(null, "", `${adminBase}/new`);
   fields.title.focus();
   setStatus(tr("editor.status.new", "New"));
@@ -411,20 +577,12 @@ async function refreshPostLibrary(activeSlug) {
   const response = await fetch(apiURL(apiBase));
   if (!response.ok) return;
   const posts = await response.json();
-  postLibrary.innerHTML = "";
-  posts.forEach((post) => {
-    const li = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "ui-list-button";
-    button.dataset.slug = post.slug;
-    button.classList.toggle("is-active", post.slug === activeSlug);
-    button.innerHTML = "<strong></strong><span></span>";
-    button.querySelector("strong").textContent = post.title;
-    button.querySelector("span").textContent = `${displayDateTime(post.date)} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`;
-    li.appendChild(button);
-    postLibrary.appendChild(li);
-  });
+  postLibraryItems = Array.isArray(posts) ? posts.map((post) => ({
+    slug: post.slug || "",
+    title: post.title || "",
+    meta: `${displayDateTime(post.date)} ${post.draft ? tr("common.draft", "Draft") : tr("common.published", "Published")}`
+  })) : [];
+  renderPostLibrary(activeSlug);
 }
 
 async function updatePreview() {
@@ -491,30 +649,8 @@ async function refreshMedia() {
   const response = await fetch(apiURL("/admin/api/media"));
   if (!response.ok) return;
   const items = await response.json();
-  mediaStrip.innerHTML = "";
-  items.slice(0, 18).forEach((item) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "ui-media-button";
-    button.dataset.path = item.path;
-    button.dataset.mimeType = item.mime_type || "";
-    button.dataset.markdown = isImageItem(item) ? "" : mediaMarkdown(item);
-    button.dataset.alt = item.alt || tr("editor.image.default_alt", "Image");
-    button.dataset.caption = item.caption || "";
-    button.title = item.original_name;
-    if (isImageItem(item)) {
-      const img = document.createElement("img");
-      img.src = item.path;
-      img.alt = item.alt || "";
-      button.appendChild(img);
-    } else {
-      const fileBadge = document.createElement("span");
-      fileBadge.className = "ui-media-button__file";
-      fileBadge.textContent = mediaFileType(item);
-      button.appendChild(fileBadge);
-    }
-    mediaStrip.appendChild(button);
-  });
+  mediaItems = Array.isArray(items) ? items.map(normalizeMediaItem) : [];
+  renderMediaPage(1);
 }
 
 document.querySelectorAll("[data-command]").forEach((button) => {
@@ -536,6 +672,22 @@ if (postLibraryToggle) {
   postLibraryToggle.addEventListener("click", () => {
     setPostLibraryCollapsed(root.dataset.library !== "collapsed");
   });
+}
+
+captureInitialPostLibrary();
+
+if (postLibrary) {
+  postLibrary.addEventListener("scroll", maybeLoadMorePostLibrary);
+}
+
+captureInitialMedia();
+
+if (mediaPrev) {
+  mediaPrev.addEventListener("click", () => renderMediaPage(mediaPage - 1));
+}
+
+if (mediaNext) {
+  mediaNext.addEventListener("click", () => renderMediaPage(mediaPage + 1));
 }
 
 postLibrary.addEventListener("click", (event) => {
