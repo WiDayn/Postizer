@@ -1094,7 +1094,8 @@ func (s *Server) updateMenus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateThemeSettings(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
-		MenuLocations map[string]string `json:"menu_locations"`
+		MenuLocations map[string]string         `json:"menu_locations"`
+		Custom        *site.ThemeCustomSettings `json:"custom"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1102,6 +1103,9 @@ func (s *Server) updateThemeSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := s.currentStore().Settings
 	settings.ThemeSettings.MenuLocations = payload.MenuLocations
+	if payload.Custom != nil {
+		settings.ThemeSettings.Custom = *payload.Custom
+	}
 	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

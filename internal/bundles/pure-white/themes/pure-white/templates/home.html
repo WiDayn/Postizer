@@ -1,5 +1,6 @@
 {{define "home.html"}}
 {{template "chromeStart" .}}
+{{$hideHomeContent := and (.Store.MenuLocationAssigned "home-content") (eq (index .Store.Settings.ThemeSettings.MenuLocations "home-content") "")}}
 <section class="front-page">
   <div class="front-grid pure-home-posts">
     {{range .Posts}}
@@ -13,7 +14,9 @@
           {{range .Tags}}<a href="/tags/{{.}}">#{{.}}</a>{{end}}
         </div>
       </header>
+      {{if not $hideHomeContent}}
       <div class="article-body js-math">{{.HTML}}</div>
+      {{end}}
     </article>
     {{else}}
     <article class="article pure-home-post">

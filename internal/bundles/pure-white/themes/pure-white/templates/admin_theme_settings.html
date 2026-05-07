@@ -1,0 +1,411 @@
+{{define "admin_theme_settings.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">{{msg . "admin.kicker"}}</p>
+  <h1>{{msg . "theme_settings.heading" "Theme Settings"}}</h1>
+</header>
+
+<section id="themeSettings" class="ui-panel admin-panel theme-settings-panel">
+  <div class="ui-panel__head">
+    <h2>{{msg . "theme_settings.menus.title" "Menu Placement"}}</h2>
+    <span id="themeSettingsStatus" class="ui-status">{{msg . "settings.status.ready" "Ready"}}</span>
+  </div>
+  <div class="theme-settings-copy">
+    <p>{{msg . "theme_settings.menus.help" "Assign custom menus to locations provided by the active theme."}}</p>
+  </div>
+  <section class="theme-settings-section">
+    <h3>{{msg . "theme_settings.locations.title" "Theme Locations"}}</h3>
+    <div id="themeLocationList" class="theme-location-list"></div>
+  </section>
+  <section class="theme-settings-section">
+    <h3>{{msg . "theme_settings.pure_white.home.title" "Home Settings"}}</h3>
+    <label class="theme-location-row">
+      <span class="theme-location-row__copy">
+        <strong>{{msg . "theme_settings.pure_white.hero.title.label" "Hero title"}}</strong>
+        <span>{{msg . "theme_settings.pure_white.hero.title.description" "Override the large Pure White title shown on the cover image. Leave empty to use the theme default."}}</span>
+      </span>
+      <input id="pureWhiteHeroTitle" class="ui-input" type="text" maxlength="80" placeholder="{{msg . "site.brand" "Postizer"}}">
+    </label>
+    <label class="theme-location-row">
+      <span class="theme-location-row__copy">
+        <strong>{{msg . "theme_settings.pure_white.hero.title_size.label" "Hero title size"}}</strong>
+        <span>{{msg . "theme_settings.pure_white.hero.title_size.description" "Scale the cover title from its current size up to three times larger."}}</span>
+      </span>
+      <span class="pure-white-range-control">
+        <input id="pureWhiteHeroTitleScale" class="ui-input" type="range" min="1" max="3" step="0.05">
+        <output id="pureWhiteHeroTitleScaleValue" for="pureWhiteHeroTitleScale">1x</output>
+      </span>
+    </label>
+    <label class="theme-location-row">
+      <span class="theme-location-row__copy">
+        <strong>{{msg . "theme_settings.pure_white.hero.subtitle.label" "Hero subtitle"}}</strong>
+        <span>{{msg . "theme_settings.pure_white.hero.subtitle.description" "Override the small Pure White subtitle below the cover title. Leave empty to use the theme default."}}</span>
+      </span>
+      <input id="pureWhiteHeroSubtitle" class="ui-input" type="text" maxlength="120" placeholder="{{msg . "site.edition_line" "Dear Reader"}}">
+    </label>
+    <label class="theme-location-row">
+      <span class="theme-location-row__copy">
+        <strong>{{msg . "theme_settings.pure_white.hero.subtitle_size.label" "Hero subtitle size"}}</strong>
+        <span>{{msg . "theme_settings.pure_white.hero.subtitle_size.description" "Scale the cover subtitle from its current size up to three times larger."}}</span>
+      </span>
+      <span class="pure-white-range-control">
+        <input id="pureWhiteHeroSubtitleScale" class="ui-input" type="range" min="1" max="3" step="0.05">
+        <output id="pureWhiteHeroSubtitleScaleValue" for="pureWhiteHeroSubtitleScale">1x</output>
+      </span>
+    </label>
+    <label class="theme-location-row">
+      <span class="theme-location-row__copy">
+        <strong>{{msg . "theme_settings.pure_white.home.content.label" "Home article content"}}</strong>
+        <span>{{msg . "theme_settings.pure_white.home.content.description" "Control whether the Pure White home page shows full article content."}}</span>
+      </span>
+      <select id="pureWhiteHomeContent" class="ui-input">
+        <option value="show">{{msg . "theme_settings.pure_white.home.content.show" "Show"}}</option>
+        <option value="hide">{{msg . "theme_settings.pure_white.home.content.hide" "Hide"}}</option>
+      </select>
+    </label>
+  </section>
+  <div class="settings-actions theme-settings-actions">
+    <button id="saveThemeSettings" class="ui-button ui-button--primary" type="button">{{msg . "theme_settings.save" "Save Theme Settings"}}</button>
+  </div>
+</section>
+
+<script id="themeSettingsInitialData" type="application/json">{{toScriptJSON (themeSettingsData .)}}</script>
+<style>
+  .pure-white-range-control {
+    display: grid;
+    grid-template-columns: minmax(11rem, 1fr) 3.5rem;
+    gap: .75rem;
+    align-items: center;
+    width: min(100%, 22rem);
+  }
+
+  .pure-white-range-control input[type="range"] {
+    width: 100%;
+  }
+
+  .pure-white-range-control output {
+    color: #4f5661;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  @media (max-width: 720px) {
+    .pure-white-range-control {
+      width: 100%;
+    }
+  }
+</style>
+<script>
+(() => {
+  const themeSettingsRoot = document.querySelector("#themeSettings");
+  const themeSettingsStatus = document.querySelector("#themeSettingsStatus");
+  const themeLocationList = document.querySelector("#themeLocationList");
+  const homeContentSelect = document.querySelector("#pureWhiteHomeContent");
+  const heroTitleInput = document.querySelector("#pureWhiteHeroTitle");
+  const heroSubtitleInput = document.querySelector("#pureWhiteHeroSubtitle");
+  const heroTitleScaleInput = document.querySelector("#pureWhiteHeroTitleScale");
+  const heroTitleScaleValue = document.querySelector("#pureWhiteHeroTitleScaleValue");
+  const heroSubtitleScaleInput = document.querySelector("#pureWhiteHeroSubtitleScale");
+  const heroSubtitleScaleValue = document.querySelector("#pureWhiteHeroSubtitleScaleValue");
+  const saveThemeSettingsButton = document.querySelector("#saveThemeSettings");
+  const homeContentLocation = "home-content";
+  const pureWhiteThemeID = "pure-white";
+  const heroScaleMin = 1;
+  const heroScaleMax = 3;
+  const messages = readPostizerMessages();
+
+  /**
+   * 从公共模板注入的 JSON script 标签中读取当前语言文案。
+   * 这个主题页使用内联脚本，执行时间早于 defer 加载的 site.js，
+   * 因此不能只依赖 window.postizerMessage。
+   * @returns {object} 返回当前主题语言合并后的翻译表。
+   */
+  function readPostizerMessages() {
+    const script = document.querySelector("#postizerMessages");
+    if (!script) return {};
+    try {
+      return JSON.parse(script.textContent || "{}");
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /**
+   * 读取后台注入的翻译文案，优先使用公共翻译函数。
+   * @param {string} key - 翻译键名。
+   * @param {string} fallback - 没有翻译时显示的默认文案。
+   * @returns {string} 返回当前语言下的文案。
+   */
+  function tr(key, fallback) {
+    if (window.postizerMessage) return window.postizerMessage(key, fallback);
+    const value = messages[key];
+    if (typeof value === "string" && value.trim() !== "") return value;
+    return fallback;
+  }
+
+  /**
+   * 为需要管理员 token 的页面保留当前 token 参数。
+   * @param {string} path - 后台 API 路径。
+   * @returns {string} 返回带 token 的 API URL。
+   */
+  function apiURL(path) {
+    const token = new URLSearchParams(window.location.search).get("token");
+    if (!token) return path;
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set("token", token);
+    return url.pathname + url.search;
+  }
+
+  /**
+   * 从页面中的 JSON script 标签读取主题设置初始值。
+   * @returns {object} 返回后台提供的主题设置数据。
+   */
+  function readInitialData() {
+    const script = document.querySelector("#themeSettingsInitialData");
+    if (!script) return {};
+    try {
+      return JSON.parse(script.textContent || "{}");
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /**
+   * 规范化后台设置，避免无效菜单 ID 被再次提交。
+   * @param {object} settings - 后台保存的主题设置对象。
+   * @returns {object} 返回包含 menus、menu_locations 和 custom 的可编辑状态。
+   */
+  function normalizeState(settings = {}) {
+    const menus = Array.isArray(settings.menus) ? settings.menus : [];
+    const menuIDs = new Set(menus.map((menu) => String(menu.id || "")));
+    const menuLocations = {};
+    Object.entries(settings.menu_locations || {}).forEach(([location, menuID]) => {
+      const value = String(menuID || "");
+      if (location === homeContentLocation || value === "" || menuIDs.has(value)) menuLocations[location] = value;
+    });
+    return { menus, menu_locations: menuLocations, custom: normalizeCustomSettings(settings.custom) };
+  }
+
+  /**
+   * 规范化主题自定义设置，保留后台支持的字符串、整数和浮点数。
+   * @param {object} custom - 后端保存的 custom 设置对象。
+   * @returns {object} 返回可再次提交的 custom 设置对象。
+   */
+  function normalizeCustomSettings(custom = {}) {
+    const result = {};
+    if (!custom || typeof custom !== "object" || Array.isArray(custom)) return result;
+    Object.entries(custom).forEach(([themeID, values]) => {
+      if (!values || typeof values !== "object" || Array.isArray(values)) return;
+      const normalizedValues = {};
+      Object.entries(values).forEach(([key, value]) => {
+        if (typeof value === "string") normalizedValues[key] = value;
+        else if (typeof value === "number" && Number.isFinite(value)) normalizedValues[key] = value;
+      });
+      if (Object.keys(normalizedValues).length) result[themeID] = normalizedValues;
+    });
+    return result;
+  }
+
+  /**
+   * 读取 Pure White 自己的 custom 设置分组。
+   * @returns {object} 返回 Pure White 的设置对象；不存在时自动创建。
+   */
+  function pureWhiteSettings() {
+    if (!state.custom[pureWhiteThemeID] || typeof state.custom[pureWhiteThemeID] !== "object") {
+      state.custom[pureWhiteThemeID] = {};
+    }
+    return state.custom[pureWhiteThemeID];
+  }
+
+  /**
+   * 写入 Pure White 字符串设置。空值表示恢复主题默认文案。
+   * @param {string} key - 设置键名。
+   * @param {string} value - 管理员输入的字符串。
+   */
+  function writePureWhiteStringSetting(key, value) {
+    const settings = pureWhiteSettings();
+    const nextValue = String(value || "").trim();
+    if (nextValue) settings[key] = nextValue;
+    else delete settings[key];
+  }
+
+  /**
+   * 把滑块倍率限制在 Pure White 允许的 1 到 3 倍之间。
+   * @param {unknown} value - 从设置或 range 控件读取到的原始值。
+   * @returns {number} 返回可保存和渲染的字号倍率。
+   */
+  function normalizeHeroScale(value) {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed)) return heroScaleMin;
+    return Math.min(heroScaleMax, Math.max(heroScaleMin, parsed));
+  }
+
+  /**
+   * 格式化字号倍率显示，保留最多两位小数。
+   * @param {number} value - 已规范化的字号倍率。
+   * @returns {string} 返回滑块旁边展示的倍率文案。
+   */
+  function formatHeroScale(value) {
+    return `${normalizeHeroScale(value).toFixed(2).replace(/\.?0+$/, "")}x`;
+  }
+
+  /**
+   * 写入 Pure White 浮点设置。1 倍是默认最小值，保存时会移除该设置。
+   * @param {string} key - 设置键名。
+   * @param {unknown} value - 管理员选择的倍率。
+   */
+  function writePureWhiteScaleSetting(key, value) {
+    const settings = pureWhiteSettings();
+    const scale = normalizeHeroScale(value);
+    if (scale <= heroScaleMin) delete settings[key];
+    else settings[key] = Number(scale.toFixed(2));
+  }
+
+  /**
+   * 同步字号滑块和倍率输出。
+   * @param {HTMLInputElement|null} input - 字号倍率 range 控件。
+   * @param {HTMLOutputElement|null} output - 倍率显示元素。
+   * @param {unknown} value - 当前倍率。
+   */
+  function syncScaleControl(input, output, value) {
+    const scale = normalizeHeroScale(value);
+    if (input) input.value = scale.toFixed(2);
+    if (output) output.value = formatHeroScale(scale);
+  }
+
+  /**
+   * 绑定滑块实时显示倍率，不立即保存，避免拖动时频繁写入配置。
+   * @param {HTMLInputElement|null} input - 字号倍率 range 控件。
+   * @param {HTMLOutputElement|null} output - 倍率显示元素。
+   */
+  function bindScaleControl(input, output) {
+    if (!input) return;
+    input.addEventListener("input", () => syncScaleControl(input, output, input.value));
+  }
+
+  /**
+   * 删除空的 custom 分组，避免 settings.json 里留下没有内容的对象。
+   * @returns {object} 返回清理后的 custom 设置对象。
+   */
+  function compactCustomSettings() {
+    Object.keys(state.custom).forEach((themeID) => {
+      const values = state.custom[themeID];
+      if (!values || typeof values !== "object" || !Object.keys(values).length) {
+        delete state.custom[themeID];
+      }
+    });
+    return state.custom;
+  }
+
+  /**
+   * 渲染普通菜单位置，例如 Pure White 的导航栏。
+   * 首页文章内容不是菜单位置，所以单独放在“首页设置”中渲染。
+   */
+  function renderMenuLocations() {
+    if (!themeLocationList) return;
+    themeLocationList.innerHTML = "";
+    if (!data.locations.length) {
+      const empty = document.createElement("p");
+      empty.className = "theme-settings-empty";
+      empty.textContent = tr("theme_settings.locations.empty", "The active theme does not declare menu locations.");
+      themeLocationList.appendChild(empty);
+      return;
+    }
+    data.locations.forEach((location) => {
+      const label = document.createElement("label");
+      label.className = "theme-location-row";
+      const copy = document.createElement("span");
+      copy.className = "theme-location-row__copy";
+      const name = document.createElement("strong");
+      name.textContent = tr(`menus.location.${location.id}`, location.name || location.id);
+      const description = document.createElement("span");
+      description.textContent = tr(`menus.location.${location.id}.description`, location.description || location.id);
+      copy.append(name, description);
+
+      const select = document.createElement("select");
+      select.className = "ui-input";
+      select.dataset.locationId = location.id;
+      select.appendChild(new Option(tr("theme_settings.locations.default", "Default menu"), "__default__"));
+      select.appendChild(new Option(tr("theme_settings.locations.none", "No menu"), "__none__"));
+      state.menus.forEach((menu) => {
+        select.appendChild(new Option(menu.name || menu.id, menu.id));
+      });
+      if (Object.prototype.hasOwnProperty.call(state.menu_locations, location.id)) {
+        select.value = state.menu_locations[location.id] === "" ? "__none__" : state.menu_locations[location.id];
+      } else {
+        select.value = "__default__";
+      }
+      select.addEventListener("change", () => {
+        if (select.value === "__default__") delete state.menu_locations[location.id];
+        else if (select.value === "__none__") state.menu_locations[location.id] = "";
+        else state.menu_locations[location.id] = select.value;
+      });
+      label.append(copy, select);
+      themeLocationList.appendChild(label);
+    });
+  }
+
+  /**
+   * 渲染 Pure White 首页正文开关。
+   * 默认不保存任何值，表示“显示”；保存空字符串表示“隐藏”。
+   */
+  function renderHomeContentSetting() {
+    if (!homeContentSelect) return;
+    homeContentSelect.value = state.menu_locations[homeContentLocation] === "" ? "hide" : "show";
+    homeContentSelect.addEventListener("change", () => {
+      if (homeContentSelect.value === "hide") state.menu_locations[homeContentLocation] = "";
+      else delete state.menu_locations[homeContentLocation];
+    });
+  }
+
+  /**
+   * 渲染 Pure White 封面标题和副标题输入框。
+   * 保存时会再次读取输入框值，因此这里主要负责把已保存的值回填给管理员。
+   */
+  function renderHeroTextSettings() {
+    const settings = pureWhiteSettings();
+    if (heroTitleInput) heroTitleInput.value = typeof settings.hero_title === "string" ? settings.hero_title : "";
+    if (heroSubtitleInput) heroSubtitleInput.value = typeof settings.hero_subtitle === "string" ? settings.hero_subtitle : "";
+    syncScaleControl(heroTitleScaleInput, heroTitleScaleValue, settings.hero_title_scale);
+    syncScaleControl(heroSubtitleScaleInput, heroSubtitleScaleValue, settings.hero_subtitle_scale);
+    bindScaleControl(heroTitleScaleInput, heroTitleScaleValue);
+    bindScaleControl(heroSubtitleScaleInput, heroSubtitleScaleValue);
+  }
+
+  const data = readInitialData();
+  const state = normalizeState(data.settings || {});
+  data.locations = Array.isArray(data.locations) ? data.locations : [];
+
+  if (saveThemeSettingsButton) {
+    saveThemeSettingsButton.addEventListener("click", async () => {
+      if (heroTitleInput) writePureWhiteStringSetting("hero_title", heroTitleInput.value);
+      if (heroSubtitleInput) writePureWhiteStringSetting("hero_subtitle", heroSubtitleInput.value);
+      if (heroTitleScaleInput) writePureWhiteScaleSetting("hero_title_scale", heroTitleScaleInput.value);
+      if (heroSubtitleScaleInput) writePureWhiteScaleSetting("hero_subtitle_scale", heroSubtitleScaleInput.value);
+      if (themeSettingsStatus) themeSettingsStatus.textContent = tr("settings.status.saving", "Saving");
+      const response = await fetch(apiURL("/admin/api/theme-settings"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          menu_locations: { ...state.menu_locations },
+          custom: compactCustomSettings()
+        })
+      });
+      if (!response.ok) {
+        if (themeSettingsStatus) themeSettingsStatus.textContent = (await response.text()).trim();
+        return;
+      }
+      if (themeSettingsStatus) themeSettingsStatus.textContent = tr("settings.status.saved", "Saved");
+      window.location.reload();
+    });
+  }
+
+  if (themeSettingsRoot) {
+    renderMenuLocations();
+    renderHomeContentSetting();
+    renderHeroTextSettings();
+  }
+})();
+</script>
+{{template "adminEnd" .}}
+{{end}}
