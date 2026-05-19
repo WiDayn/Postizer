@@ -2,7 +2,7 @@
   "id": "newspaper-classic-ink",
   "type": "theme",
   "name": "Newspaper Classic Ink",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "Ink-negative companion for the Newspaper Classic layout.",
   "default_locale": "en",
   "translations_dir": "translations",

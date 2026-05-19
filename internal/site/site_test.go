@@ -3,6 +3,7 @@ package site
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -651,8 +652,35 @@ func TestRenderMarkdownDoesNotReplaceEquationReferencesInCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := string(html)
-	if !strings.Contains(rendered, `\eqref{eq:energy}`) {
+	if !strings.Contains(renderedText(rendered), `\eqref{eq:energy}`) {
 		t.Fatalf("equation reference inside code was replaced:\n%s", rendered)
+	}
+}
+
+func TestRenderMarkdownHighlightsFencedCode(t *testing.T) {
+	html, err := RenderMarkdown("```go\npackage main\n\nfunc main() {\n\tfmt.Println(\"ok\")\n}\n```")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(html)
+	for _, expected := range []string{`<pre tabindex="0"`, `background-color:#272822`, `<span style=`} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("highlighted code block did not contain %q:\n%s", expected, rendered)
+		}
+	}
+	if strings.Contains(rendered, `<pre><code>package main`) {
+		t.Fatalf("code block used the plain code renderer:\n%s", rendered)
+	}
+}
+
+func TestRenderMarkdownGuessesLanguageForPlainFence(t *testing.T) {
+	html, err := RenderMarkdown("```\npackage main\n\nfunc main() {\n\tfmt.Println(\"ok\")\n}\n```")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(html)
+	if !strings.Contains(rendered, `<pre tabindex="0"`) || !strings.Contains(rendered, `<span style=`) {
+		t.Fatalf("plain fenced code block was not highlighted:\n%s", rendered)
 	}
 }
 
@@ -718,9 +746,15 @@ func TestRenderMarkdownDoesNotRenderFiguresInCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := string(html)
-	if strings.Contains(rendered, `article-figure`) || !strings.Contains(rendered, `\figref{fig:code}`) {
+	if strings.Contains(rendered, `article-figure`) || !strings.Contains(renderedText(rendered), `\figref{fig:code}`) {
 		t.Fatalf("figure syntax inside code was modified:\n%s", rendered)
 	}
+}
+
+var renderedHTMLTagPattern = regexp.MustCompile(`<[^>]+>`)
+
+func renderedText(value string) string {
+	return renderedHTMLTagPattern.ReplaceAllString(value, "")
 }
 
 func TestLoadSettingsMigratesLegacyThemeField(t *testing.T) {

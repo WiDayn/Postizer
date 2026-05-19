@@ -284,7 +284,8 @@ func TestLoadCatalogIncludesOfficialNewspaperClassicInk(t *testing.T) {
 	if len(catalog.ThemeStyles) != 1 {
 		t.Fatalf("theme styles = %d, want 1", len(catalog.ThemeStyles))
 	}
-	if got, want := catalog.ThemeStyles[0], "/packs/official/bundles/newspaper/themes/ink/ink.css?v=1.0.0"; got != want {
+	wantStyleURL := "/packs/official/bundles/newspaper/themes/ink/ink.css?v=" + catalog.ActiveTheme.Version
+	if got, want := catalog.ThemeStyles[0], wantStyleURL; got != want {
 		t.Fatalf("theme style URL = %q, want %q", got, want)
 	}
 	if len(catalog.ActiveTheme.MenuLocations) != 2 {
