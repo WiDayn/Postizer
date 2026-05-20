@@ -266,7 +266,7 @@
   "settings.permalinks.save": "Save permalinks",
   "updates.heading": "Auto Update",
   "settings.auto_update.title": "Automatic Updates",
-  "settings.auto_update.help": "When enabled, the Linux service installer timer periodically checks the Git repository and updates the running service when new commits are available.",
+  "settings.auto_update.help": "When enabled, the Linux service installer timer periodically checks the Git repository and updates the running service only when a newer release tag matching vX.X.X is available.",
   "settings.auto_update.enabled": "Enable automatic updates",
   "settings.auto_update.note": "This requires the Linux service installer to have registered the Postizer update timer.",
   "settings.auto_update.save": "Save update settings",

@@ -297,6 +297,132 @@ update_source_tree() {
   export POSTIZER_GIT_PULL_DONE=1
 }
 
+is_release_tag() {
+  [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+release_tag_version() {
+  local tag="$1"
+  printf '%s' "${tag#v}"
+}
+
+version_gt() {
+  local have="$1"
+  local want="$2"
+  [[ "$have" != "$want" ]] && version_ge "$have" "$want"
+}
+
+latest_release_tag() {
+  local latest="" tag
+  while IFS= read -r tag; do
+    if ! is_release_tag "$tag"; then
+      continue
+    fi
+    if [[ -z "$latest" ]] || version_gt "$(release_tag_version "$tag")" "$(release_tag_version "$latest")"; then
+      latest="$tag"
+    fi
+  done < <(run_source_git tag --list 'v[0-9]*.[0-9]*.[0-9]*')
+  printf '%s' "$latest"
+}
+
+current_release_tag() {
+  local current="" tag
+  while IFS= read -r tag; do
+    if ! is_release_tag "$tag"; then
+      continue
+    fi
+    if [[ -z "$current" ]] || version_gt "$(release_tag_version "$tag")" "$(release_tag_version "$current")"; then
+      current="$tag"
+    fi
+  done < <(run_source_git tag --points-at HEAD)
+  printf '%s' "$current"
+}
+
+update_source_tree_to_latest_release_tag() {
+  if [[ "$GIT_PULL" -ne 1 || "${POSTIZER_GIT_PULL_DONE:-0}" -eq 1 ]]; then
+    if ! source_tree_available; then
+      clone_source_tree
+    fi
+    return
+  fi
+  if [[ ! -e "$SOURCE_DIR/.git" ]]; then
+    if source_tree_available; then
+      echo "Skipping release tag update: $SOURCE_DIR is not a Git checkout."
+      export POSTIZER_GIT_PULL_DONE=1
+      return
+    fi
+    clone_source_tree
+  fi
+  if ! optional_command_exists git; then
+    echo "Missing git for checking release tags. Install git or rerun with --no-git-pull." >&2
+    exit 1
+  fi
+  if ! run_source_git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Skipping release tag update: $SOURCE_DIR is not a Git work tree."
+    export POSTIZER_GIT_PULL_DONE=1
+    return
+  fi
+  if ! run_source_git remote get-url origin >/dev/null 2>&1; then
+    echo "Skipping release tag update: no origin remote is configured."
+    export POSTIZER_GIT_PULL_DONE=1
+    return
+  fi
+
+  local before after current latest target_commit
+  before="$(run_source_git rev-parse HEAD 2>/dev/null || true)"
+  echo "Checking for release tags matching vX.X.X..."
+  run_source_git fetch --tags origin
+
+  latest="$(latest_release_tag)"
+  if [[ -z "$latest" ]]; then
+    echo "No release tags matching vX.X.X were found."
+    GIT_UPDATED=0
+    export POSTIZER_GIT_PULL_DONE=1
+    return
+  fi
+
+  current="$(current_release_tag)"
+  if [[ "$current" == "$latest" ]]; then
+    echo "Already running release tag $latest."
+    GIT_UPDATED=0
+    export POSTIZER_GIT_PULL_DONE=1
+    return
+  fi
+  if [[ -n "$current" ]] && ! version_gt "$(release_tag_version "$latest")" "$(release_tag_version "$current")"; then
+    echo "No newer release tag found. Current: $current, latest: $latest."
+    GIT_UPDATED=0
+    export POSTIZER_GIT_PULL_DONE=1
+    return
+  fi
+
+  target_commit="$(run_source_git rev-list -n 1 "$latest" 2>/dev/null || true)"
+  if [[ -z "$target_commit" ]]; then
+    echo "Could not resolve release tag $latest." >&2
+    exit 1
+  fi
+  if [[ -z "$current" ]] && ! run_source_git merge-base --is-ancestor HEAD "$target_commit"; then
+    echo "Latest release tag $latest is not ahead of current HEAD; skipping to avoid downgrading."
+    GIT_UPDATED=0
+    export POSTIZER_GIT_PULL_DONE=1
+    return
+  fi
+  if [[ -n "$(run_source_git status --porcelain)" ]]; then
+    echo "Source tree has local changes; refusing to checkout release tag $latest." >&2
+    exit 1
+  fi
+
+  echo "Updating source tree to release tag $latest..."
+  if ! run_source_git checkout --detach "$latest"; then
+    echo "git checkout $latest failed. Resolve local changes or rerun with --no-git-pull." >&2
+    exit 1
+  fi
+  after="$(run_source_git rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "$before" && -n "$after" && "$before" != "$after" ]]; then
+    GIT_UPDATED=1
+  fi
+  export POSTIZER_GIT_PULL_DONE=1
+}
+
 load_go_requirement() {
   if [[ -n "$REQUIRED_GO_VERSION" ]]; then
     return
@@ -675,7 +801,11 @@ EOF
 if [[ "${EUID}" -ne 0 ]]; then
   validate_paths
   if [[ -w "$SOURCE_DIR" && ( -e "$SOURCE_DIR/.git" || -f "$SOURCE_DIR/go.mod" ) ]]; then
-    update_source_tree
+    if [[ "$AUTO_UPDATE_RUN" -eq 1 ]]; then
+      update_source_tree_to_latest_release_tag
+    else
+      update_source_tree
+    fi
   fi
   if [[ ! -f "$SCRIPT_SELF" ]]; then
     echo "Please save this installer to a file before running it without root privileges." >&2
@@ -692,9 +822,13 @@ if [[ "$AUTO_UPDATE_RUN" -eq 1 ]] && ! auto_update_enabled; then
   echo "Automatic updates are disabled in $INSTALL_DIR/content/settings.json"
   exit 0
 fi
-update_source_tree
+if [[ "$AUTO_UPDATE_RUN" -eq 1 ]]; then
+  update_source_tree_to_latest_release_tag
+else
+  update_source_tree
+fi
 if [[ "$AUTO_UPDATE_RUN" -eq 1 && "$GIT_UPDATED" -ne 1 ]]; then
-  echo "No new commits found."
+  echo "No newer release tag found."
   exit 0
 fi
 load_go_requirement

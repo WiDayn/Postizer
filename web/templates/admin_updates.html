@@ -11,7 +11,7 @@
     <span id="autoUpdateStatus" class="ui-status">{{msg . "settings.status.ready"}}</span>
   </div>
   <form id="autoUpdateSettingsForm" class="settings-form">
-    <p class="settings-form-note">{{msg . "settings.auto_update.help" "When enabled, the Linux service installer timer periodically checks the Git repository and updates the running service when new commits are available."}}</p>
+    <p class="settings-form-note">{{msg . "settings.auto_update.help" "When enabled, the Linux service installer timer periodically checks the Git repository and updates the running service only when a newer release tag matching vX.X.X is available."}}</p>
     <label class="ui-check">
       <input id="autoUpdateEnabled" name="enabled" type="checkbox" {{if .Store.Settings.AutoUpdate.Enabled}}checked{{end}}>
       <span>{{msg . "settings.auto_update.enabled" "Enable automatic updates"}}</span>
