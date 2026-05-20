@@ -182,6 +182,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/theme-settings", s.requireAdmin(http.HandlerFunc(s.adminThemeSettings)))
 	mux.Handle("GET /admin/settings", s.requireAdmin(http.HandlerFunc(s.adminSettings)))
 	mux.Handle("GET /admin/settings/permalinks", s.requireAdmin(http.HandlerFunc(s.adminPermalinks)))
+	mux.Handle("GET /admin/settings/updates", s.requireAdmin(http.HandlerFunc(s.adminUpdateSettings)))
 	mux.Handle("GET /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.listPosts)))
 	mux.Handle("GET /admin/api/posts/{slug}", s.requireAdmin(http.HandlerFunc(s.getPost)))
 	mux.Handle("POST /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.savePost)))
@@ -200,6 +201,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("DELETE /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.clearHomeImage)))
 	mux.Handle("POST /admin/api/settings/site-title", s.requireAdmin(http.HandlerFunc(s.updateSiteTitleSettings)))
 	mux.Handle("POST /admin/api/settings/permalinks", s.requireAdmin(http.HandlerFunc(s.updatePermalinkSettings)))
+	mux.Handle("POST /admin/api/settings/auto-update", s.requireAdmin(http.HandlerFunc(s.updateAutoUpdateSettings)))
 	mux.Handle("POST /admin/api/settings/time-zone", s.requireAdmin(http.HandlerFunc(s.updateTimeZoneSettings)))
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/menus", s.requireAdmin(http.HandlerFunc(s.updateMenus)))
@@ -758,6 +760,11 @@ func (s *Server) adminPermalinks(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "admin_permalinks.html", ViewData{Title: "Permalinks", TitleKey: "title.admin.permalinks", Store: store, ActiveAdmin: "permalinks"})
 }
 
+func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.render(w, "admin_updates.html", ViewData{Title: "Auto Update", TitleKey: "title.admin.updates", Store: store, ActiveAdmin: "updates"})
+}
+
 func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
 	type postSummary struct {
 		Title   string   `json:"title"`
@@ -1131,6 +1138,26 @@ func (s *Server) updatePermalinkSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, s.currentStore().Settings.Permalinks)
+}
+
+func (s *Server) updateAutoUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload site.AutoUpdateSettings
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.AutoUpdate = payload
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.currentStore().Settings.AutoUpdate)
 }
 
 func (s *Server) updateTimeZoneSettings(w http.ResponseWriter, r *http.Request) {

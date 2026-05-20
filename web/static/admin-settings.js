@@ -30,6 +30,9 @@ const permalinkPagePreview = document.querySelector("#permalinkPagePreview");
 const permalinkTagPreview = document.querySelector("#permalinkTagPreview");
 const permalinkTokenButtons = Array.from(document.querySelectorAll("[data-permalink-token]"));
 const permalinkPostPresetInputs = Array.from(document.querySelectorAll('input[name="post_permalink_preset"]'));
+const autoUpdateSettingsForm = document.querySelector("#autoUpdateSettingsForm");
+const autoUpdateStatus = document.querySelector("#autoUpdateStatus");
+const autoUpdateEnabled = document.querySelector("#autoUpdateEnabled");
 const timeZoneSettingsForm = document.querySelector("#timeZoneSettingsForm");
 const timeZoneStatus = document.querySelector("#timeZoneStatus");
 const siteTimeZone = document.querySelector("#siteTimeZone");
@@ -78,6 +81,10 @@ function setSiteTitleStatus(message) {
 
 function setPermalinkStatus(message) {
   if (permalinkStatus) permalinkStatus.textContent = message;
+}
+
+function setAutoUpdateStatus(message) {
+  if (autoUpdateStatus) autoUpdateStatus.textContent = message;
 }
 
 function setTimeZoneStatus(message) {
@@ -875,6 +882,27 @@ if (permalinkSettingsForm && permalinkPostPattern && permalinkPagePattern && per
     if (typeof result.tag === "string") permalinkTagPattern.value = result.tag;
     syncPermalinkPreviews();
     setPermalinkStatus(tr("settings.status.saved", "Saved"));
+  });
+}
+
+if (autoUpdateSettingsForm && autoUpdateEnabled) {
+  autoUpdateSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setAutoUpdateStatus(tr("settings.status.saving", "Saving"));
+    const response = await fetch(apiURL("/admin/api/settings/auto-update"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: Boolean(autoUpdateEnabled.checked)
+      })
+    });
+    if (!response.ok) {
+      setAutoUpdateStatus((await response.text()).trim());
+      return;
+    }
+    const result = await response.json();
+    autoUpdateEnabled.checked = Boolean(result.enabled);
+    setAutoUpdateStatus(tr("settings.status.saved", "Saved"));
   });
 }
 

@@ -480,6 +480,45 @@ func TestUpdatePermalinkSettingsSavesPermalinks(t *testing.T) {
 	}
 }
 
+func TestUpdateAutoUpdateSettingsSavesToggle(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/settings/auto-update", bytes.NewBufferString(`{"enabled": true}`))
+	response := httptest.NewRecorder()
+
+	s.updateAutoUpdateSettings(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateAutoUpdateSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.AutoUpdate.Enabled {
+		t.Fatal("auto update should be enabled")
+	}
+}
+
 func TestRenderPublicPermalinkUsesCustomPermalink(t *testing.T) {
 	previousDir, err := os.Getwd()
 	if err != nil {

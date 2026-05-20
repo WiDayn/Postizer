@@ -54,9 +54,10 @@
       <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
       <a class="{{if eq .ActiveAdmin "theme-settings"}}is-active{{end}}" href="/admin/theme-settings">{{msg . "nav.theme_settings" "Theme Settings"}}</a>
       <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
-      <a class="{{if or (eq .ActiveAdmin "settings") (eq .ActiveAdmin "permalinks")}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>
+      <a class="{{if or (eq .ActiveAdmin "settings") (eq .ActiveAdmin "permalinks") (eq .ActiveAdmin "updates")}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>
       <div class="admin-nav-sub">
         <a class="{{if eq .ActiveAdmin "permalinks"}}is-active{{end}}" href="/admin/settings/permalinks">{{msg . "nav.permalinks" "Permalinks"}}</a>
+        <a class="{{if eq .ActiveAdmin "updates"}}is-active{{end}}" href="/admin/settings/updates">{{msg . "nav.updates" "Auto Update"}}</a>
       </div>
     </nav>
     <div class="admin-sidebar-footer">

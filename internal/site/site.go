@@ -83,6 +83,7 @@ type Store struct {
 type Settings struct {
 	SiteTitle       SiteTitle            `json:"site_title"`
 	Permalinks      PermalinkSettings    `json:"permalinks"`
+	AutoUpdate      AutoUpdateSettings   `json:"auto_update"`
 	HomeImage       HomeImage            `json:"home_image"`
 	MediaProcessing MediaProcessing      `json:"media_processing"`
 	ThemeSettings   ThemeSettings        `json:"theme_settings"`
@@ -105,6 +106,10 @@ type PermalinkSettings struct {
 	Post string `json:"post"`
 	Page string `json:"page"`
 	Tag  string `json:"tag"`
+}
+
+type AutoUpdateSettings struct {
+	Enabled bool `json:"enabled"`
 }
 
 type HomeImage struct {
@@ -656,6 +661,7 @@ func defaultSettings() Settings {
 	return Settings{
 		SiteTitle:       defaultSiteTitle(),
 		Permalinks:      defaultPermalinks(),
+		AutoUpdate:      defaultAutoUpdate(),
 		MediaProcessing: defaultMediaProcessing(),
 		TimeZone:        DefaultTimeZone,
 		ThemePack: appearance.Selection{
@@ -677,6 +683,12 @@ func defaultPermalinks() PermalinkSettings {
 func defaultSiteTitle() SiteTitle {
 	return SiteTitle{
 		Main: DefaultSiteTitle,
+	}
+}
+
+func defaultAutoUpdate() AutoUpdateSettings {
+	return AutoUpdateSettings{
+		Enabled: false,
 	}
 }
 
@@ -717,6 +729,7 @@ func normalizeSettings(settings *Settings) {
 	settings.TimeZone = NormalizeTimeZone(settings.TimeZone)
 	settings.SiteTitle = normalizeSiteTitle(settings.SiteTitle)
 	settings.Permalinks = normalizePermalinks(settings.Permalinks)
+	settings.AutoUpdate = normalizeAutoUpdate(settings.AutoUpdate)
 
 	// 旧版文字包迁移：
 	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。
@@ -757,6 +770,10 @@ func normalizePermalinks(settings PermalinkSettings) PermalinkSettings {
 	settings.Page = normalizePermalinkPattern(settings.Page, defaults.Page, pagePermalinkAllowedTokens(), []string{"pagename", "slug"})
 	settings.Tag = normalizePermalinkPattern(settings.Tag, defaults.Tag, tagPermalinkAllowedTokens(), []string{"tag", "slug"})
 	return settings
+}
+
+func normalizeAutoUpdate(settings AutoUpdateSettings) AutoUpdateSettings {
+	return AutoUpdateSettings{Enabled: settings.Enabled}
 }
 
 func normalizePermalinkPattern(pattern, fallback string, allowed map[string]bool, required []string) string {

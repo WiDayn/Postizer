@@ -865,6 +865,16 @@ func TestLoadSettingsDefaultsSiteTitle(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsDefaultsAutoUpdateDisabled(t *testing.T) {
+	settings, err := LoadSettings(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.AutoUpdate.Enabled {
+		t.Fatal("auto update should be disabled by default")
+	}
+}
+
 func TestSaveSettingsNormalizesSiteTitle(t *testing.T) {
 	root := t.TempDir()
 	settings := defaultSettings()

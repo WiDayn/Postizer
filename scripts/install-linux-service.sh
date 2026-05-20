@@ -9,6 +9,9 @@ SERVICE_USER="${POSTIZER_SERVICE_USER:-postizer}"
 SERVICE_GROUP="${POSTIZER_SERVICE_GROUP:-$SERVICE_USER}"
 INSTALL_DIR="${POSTIZER_INSTALL_DIR:-/opt/postizer}"
 DEFAULT_SOURCE_DIR="${POSTIZER_SOURCE_DIR:-/usr/local/src/postizer}"
+UPDATE_SERVICE_NAME_ENV="${POSTIZER_UPDATE_SERVICE_NAME:-}"
+UPDATE_SERVICE_NAME="${UPDATE_SERVICE_NAME_ENV:-$SERVICE_NAME-update}"
+UPDATE_TIMER_INTERVAL="${POSTIZER_UPDATE_INTERVAL:-15min}"
 BIN_LINK="${POSTIZER_BIN_LINK:-/usr/local/bin/postizer}"
 ENV_DIR="${POSTIZER_ENV_DIR:-/etc/postizer}"
 ENV_FILE="${POSTIZER_ENV_FILE:-$ENV_DIR/postizer.env}"
@@ -18,6 +21,9 @@ ENABLE_SERVICE=1
 BUILD_BINARY=1
 SKIP_DEPS=0
 GIT_PULL=1
+GIT_UPDATED=0
+INSTALL_UPDATE_TIMER=1
+AUTO_UPDATE_RUN=0
 NO_BUILD_BINARY=0
 SCRIPT_SELF="${BASH_SOURCE[0]:-$0}"
 SCRIPT_DIR=""
@@ -47,6 +53,7 @@ Options:
   --install-dir PATH    Runtime directory (default: $INSTALL_DIR)
   --source-dir PATH     Source checkout directory (default: $DEFAULT_SOURCE_DIR)
   --repo-url URL        Git repository to clone (default: $REPO_URL)
+  --update-interval N   Auto-update systemd timer interval (default: $UPDATE_TIMER_INTERVAL)
   --service-name NAME   systemd service name (default: $SERVICE_NAME)
   --user NAME           Service user (default: $SERVICE_USER)
   --group NAME          Service group (default: same as user)
@@ -55,6 +62,7 @@ Options:
   --no-build            Use ./postizer from the repository root
   --no-git-pull         Do not update an existing Git checkout before building
   --skip-deps           Do not install missing OS packages or Go
+  --no-update-timer     Do not register the auto-update systemd timer
   --no-enable           Do not enable the service at boot
   --no-start            Do not start/restart the service
   -h, --help            Show this help
@@ -91,6 +99,11 @@ while [[ $# -gt 0 ]]; do
     --repo-url)
       require_arg "$1" "${2:-}"
       REPO_URL="$2"
+      shift 2
+      ;;
+    --update-interval)
+      require_arg "$1" "${2:-}"
+      UPDATE_TIMER_INTERVAL="$2"
       shift 2
       ;;
     --service-name)
@@ -132,6 +145,15 @@ while [[ $# -gt 0 ]]; do
       SKIP_DEPS=1
       shift
       ;;
+    --no-update-timer)
+      INSTALL_UPDATE_TIMER=0
+      shift
+      ;;
+    --auto-update-run)
+      AUTO_UPDATE_RUN=1
+      INSTALL_UPDATE_TIMER=0
+      shift
+      ;;
     --no-enable)
       ENABLE_SERVICE=0
       shift
@@ -151,6 +173,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$UPDATE_SERVICE_NAME_ENV" ]]; then
+  UPDATE_SERVICE_NAME="$SERVICE_NAME-update"
+fi
 
 if [[ "$NO_BUILD_BINARY" -eq 1 && -z "$BINARY_SOURCE" ]]; then
   BINARY_SOURCE="$SOURCE_DIR/$APP_NAME"
@@ -218,6 +244,7 @@ clone_source_tree() {
   mkdir -p "$(dirname "$SOURCE_DIR")"
   echo "Cloning Postizer from $REPO_URL into $SOURCE_DIR..."
   git clone "$REPO_URL" "$SOURCE_DIR"
+  GIT_UPDATED=1
 }
 
 update_source_tree() {
@@ -256,10 +283,16 @@ update_source_tree() {
     return
   fi
 
+  local before after
+  before="$(run_source_git rev-parse HEAD 2>/dev/null || true)"
   echo "Updating source tree with git pull --ff-only..."
   if ! run_source_git pull --ff-only; then
     echo "git pull failed. Resolve local changes or rerun with --no-git-pull." >&2
     exit 1
+  fi
+  after="$(run_source_git rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "$before" && -n "$after" && "$before" != "$after" ]]; then
+    GIT_UPDATED=1
   fi
   export POSTIZER_GIT_PULL_DONE=1
 }
@@ -277,6 +310,14 @@ load_go_requirement() {
     echo "Cannot detect required Go version from $SOURCE_DIR/go.mod" >&2
     exit 1
   fi
+}
+
+auto_update_enabled() {
+  local settings_file="$INSTALL_DIR/content/settings.json"
+  if [[ ! -f "$settings_file" ]]; then
+    return 1
+  fi
+  sed -n '/"auto_update"[[:space:]]*:/,/}/p' "$settings_file" | grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true'
 }
 
 validate_paths() {
@@ -578,6 +619,59 @@ WantedBy=multi-user.target
 EOF
 }
 
+write_update_timer_files() {
+  if [[ "$INSTALL_UPDATE_TIMER" -ne 1 ]]; then
+    return
+  fi
+
+  local updater_path="/usr/local/bin/$SERVICE_NAME-auto-update"
+  local update_service_path="/etc/systemd/system/$UPDATE_SERVICE_NAME.service"
+  local update_timer_path="/etc/systemd/system/$UPDATE_SERVICE_NAME.timer"
+  local script_path="$SOURCE_DIR/scripts/install-linux-service.sh"
+
+  cat >"$updater_path" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec bash $(printf '%q' "$script_path") \\
+  --auto-update-run \\
+  --source-dir $(printf '%q' "$SOURCE_DIR") \\
+  --repo-url $(printf '%q' "$REPO_URL") \\
+  --install-dir $(printf '%q' "$INSTALL_DIR") \\
+  --service-name $(printf '%q' "$SERVICE_NAME") \\
+  --user $(printf '%q' "$SERVICE_USER") \\
+  --group $(printf '%q' "$SERVICE_GROUP") \\
+  --addr $(printf '%q' "$LISTEN_ADDR")
+EOF
+  chmod 0755 "$updater_path"
+
+  cat >"$update_service_path" <<EOF
+[Unit]
+Description=Postizer automatic update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=$SOURCE_DIR
+ExecStart=$updater_path
+EOF
+
+  cat >"$update_timer_path" <<EOF
+[Unit]
+Description=Check for Postizer updates
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=$UPDATE_TIMER_INTERVAL
+RandomizedDelaySec=2min
+Persistent=true
+Unit=$UPDATE_SERVICE_NAME.service
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
 if [[ "${EUID}" -ne 0 ]]; then
   validate_paths
   if [[ -w "$SOURCE_DIR" && ( -e "$SOURCE_DIR/.git" || -f "$SOURCE_DIR/go.mod" ) ]]; then
@@ -594,7 +688,15 @@ validate_paths
 if needs_dependency_install; then
   install_os_packages
 fi
+if [[ "$AUTO_UPDATE_RUN" -eq 1 ]] && ! auto_update_enabled; then
+  echo "Automatic updates are disabled in $INSTALL_DIR/content/settings.json"
+  exit 0
+fi
 update_source_tree
+if [[ "$AUTO_UPDATE_RUN" -eq 1 && "$GIT_UPDATED" -ne 1 ]]; then
+  echo "No new commits found."
+  exit 0
+fi
 load_go_requirement
 install_go_toolchain
 need_command systemctl
@@ -609,16 +711,26 @@ build_or_select_binary
 write_env_file
 install_files
 write_service_file
+write_update_timer_files
 
 systemctl daemon-reload
 if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
   systemctl enable "$SERVICE_NAME.service"
+  if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
+    systemctl enable "$UPDATE_SERVICE_NAME.timer"
+  fi
 fi
 if [[ "$START_SERVICE" -eq 1 ]]; then
   systemctl restart "$SERVICE_NAME.service"
+  if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
+    systemctl restart "$UPDATE_SERVICE_NAME.timer"
+  fi
 fi
 
 echo "Installed Postizer to $INSTALL_DIR"
 echo "Service: $SERVICE_NAME.service"
+if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
+  echo "Auto-update timer: $UPDATE_SERVICE_NAME.timer"
+fi
 echo "Status: systemctl status $SERVICE_NAME.service"
 echo "Logs:   journalctl -u $SERVICE_NAME.service -f"

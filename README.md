@@ -24,7 +24,7 @@ On a Linux host with systemd:
 curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash
 ```
 
-The installer clones `https://github.com/WiDayn/Postizer.git` into `/usr/local/src/postizer` when needed, runs `git pull --ff-only` for an existing Git checkout, installs missing base dependencies where possible, downloads the Go version required by `go.mod` when needed, builds Postizer, installs the runtime into `/opt/postizer`, writes `/etc/postizer/postizer.env`, registers `postizer.service`, enables it, and starts it. If `POSTIZER_ADMIN_PASSWORD` is not set, the installer generates an initial admin password and prints it once.
+The installer clones `https://github.com/WiDayn/Postizer.git` into `/usr/local/src/postizer` when needed, runs `git pull --ff-only` for an existing Git checkout, installs missing base dependencies where possible, downloads the Go version required by `go.mod` when needed, builds Postizer, installs the runtime into `/opt/postizer`, writes `/etc/postizer/postizer.env`, registers `postizer.service`, enables it, starts it, and registers `postizer-update.timer`. If `POSTIZER_ADMIN_PASSWORD` is not set, the installer generates an initial admin password and prints it once. Automatic updates are off by default and can be enabled in Admin -> Settings -> Auto Update.
 
 If you are already inside a cloned repository, you can also run:
 
@@ -41,6 +41,7 @@ bash scripts/install-linux-service.sh --binary ./postizer
 bash scripts/install-linux-service.sh --skip-deps
 bash scripts/install-linux-service.sh --source-dir /srv/postizer-src
 bash scripts/install-linux-service.sh --no-git-pull
+bash scripts/install-linux-service.sh --no-update-timer
 ```
 
 Service commands:
@@ -49,6 +50,7 @@ Service commands:
 sudo systemctl status postizer
 sudo journalctl -u postizer -f
 sudo systemctl restart postizer
+sudo systemctl status postizer-update.timer
 ```
 
 Default local admin login:
