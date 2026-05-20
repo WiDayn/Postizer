@@ -16,6 +16,41 @@ Open:
 - Admin editor: <http://localhost:8080/admin>
 - Media library: <http://localhost:8080/admin/media>
 
+## Linux Service Install
+
+On a Linux host with systemd:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash
+```
+
+The installer clones `https://github.com/WiDayn/Postizer.git` into `/usr/local/src/postizer` when needed, runs `git pull --ff-only` for an existing Git checkout, installs missing base dependencies where possible, downloads the Go version required by `go.mod` when needed, builds Postizer, installs the runtime into `/opt/postizer`, writes `/etc/postizer/postizer.env`, registers `postizer.service`, enables it, and starts it. If `POSTIZER_ADMIN_PASSWORD` is not set, the installer generates an initial admin password and prints it once.
+
+If you are already inside a cloned repository, you can also run:
+
+```bash
+bash scripts/install-linux-service.sh
+```
+
+Common options:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo env POSTIZER_ADMIN_PASSWORD='change-this-password' bash
+curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash -s -- --addr 127.0.0.1:8080 --no-start
+bash scripts/install-linux-service.sh --binary ./postizer
+bash scripts/install-linux-service.sh --skip-deps
+bash scripts/install-linux-service.sh --source-dir /srv/postizer-src
+bash scripts/install-linux-service.sh --no-git-pull
+```
+
+Service commands:
+
+```bash
+sudo systemctl status postizer
+sudo journalctl -u postizer -f
+sudo systemctl restart postizer
+```
+
 Default local admin login:
 
 - Username: `admin`

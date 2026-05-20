@@ -431,6 +431,107 @@ func TestUpdateSiteTitleSettingsSavesTitle(t *testing.T) {
 	}
 }
 
+func TestUpdatePermalinkSettingsSavesPermalinks(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/settings/permalinks", bytes.NewBufferString(`{
+  "post": "/notes/%year%/%monthnum%/%postname%",
+  "page": "/docs/%pagename%",
+  "tag": "/topics/%tag%"
+}`))
+	response := httptest.NewRecorder()
+
+	s.updatePermalinkSettings(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updatePermalinkSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.Permalinks.Post, "/notes/%year%/%monthnum%/%postname%"; got != want {
+		t.Fatalf("post permalink = %q, want %q", got, want)
+	}
+	if got, want := settings.Permalinks.Page, "/docs/%pagename%"; got != want {
+		t.Fatalf("page permalink = %q, want %q", got, want)
+	}
+	if got, want := settings.Permalinks.Tag, "/topics/%tag%"; got != want {
+		t.Fatalf("tag permalink = %q, want %q", got, want)
+	}
+}
+
+func TestRenderPublicPermalinkUsesCustomPermalink(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	if _, err := site.SavePost(contentRoot, site.PostDraft{
+		Title: "Custom Route",
+		Date:  "2026-05-20T10:30",
+		Body:  "Public body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	settings := site.Settings{
+		Permalinks: site.PermalinkSettings{
+			Post: "/notes/%year%/%monthnum%/%postname%",
+			Page: site.DefaultPagePermalink,
+			Tag:  site.DefaultTagPermalink,
+		},
+	}
+	if err := site.SaveSettings(contentRoot, settings); err != nil {
+		t.Fatal(err)
+	}
+	store, err := site.Load(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	templates, err := loadTemplates(appearance.Pack{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{store: store, templates: templates}
+	request := httptest.NewRequest("GET", "/notes/2026/05/custom-route", nil)
+	response := httptest.NewRecorder()
+
+	if !s.renderPublicPermalink(response, request) {
+		t.Fatal("custom permalink should render")
+	}
+	if !strings.Contains(response.Body.String(), "Custom Route") {
+		t.Fatalf("response should include post title, got %s", response.Body.String())
+	}
+}
+
 func TestPageTitleFromViewDataUsesConfiguredSiteTitle(t *testing.T) {
 	store := &site.Store{Settings: site.Settings{SiteTitle: site.SiteTitle{
 		Main:     "Field Notes",

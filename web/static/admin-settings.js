@@ -20,6 +20,16 @@ const siteTitleSettingsForm = document.querySelector("#siteTitleSettingsForm");
 const siteTitleStatus = document.querySelector("#siteTitleStatus");
 const siteTitleMain = document.querySelector("#siteTitleMain");
 const siteTitleSubtitle = document.querySelector("#siteTitleSubtitle");
+const permalinkSettingsForm = document.querySelector("#permalinkSettingsForm");
+const permalinkStatus = document.querySelector("#permalinkStatus");
+const permalinkPostPattern = document.querySelector("#permalinkPostPattern");
+const permalinkPagePattern = document.querySelector("#permalinkPagePattern");
+const permalinkTagPattern = document.querySelector("#permalinkTagPattern");
+const permalinkPostPreview = document.querySelector("#permalinkPostPreview");
+const permalinkPagePreview = document.querySelector("#permalinkPagePreview");
+const permalinkTagPreview = document.querySelector("#permalinkTagPreview");
+const permalinkTokenButtons = Array.from(document.querySelectorAll("[data-permalink-token]"));
+const permalinkPostPresetInputs = Array.from(document.querySelectorAll('input[name="post_permalink_preset"]'));
 const timeZoneSettingsForm = document.querySelector("#timeZoneSettingsForm");
 const timeZoneStatus = document.querySelector("#timeZoneStatus");
 const siteTimeZone = document.querySelector("#siteTimeZone");
@@ -66,6 +76,10 @@ function setSiteTitleStatus(message) {
   if (siteTitleStatus) siteTitleStatus.textContent = message;
 }
 
+function setPermalinkStatus(message) {
+  if (permalinkStatus) permalinkStatus.textContent = message;
+}
+
 function setTimeZoneStatus(message) {
   if (timeZoneStatus) timeZoneStatus.textContent = message;
 }
@@ -78,6 +92,63 @@ function normalizedQuality(value) {
   const parsed = Number.parseInt(String(value || ""), 10);
   if (!Number.isFinite(parsed)) return 82;
   return Math.min(100, Math.max(1, parsed));
+}
+
+function formatPermalinkPreview(pattern, values) {
+  let path = String(pattern || "").replace(/%([A-Za-z0-9_]+)%/g, (token, name) => {
+    const key = `%${String(name || "").toLowerCase()}%`;
+    return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : token;
+  });
+  if (!path.startsWith("/")) path = `/${path}`;
+  return path;
+}
+
+function syncPermalinkPreviews() {
+  if (permalinkPostPreview && permalinkPostPattern) {
+    permalinkPostPreview.textContent = formatPermalinkPreview(permalinkPostPattern.value || "/posts/%postname%", {
+      "%postname%": "sample-post",
+      "%slug%": "sample-post",
+      "%year%": "2026",
+      "%monthnum%": "05",
+      "%day%": "20"
+    });
+  }
+  if (permalinkPagePreview && permalinkPagePattern) {
+    permalinkPagePreview.textContent = formatPermalinkPreview(permalinkPagePattern.value || "/pages/%pagename%", {
+      "%pagename%": "about",
+      "%slug%": "about"
+    });
+  }
+  if (permalinkTagPreview && permalinkTagPattern) {
+    permalinkTagPreview.textContent = formatPermalinkPreview(permalinkTagPattern.value || "/tags/%tag%", {
+      "%tag%": "go",
+      "%slug%": "go"
+    });
+  }
+}
+
+function syncPostPermalinkPreset() {
+  if (!permalinkPostPresetInputs.length || !permalinkPostPattern) return;
+  const value = String(permalinkPostPattern.value || "").trim();
+  const matched = permalinkPostPresetInputs.find((input) => input.value !== "custom" && input.value === value);
+  permalinkPostPresetInputs.forEach((input) => {
+    input.checked = matched ? input === matched : input.value === "custom";
+    if (input.value === "custom") {
+      const preview = input.closest(".permalink-preset") && input.closest(".permalink-preset").querySelector("code");
+      if (preview) preview.textContent = value || "/posts/%postname%";
+    }
+  });
+}
+
+function insertPermalinkToken(input, token) {
+  if (!input) return;
+  const start = input.selectionStart || input.value.length;
+  const end = input.selectionEnd || start;
+  input.value = `${input.value.slice(0, start)}${token}${input.value.slice(end)}`;
+  input.selectionStart = input.selectionEnd = start + token.length;
+  input.focus();
+  syncPermalinkPreviews();
+  syncPostPermalinkPreset();
 }
 
 function selectedValue(name) {
@@ -750,6 +821,60 @@ if (siteTitleSettingsForm && siteTitleMain && siteTitleSubtitle) {
     if (typeof result.main === "string") siteTitleMain.value = result.main;
     if (typeof result.subtitle === "string") siteTitleSubtitle.value = result.subtitle;
     setSiteTitleStatus(tr("settings.status.saved", "Saved"));
+  });
+}
+
+if (permalinkSettingsForm && permalinkPostPattern && permalinkPagePattern && permalinkTagPattern) {
+  [permalinkPostPattern, permalinkPagePattern, permalinkTagPattern].forEach((input) => {
+    input.addEventListener("input", () => {
+      syncPermalinkPreviews();
+      if (input === permalinkPostPattern) syncPostPermalinkPreset();
+    });
+  });
+  permalinkPostPresetInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      if (input.value === "custom") {
+        permalinkPostPattern.focus();
+        return;
+      }
+      permalinkPostPattern.value = input.value;
+      syncPermalinkPreviews();
+      syncPostPermalinkPreset();
+    });
+  });
+  permalinkTokenButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const active = document.activeElement;
+      const target = [permalinkPostPattern, permalinkPagePattern, permalinkTagPattern].includes(active) ? active : permalinkPostPattern;
+      insertPermalinkToken(target, button.dataset.permalinkToken || "");
+    });
+  });
+  syncPermalinkPreviews();
+  syncPostPermalinkPreset();
+
+  permalinkSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setPermalinkStatus(tr("settings.status.saving", "Saving"));
+    const response = await fetch(apiURL("/admin/api/settings/permalinks"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        post: String(permalinkPostPattern.value || "").trim(),
+        page: String(permalinkPagePattern.value || "").trim(),
+        tag: String(permalinkTagPattern.value || "").trim()
+      })
+    });
+    if (!response.ok) {
+      setPermalinkStatus((await response.text()).trim());
+      return;
+    }
+    const result = await response.json();
+    if (typeof result.post === "string") permalinkPostPattern.value = result.post;
+    if (typeof result.page === "string") permalinkPagePattern.value = result.page;
+    if (typeof result.tag === "string") permalinkTagPattern.value = result.tag;
+    syncPermalinkPreviews();
+    setPermalinkStatus(tr("settings.status.saved", "Saved"));
   });
 }
 

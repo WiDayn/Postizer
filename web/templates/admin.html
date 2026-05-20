@@ -1,7 +1,7 @@
 {{define "admin.html"}}
 {{template "adminStart" .}}
 {{$isPage := eq .EditorKind "page"}}
-<section class="editor-shell" data-mode="split" data-library="expanded" data-time-zone="{{.Store.Settings.TimeZone}}" data-content-kind="{{if $isPage}}page{{else}}post{{end}}" data-initial-slug="{{.EditorSlug}}">
+<section class="editor-shell" data-mode="split" data-library="expanded" data-time-zone="{{.Store.Settings.TimeZone}}" data-content-kind="{{if $isPage}}page{{else}}post{{end}}" data-permalink-pattern="{{if $isPage}}{{.Store.Settings.Permalinks.Page}}{{else}}{{.Store.Settings.Permalinks.Post}}{{end}}" data-initial-slug="{{.EditorSlug}}">
   <header class="editor-topbar">
     <div>
       <p class="kicker">{{msg . "admin.kicker"}}</p>
@@ -56,7 +56,7 @@
     <div class="editor-main">
       <input id="postTitle" class="title-field ui-input" type="text" placeholder="{{msg . "editor.title_placeholder"}}">
       <div class="permalink-row">
-        <span>{{if $isPage}}/pages/{{else}}/posts/{{end}}</span>
+        <span>/</span>
         <code id="postSlug"></code>
       </div>
 
@@ -154,6 +154,6 @@
     </aside>
   </div>
 </section>
-<script defer src="/static/admin.js?v=19"></script>
+<script defer src="/static/admin.js?v=20"></script>
 {{template "adminEnd" .}}
 {{end}}

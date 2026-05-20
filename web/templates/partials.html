@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{pageTitle .}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=103">
+  <link rel="stylesheet" href="/static/site.css?v=105">
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
@@ -54,7 +54,10 @@
       <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
       <a class="{{if eq .ActiveAdmin "theme-settings"}}is-active{{end}}" href="/admin/theme-settings">{{msg . "nav.theme_settings" "Theme Settings"}}</a>
       <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
-      <a class="{{if eq .ActiveAdmin "settings"}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>
+      <a class="{{if or (eq .ActiveAdmin "settings") (eq .ActiveAdmin "permalinks")}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>
+      <div class="admin-nav-sub">
+        <a class="{{if eq .ActiveAdmin "permalinks"}}is-active{{end}}" href="/admin/settings/permalinks">{{msg . "nav.permalinks" "Permalinks"}}</a>
+      </div>
     </nav>
     <div class="admin-sidebar-footer">
       <a href="/">{{msg . "nav.view_site"}}</a>

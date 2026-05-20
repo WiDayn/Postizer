@@ -6,8 +6,8 @@
     {{range .Posts}}
     <item>
       <title>{{.Title}}</title>
-      <link>/posts/{{.Slug}}</link>
-      <guid>/posts/{{.Slug}}</guid>
+      <link>{{postURL .}}</link>
+      <guid>{{postURL .}}</guid>
       <pubDate>{{date .Date}}</pubDate>
       <description>{{.Summary}}</description>
     </item>

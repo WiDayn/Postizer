@@ -1,0 +1,95 @@
+{{define "admin_permalinks.html"}}
+{{template "adminStart" .}}
+<header class="admin-page-header">
+  <p class="kicker">{{msg . "admin.kicker"}}</p>
+  <h1>{{msg . "permalinks.heading" "Permalinks"}}</h1>
+</header>
+
+<section class="ui-panel admin-panel">
+  <div class="ui-panel__head">
+    <h2>{{msg . "settings.permalinks.title" "Permalink Settings"}}</h2>
+    <span id="permalinkStatus" class="ui-status">{{msg . "settings.status.ready"}}</span>
+  </div>
+  <form id="permalinkSettingsForm" class="settings-form">
+    <p class="settings-form-note">{{msg . "settings.permalinks.help" "Customize public URL formats for posts, pages, and tags."}}</p>
+
+    <div class="permalink-settings-list">
+      <fieldset class="permalink-preset-list">
+        <legend>{{msg . "settings.permalinks.post_presets" "Post quick presets"}}</legend>
+        <label class="permalink-preset">
+          <input type="radio" name="post_permalink_preset" value="/posts/%postname%">
+          <span>
+            <strong>{{msg . "settings.permalinks.preset.default" "Default"}}</strong>
+            <code>/posts/sample-post</code>
+          </span>
+        </label>
+        <label class="permalink-preset">
+          <input type="radio" name="post_permalink_preset" value="/%year%/%monthnum%/%day%/%postname%/">
+          <span>
+            <strong>{{msg . "settings.permalinks.preset.date_name" "Date and name"}}</strong>
+            <code>/2026/05/20/sample-post/</code>
+          </span>
+        </label>
+        <label class="permalink-preset">
+          <input type="radio" name="post_permalink_preset" value="/%year%/%monthnum%/%postname%/">
+          <span>
+            <strong>{{msg . "settings.permalinks.preset.month_name" "Month and name"}}</strong>
+            <code>/2026/05/sample-post/</code>
+          </span>
+        </label>
+        <label class="permalink-preset">
+          <input type="radio" name="post_permalink_preset" value="/%postname%/">
+          <span>
+            <strong>{{msg . "settings.permalinks.preset.post_name" "Post name"}}</strong>
+            <code>/sample-post/</code>
+          </span>
+        </label>
+        <label class="permalink-preset">
+          <input type="radio" name="post_permalink_preset" value="custom">
+          <span>
+            <strong>{{msg . "settings.permalinks.preset.custom" "Custom structure"}}</strong>
+            <code>{{.Store.Settings.Permalinks.Post}}</code>
+          </span>
+        </label>
+      </fieldset>
+
+      <label class="ui-field">
+        <span>{{msg . "settings.permalinks.post" "Post path format"}}</span>
+        <input id="permalinkPostPattern" class="ui-input" name="post" type="text" value="{{.Store.Settings.Permalinks.Post}}" placeholder="/posts/%postname%">
+        <code id="permalinkPostPreview" class="permalink-preview" data-kind="post">/posts/sample-post</code>
+      </label>
+
+      <label class="ui-field">
+        <span>{{msg . "settings.permalinks.page" "Page path format"}}</span>
+        <input id="permalinkPagePattern" class="ui-input" name="page" type="text" value="{{.Store.Settings.Permalinks.Page}}" placeholder="/pages/%pagename%">
+        <code id="permalinkPagePreview" class="permalink-preview" data-kind="page">/pages/about</code>
+      </label>
+
+      <label class="ui-field">
+        <span>{{msg . "settings.permalinks.tag" "Tag path format"}}</span>
+        <input id="permalinkTagPattern" class="ui-input" name="tag" type="text" value="{{.Store.Settings.Permalinks.Tag}}" placeholder="/tags/%tag%">
+        <code id="permalinkTagPreview" class="permalink-preview" data-kind="tag">/tags/go</code>
+      </label>
+    </div>
+
+    <div class="settings-form-note">
+      <p>{{msg . "settings.permalinks.tokens" "Available tokens"}}</p>
+      <div class="permalink-token-list">
+        <button type="button" class="ui-button permalink-token" data-permalink-token="%postname%">%postname%</button>
+        <button type="button" class="ui-button permalink-token" data-permalink-token="%pagename%">%pagename%</button>
+        <button type="button" class="ui-button permalink-token" data-permalink-token="%tag%">%tag%</button>
+        <button type="button" class="ui-button permalink-token" data-permalink-token="%slug%">%slug%</button>
+        <button type="button" class="ui-button permalink-token" data-permalink-token="%year%">%year%</button>
+        <button type="button" class="ui-button permalink-token" data-permalink-token="%monthnum%">%monthnum%</button>
+        <button type="button" class="ui-button permalink-token" data-permalink-token="%day%">%day%</button>
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button type="submit" class="ui-button ui-button--primary">{{msg . "settings.permalinks.save" "Save permalinks"}}</button>
+    </div>
+  </form>
+</section>
+<script defer src="/static/admin-settings.js?v=41"></script>
+{{template "adminEnd" .}}
+{{end}}

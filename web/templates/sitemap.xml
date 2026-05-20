@@ -2,8 +2,8 @@
   <url><loc>/</loc></url>
   <url><loc>/archive</loc></url>
   <url><loc>/tags</loc></url>
-  {{range .Posts}}<url><loc>/posts/{{.Slug}}</loc></url>{{end}}
-  {{range .Pages}}<url><loc>/pages/{{.Slug}}</loc></url>{{end}}
-  {{range .Tags}}<url><loc>/tags/{{.Slug}}</loc></url>{{end}}
+  {{range .Posts}}<url><loc>{{postURL .}}</loc></url>{{end}}
+  {{range .Pages}}<url><loc>{{pageURL .}}</loc></url>{{end}}
+  {{range .Tags}}<url><loc>{{tagURL .}}</loc></url>{{end}}
 </urlset>
 {{end}}

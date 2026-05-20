@@ -181,6 +181,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/menus", s.requireAdmin(http.HandlerFunc(s.adminMenus)))
 	mux.Handle("GET /admin/theme-settings", s.requireAdmin(http.HandlerFunc(s.adminThemeSettings)))
 	mux.Handle("GET /admin/settings", s.requireAdmin(http.HandlerFunc(s.adminSettings)))
+	mux.Handle("GET /admin/settings/permalinks", s.requireAdmin(http.HandlerFunc(s.adminPermalinks)))
 	mux.Handle("GET /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.listPosts)))
 	mux.Handle("GET /admin/api/posts/{slug}", s.requireAdmin(http.HandlerFunc(s.getPost)))
 	mux.Handle("POST /admin/api/posts", s.requireAdmin(http.HandlerFunc(s.savePost)))
@@ -198,6 +199,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.uploadHomeImage)))
 	mux.Handle("DELETE /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.clearHomeImage)))
 	mux.Handle("POST /admin/api/settings/site-title", s.requireAdmin(http.HandlerFunc(s.updateSiteTitleSettings)))
+	mux.Handle("POST /admin/api/settings/permalinks", s.requireAdmin(http.HandlerFunc(s.updatePermalinkSettings)))
 	mux.Handle("POST /admin/api/settings/time-zone", s.requireAdmin(http.HandlerFunc(s.updateTimeZoneSettings)))
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/menus", s.requireAdmin(http.HandlerFunc(s.updateMenus)))
@@ -219,9 +221,18 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 			}
 			return site.FormatDisplayTime(t)
 		},
-		"postURL": func(p *site.Post) string { return "/posts/" + p.Slug },
-		"pageURL": func(p *site.Page) string { return "/pages/" + p.Slug },
-		"tagURL":  func(t *site.Tag) string { return "/tags/" + t.Slug },
+		"postURL": func(p *site.Post) string { return site.PostURL(site.Settings{}, p) },
+		"pageURL": func(p *site.Page) string { return site.PageURL(site.Settings{}, p) },
+		"tagURL":  func(t *site.Tag) string { return site.TagURL(site.Settings{}, t) },
+		"tagSlugURL": func(data ViewData, slug string) string {
+			if data.Store == nil {
+				return site.TagSlugURL(site.Settings{}, slug)
+			}
+			if tag := data.Store.TagsBySlug[strings.TrimSpace(slug)]; tag != nil {
+				return site.TagURL(data.Store.Settings, tag)
+			}
+			return site.TagSlugURL(data.Store.Settings, slug)
+		},
 		"mediaFigure": func(item media.Item) string {
 			return mediaFigureMarkdown(item)
 		},
@@ -326,6 +337,9 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
+		if s.renderPublicPermalink(w, r) {
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -339,6 +353,9 @@ func (s *Server) archive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) post(w http.ResponseWriter, r *http.Request) {
+	if s.renderPublicPermalink(w, r) {
+		return
+	}
 	slug := r.PathValue("slug")
 	store := s.currentStore()
 	post := store.PostsBySlug[slug]
@@ -350,6 +367,9 @@ func (s *Server) post(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
+	if s.renderPublicPermalink(w, r) {
+		return
+	}
 	slug := r.PathValue("slug")
 	store := s.currentStore()
 	page := store.PagesBySlug[slug]
@@ -366,6 +386,9 @@ func (s *Server) tags(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
+	if s.renderPublicPermalink(w, r) {
+		return
+	}
 	slug := r.PathValue("slug")
 	store := s.currentStore()
 	tag := store.TagsBySlug[slug]
@@ -374,6 +397,23 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "tag.html", ViewData{Title: tag.Title, Store: store, Tag: tag, Tags: store.Tags})
+}
+
+func (s *Server) renderPublicPermalink(w http.ResponseWriter, r *http.Request) bool {
+	store := s.currentStore()
+	if post := store.PostByPermalink(r.URL.Path); post != nil {
+		s.render(w, "post.html", ViewData{Title: post.Title, Store: store, Post: post, Tags: store.Tags})
+		return true
+	}
+	if page := store.PageByPermalink(r.URL.Path); page != nil {
+		s.render(w, "page.html", ViewData{Title: page.Title, Store: store, Page: page, Tags: store.Tags})
+		return true
+	}
+	if tag := store.TagByPermalink(r.URL.Path); tag != nil {
+		s.render(w, "tag.html", ViewData{Title: tag.Title, Store: store, Tag: tag, Tags: store.Tags})
+		return true
+	}
+	return false
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
@@ -713,6 +753,11 @@ func (s *Server) adminSettings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "admin_settings.html", ViewData{Title: "Settings", TitleKey: "title.admin.settings", Store: store, ActiveAdmin: "settings"})
 }
 
+func (s *Server) adminPermalinks(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.render(w, "admin_permalinks.html", ViewData{Title: "Permalinks", TitleKey: "title.admin.permalinks", Store: store, ActiveAdmin: "permalinks"})
+}
+
 func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
 	type postSummary struct {
 		Title   string   `json:"title"`
@@ -735,7 +780,7 @@ func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
 			Tags:    p.Tags,
 			Summary: p.Summary,
 			Draft:   p.Draft,
-			URL:     "/posts/" + p.Slug,
+			URL:     site.PostURL(store.Settings, p),
 		})
 	}
 	writeJSON(w, posts)
@@ -778,9 +823,14 @@ func (s *Server) savePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	store := s.currentStore()
+	url := site.PostDraftURL(store.Settings, saved)
+	if post := store.AllPostsBySlug[saved.Slug]; post != nil {
+		url = site.PostURL(store.Settings, post)
+	}
 	writeJSON(w, map[string]any{
 		"slug":    saved.Slug,
-		"url":     "/posts/" + saved.Slug,
+		"url":     url,
 		"draft":   saved.Draft,
 		"date":    saved.Date,
 		"updated": saved.Updated,
@@ -823,7 +873,7 @@ func (s *Server) listPages(w http.ResponseWriter, r *http.Request) {
 			Updated: formatInputDateTime(p.Updated),
 			Summary: p.Summary,
 			Draft:   p.Draft,
-			URL:     "/pages/" + p.Slug,
+			URL:     site.PageURL(store.Settings, p),
 		})
 	}
 	writeJSON(w, pages)
@@ -865,9 +915,14 @@ func (s *Server) savePage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	store := s.currentStore()
+	url := site.PageDraftURL(store.Settings, saved)
+	if page := store.AllPagesBySlug[saved.Slug]; page != nil {
+		url = site.PageURL(store.Settings, page)
+	}
 	writeJSON(w, map[string]any{
 		"slug":    saved.Slug,
-		"url":     "/pages/" + saved.Slug,
+		"url":     url,
 		"draft":   saved.Draft,
 		"date":    saved.Date,
 		"updated": saved.Updated,
@@ -1052,6 +1107,30 @@ func (s *Server) updateSiteTitleSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, s.currentStore().Settings.SiteTitle)
+}
+
+func (s *Server) updatePermalinkSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload site.PermalinkSettings
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := site.ValidatePermalinks(payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.Permalinks = payload
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.currentStore().Settings.Permalinks)
 }
 
 func (s *Server) updateTimeZoneSettings(w http.ResponseWriter, r *http.Request) {
@@ -1450,7 +1529,8 @@ func (s *Server) SavePost(_ context.Context, draft *pluginrpc.ContentDraft) (*pl
 	if err != nil {
 		return nil, err
 	}
-	return &pluginrpc.SaveContentResponse{Title: saved.Title, Slug: saved.Slug, URL: "/posts/" + saved.Slug}, nil
+	settings := s.currentStore().Settings
+	return &pluginrpc.SaveContentResponse{Title: saved.Title, Slug: saved.Slug, URL: site.PostDraftURL(settings, saved)}, nil
 }
 
 func (s *Server) SavePage(_ context.Context, draft *pluginrpc.ContentDraft) (*pluginrpc.SaveContentResponse, error) {
@@ -1467,7 +1547,8 @@ func (s *Server) SavePage(_ context.Context, draft *pluginrpc.ContentDraft) (*pl
 	if err != nil {
 		return nil, err
 	}
-	return &pluginrpc.SaveContentResponse{Title: saved.Title, Slug: saved.Slug, URL: "/pages/" + saved.Slug}, nil
+	settings := s.currentStore().Settings
+	return &pluginrpc.SaveContentResponse{Title: saved.Title, Slug: saved.Slug, URL: site.PageDraftURL(settings, saved)}, nil
 }
 
 func (s *Server) ReloadRuntime(context.Context, *pluginrpc.ReloadRuntimeRequest) (*pluginrpc.ReloadRuntimeResponse, error) {
@@ -2259,10 +2340,10 @@ func (s *Server) searchIndex(w http.ResponseWriter, r *http.Request) {
 	var docs []doc
 	store := s.currentStore()
 	for _, p := range store.Posts {
-		docs = append(docs, doc{Title: p.Title, URL: "/posts/" + p.Slug, Summary: p.Summary, Tags: p.Tags})
+		docs = append(docs, doc{Title: p.Title, URL: site.PostURL(store.Settings, p), Summary: p.Summary, Tags: p.Tags})
 	}
 	for _, p := range store.Pages {
-		docs = append(docs, doc{Title: p.Title, URL: "/pages/" + p.Slug, Summary: p.Summary})
+		docs = append(docs, doc{Title: p.Title, URL: site.PageURL(store.Settings, p), Summary: p.Summary})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(docs)
@@ -2426,7 +2507,7 @@ func menuLinksForLocation(data ViewData, location string) []site.MenuLink {
 		{Label: messageFromViewData(data, "nav.search", "Search"), URL: "/search"},
 	}
 	for _, page := range data.Store.Pages {
-		links = append(links, site.MenuLink{Label: page.Title, URL: "/pages/" + page.Slug})
+		links = append(links, site.MenuLink{Label: page.Title, URL: site.PageURL(data.Store.Settings, page)})
 	}
 	links = append(links, site.MenuLink{Label: messageFromViewData(data, "nav.admin", "Admin"), URL: "/admin"})
 	return links

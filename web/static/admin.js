@@ -21,8 +21,8 @@ const contentKind = root && root.dataset.contentKind === "page" ? "page" : "post
 const isPageEditor = contentKind === "page";
 const contentPlural = isPageEditor ? "pages" : "posts";
 const apiBase = `/admin/api/${contentPlural}`;
-const publicBase = `/${contentPlural}`;
 const adminBase = `/admin/${contentPlural}`;
+const permalinkPattern = String((root && root.dataset.permalinkPattern) || (isPageEditor ? "/pages/%pagename%" : "/posts/%postname%"));
 const initialSlug = (root && root.dataset.initialSlug) || "";
 const fields = {
   title: document.querySelector("#postTitle"),
@@ -170,7 +170,35 @@ function visibleSlug() {
 }
 
 function setSlugDisplay(slug) {
-  if (fields.slug) fields.slug.textContent = slug || "";
+  if (fields.slug) fields.slug.textContent = publicURLForSlug(slug || "").replace(/^\//, "");
+}
+
+function datePartsForPermalink() {
+  const date = String((fields.date && fields.date.value) || "");
+  const match = date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return {
+    year: match ? match[1] : "0000",
+    monthnum: match ? match[2] : "00",
+    day: match ? match[3] : "00"
+  };
+}
+
+function publicURLForSlug(slug) {
+  const parts = datePartsForPermalink();
+  const replacements = {
+    "%postname%": slug,
+    "%pagename%": slug,
+    "%slug%": slug,
+    "%year%": parts.year,
+    "%monthnum%": parts.monthnum,
+    "%day%": parts.day
+  };
+  let path = permalinkPattern.replace(/%([A-Za-z0-9_]+)%/g, (token, name) => {
+    const key = `%${String(name || "").toLowerCase()}%`;
+    return Object.prototype.hasOwnProperty.call(replacements, key) ? replacements[key] : token;
+  });
+  if (!path.startsWith("/")) path = `/${path}`;
+  return path;
 }
 
 function updateDeleteButton() {
@@ -623,7 +651,7 @@ function updateCounts() {
 function updateViewLink() {
   const slug = visibleSlug();
   setSlugDisplay(slug);
-  fields.view.href = slug ? `${publicBase}/${slug}` : "/";
+  fields.view.href = slug ? publicURLForSlug(slug) : "/";
 }
 
 function afterEdit() {
@@ -726,6 +754,9 @@ fields.title.addEventListener("input", () => {
   field.addEventListener("input", () => setDirty(true));
   field.addEventListener("change", () => setDirty(true));
 });
+
+fields.date.addEventListener("input", updateViewLink);
+fields.date.addEventListener("change", updateViewLink);
 
 fields.updated.addEventListener("input", () => {
   updatedTouched = true;

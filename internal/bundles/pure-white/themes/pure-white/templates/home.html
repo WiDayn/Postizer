@@ -11,7 +11,7 @@
         <div class="post-meta">
           <time>{{date .Date}}</time>
           <span>{{.ReadingTime}} {{msg $ "common.minute_suffix"}}</span>
-          {{range .Tags}}<a href="/tags/{{.}}">#{{.}}</a>{{end}}
+          {{range .Tags}}<a href="{{tagSlugURL $ .}}">#{{.}}</a>{{end}}
         </div>
       </header>
       {{if not $hideHomeContent}}

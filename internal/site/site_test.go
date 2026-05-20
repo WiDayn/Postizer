@@ -902,6 +902,78 @@ func TestSaveSettingsNormalizesSiteTitle(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesCustomPermalinkURLs(t *testing.T) {
+	root := t.TempDir()
+	post, err := SavePost(root, PostDraft{
+		Title: "Sample Post",
+		Date:  "2026-05-20T10:30",
+		Tags:  []string{"Go News"},
+		Body:  "Body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := SavePage(root, PageDraft{
+		Title: "About",
+		Body:  "About.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := defaultSettings()
+	settings.Permalinks = PermalinkSettings{
+		Post: "/notes/%year%/%monthnum%/%postname%/",
+		Page: "/docs/%pagename%",
+		Tag:  "/topics/%tag%",
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loadedPost := store.PostsBySlug[post.Slug]
+	if got, want := loadedPost.URL, "/notes/2026/05/sample-post/"; got != want {
+		t.Fatalf("post url = %q, want %q", got, want)
+	}
+	if store.PostByPermalink("/notes/2026/05/sample-post") != loadedPost {
+		t.Fatal("post permalink should match with or without trailing slash")
+	}
+	loadedPage := store.PagesBySlug[page.Slug]
+	if got, want := loadedPage.URL, "/docs/about"; got != want {
+		t.Fatalf("page url = %q, want %q", got, want)
+	}
+	if store.PageByPermalink("/docs/about/") != loadedPage {
+		t.Fatal("page permalink should match with or without trailing slash")
+	}
+	tag := store.TagsBySlug["go-news"]
+	if tag == nil {
+		t.Fatal("tag should exist")
+	}
+	if got, want := tag.URL, "/topics/go-news"; got != want {
+		t.Fatalf("tag url = %q, want %q", got, want)
+	}
+	if store.TagByPermalink("/topics/go-news") != tag {
+		t.Fatal("tag permalink should resolve")
+	}
+}
+
+func TestValidatePermalinksRejectsUnknownTokens(t *testing.T) {
+	err := ValidatePermalinks(PermalinkSettings{
+		Post: "/notes/%author%/%postname%",
+		Page: DefaultPagePermalink,
+		Tag:  DefaultTagPermalink,
+	})
+	if err == nil {
+		t.Fatal("expected invalid permalink token error")
+	}
+	if !strings.Contains(err.Error(), "%author%") {
+		t.Fatalf("error = %q, want unknown token", err.Error())
+	}
+}
+
 func TestThemeMenuLinksResolveSupportedItems(t *testing.T) {
 	root := t.TempDir()
 	page, err := SavePage(root, PageDraft{

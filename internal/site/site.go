@@ -31,6 +31,9 @@ import (
 const (
 	DefaultTimeZone      = "Asia/Hong_Kong"
 	DefaultSiteTitle     = "Postizer"
+	DefaultPostPermalink = "/posts/%postname%"
+	DefaultPagePermalink = "/pages/%pagename%"
+	DefaultTagPermalink  = "/tags/%tag%"
 	inputMinuteLayout    = "2006-01-02T15:04"
 	displayMinuteLayout  = "2006-01-02 15:04"
 	legacyDateOnlyLayout = "2006-01-02"
@@ -51,6 +54,7 @@ var (
 	summaryLineBreakPattern = regexp.MustCompile(`(?m)\s{2,}$`)
 	themeSettingKeyPattern  = regexp.MustCompile(`[^a-z0-9_]+`)
 	themeSettingKeyDivider  = regexp.MustCompile(`_+`)
+	permalinkTokenPattern   = regexp.MustCompile(`%([A-Za-z0-9_]+)%`)
 )
 
 const (
@@ -78,6 +82,7 @@ type Store struct {
 
 type Settings struct {
 	SiteTitle       SiteTitle            `json:"site_title"`
+	Permalinks      PermalinkSettings    `json:"permalinks"`
 	HomeImage       HomeImage            `json:"home_image"`
 	MediaProcessing MediaProcessing      `json:"media_processing"`
 	ThemeSettings   ThemeSettings        `json:"theme_settings"`
@@ -94,6 +99,12 @@ type Settings struct {
 type SiteTitle struct {
 	Main     string `json:"main"`
 	Subtitle string `json:"subtitle"`
+}
+
+type PermalinkSettings struct {
+	Post string `json:"post"`
+	Page string `json:"page"`
+	Tag  string `json:"tag"`
 }
 
 type HomeImage struct {
@@ -270,6 +281,7 @@ type MenuLink struct {
 type Post struct {
 	Title       string
 	Slug        string
+	URL         string
 	Date        time.Time
 	Updated     time.Time
 	Tags        []string
@@ -285,6 +297,7 @@ type Post struct {
 type Page struct {
 	Title    string
 	Slug     string
+	URL      string
 	Date     time.Time
 	Updated  time.Time
 	Summary  string
@@ -299,6 +312,7 @@ type Tag struct {
 	Name    string
 	Title   string
 	Slug    string
+	URL     string
 	Summary string
 	Posts   []*Post
 }
@@ -384,7 +398,60 @@ func Load(root string) (*Store, error) {
 		return len(store.Tags[i].Posts) > len(store.Tags[j].Posts)
 	})
 
+	store.applyPermalinks()
+
 	return store, nil
+}
+
+func (s *Store) applyPermalinks() {
+	if s == nil {
+		return
+	}
+	for _, post := range s.AllPosts {
+		post.URL = PostURL(s.Settings, post)
+	}
+	for _, page := range s.AllPages {
+		page.URL = PageURL(s.Settings, page)
+	}
+	for _, tag := range s.TagsBySlug {
+		tag.URL = TagURL(s.Settings, tag)
+	}
+}
+
+func (s *Store) PostByPermalink(requestPath string) *Post {
+	if s == nil {
+		return nil
+	}
+	for _, post := range s.Posts {
+		if samePermalinkPath(post.URL, requestPath) {
+			return post
+		}
+	}
+	return nil
+}
+
+func (s *Store) PageByPermalink(requestPath string) *Page {
+	if s == nil {
+		return nil
+	}
+	for _, page := range s.Pages {
+		if samePermalinkPath(page.URL, requestPath) {
+			return page
+		}
+	}
+	return nil
+}
+
+func (s *Store) TagByPermalink(requestPath string) *Tag {
+	if s == nil {
+		return nil
+	}
+	for _, tag := range s.Tags {
+		if samePermalinkPath(tag.URL, requestPath) {
+			return tag
+		}
+	}
+	return nil
 }
 
 func (s *Store) MenuLinks(location string) []MenuLink {
@@ -512,7 +579,7 @@ func (s *Store) resolveMenuItem(item MenuItem) (MenuLink, bool) {
 		if label == "" {
 			label = page.Title
 		}
-		return MenuLink{Label: label, URL: "/pages/" + page.Slug}, true
+		return MenuLink{Label: label, URL: PageURL(s.Settings, page)}, true
 	case "post":
 		post := s.PostsBySlug[strings.TrimSpace(item.Target)]
 		if post == nil {
@@ -521,7 +588,7 @@ func (s *Store) resolveMenuItem(item MenuItem) (MenuLink, bool) {
 		if label == "" {
 			label = post.Title
 		}
-		return MenuLink{Label: label, URL: "/posts/" + post.Slug}, true
+		return MenuLink{Label: label, URL: PostURL(s.Settings, post)}, true
 	case "tag":
 		tag := s.TagsBySlug[strings.TrimSpace(item.Target)]
 		if tag == nil {
@@ -530,7 +597,7 @@ func (s *Store) resolveMenuItem(item MenuItem) (MenuLink, bool) {
 		if label == "" {
 			label = tag.Title
 		}
-		return MenuLink{Label: label, URL: "/tags/" + tag.Slug}, true
+		return MenuLink{Label: label, URL: TagURL(s.Settings, tag)}, true
 	case "custom":
 		url := strings.TrimSpace(item.URL)
 		if !ValidMenuURL(url) {
@@ -588,6 +655,7 @@ func SaveSettings(root string, settings Settings) error {
 func defaultSettings() Settings {
 	return Settings{
 		SiteTitle:       defaultSiteTitle(),
+		Permalinks:      defaultPermalinks(),
 		MediaProcessing: defaultMediaProcessing(),
 		TimeZone:        DefaultTimeZone,
 		ThemePack: appearance.Selection{
@@ -595,6 +663,14 @@ func defaultSettings() Settings {
 			PackID:  appearance.DefaultThemePackID,
 		},
 		ThemeLocale: "en",
+	}
+}
+
+func defaultPermalinks() PermalinkSettings {
+	return PermalinkSettings{
+		Post: DefaultPostPermalink,
+		Page: DefaultPagePermalink,
+		Tag:  DefaultTagPermalink,
 	}
 }
 
@@ -640,6 +716,7 @@ func normalizeSettings(settings *Settings) {
 	settings.ThemeSettings = normalizeThemeSettings(settings.ThemeSettings)
 	settings.TimeZone = NormalizeTimeZone(settings.TimeZone)
 	settings.SiteTitle = normalizeSiteTitle(settings.SiteTitle)
+	settings.Permalinks = normalizePermalinks(settings.Permalinks)
 
 	// 旧版文字包迁移：
 	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。
@@ -672,6 +749,107 @@ func normalizeSiteTitle(title SiteTitle) SiteTitle {
 		title.Main = defaults.Main
 	}
 	return title
+}
+
+func normalizePermalinks(settings PermalinkSettings) PermalinkSettings {
+	defaults := defaultPermalinks()
+	settings.Post = normalizePermalinkPattern(settings.Post, defaults.Post, postPermalinkAllowedTokens(), []string{"postname", "slug"})
+	settings.Page = normalizePermalinkPattern(settings.Page, defaults.Page, pagePermalinkAllowedTokens(), []string{"pagename", "slug"})
+	settings.Tag = normalizePermalinkPattern(settings.Tag, defaults.Tag, tagPermalinkAllowedTokens(), []string{"tag", "slug"})
+	return settings
+}
+
+func normalizePermalinkPattern(pattern, fallback string, allowed map[string]bool, required []string) string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return fallback
+	}
+	if err := validatePermalinkPattern(pattern, allowed, required); err != nil {
+		return fallback
+	}
+	return pattern
+}
+
+func ValidatePermalinks(settings PermalinkSettings) error {
+	if err := validatePermalinkSetting("post", settings.Post, postPermalinkAllowedTokens(), []string{"postname", "slug"}); err != nil {
+		return err
+	}
+	if err := validatePermalinkSetting("page", settings.Page, pagePermalinkAllowedTokens(), []string{"pagename", "slug"}); err != nil {
+		return err
+	}
+	if err := validatePermalinkSetting("tag", settings.Tag, tagPermalinkAllowedTokens(), []string{"tag", "slug"}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePermalinkSetting(name, pattern string, allowed map[string]bool, required []string) error {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil
+	}
+	if err := validatePermalinkPattern(pattern, allowed, required); err != nil {
+		return fmt.Errorf("%s permalink: %w", name, err)
+	}
+	return nil
+}
+
+func validatePermalinkPattern(pattern string, allowed map[string]bool, required []string) error {
+	if !strings.HasPrefix(pattern, "/") {
+		return fmt.Errorf("must start with /")
+	}
+	if strings.ContainsAny(pattern, "?#") {
+		return fmt.Errorf("must not contain query strings or fragments")
+	}
+	if strings.Contains(pattern, "//") {
+		return fmt.Errorf("must not contain empty path segments")
+	}
+	for _, segment := range strings.Split(pattern, "/") {
+		if segment == "." || segment == ".." {
+			return fmt.Errorf("must not contain . or .. segments")
+		}
+	}
+	if !containsAnyPermalinkToken(pattern, required) {
+		return fmt.Errorf("must include one of %s", strings.Join(formatPermalinkTokenNames(required), ", "))
+	}
+	if unknown := unknownPermalinkTokens(pattern, allowed); len(unknown) > 0 {
+		return fmt.Errorf("unknown token %s", strings.Join(formatPermalinkTokenNames(unknown), ", "))
+	}
+	return nil
+}
+
+func containsAnyPermalinkToken(pattern string, names []string) bool {
+	for _, name := range names {
+		if strings.Contains(strings.ToLower(pattern), "%"+strings.ToLower(name)+"%") {
+			return true
+		}
+	}
+	return false
+}
+
+func unknownPermalinkTokens(pattern string, allowed map[string]bool) []string {
+	var unknown []string
+	seen := map[string]bool{}
+	for _, match := range permalinkTokenPattern.FindAllStringSubmatch(pattern, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		name := strings.ToLower(match[1])
+		if allowed[name] || seen[name] {
+			continue
+		}
+		unknown = append(unknown, name)
+		seen[name] = true
+	}
+	return unknown
+}
+
+func formatPermalinkTokenNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		out = append(out, "%"+name+"%")
+	}
+	return out
 }
 
 func normalizeMediaProcessing(settings MediaProcessing) MediaProcessing {
@@ -714,6 +892,142 @@ func TimeLocation(settings Settings) *time.Location {
 		return time.FixedZone(DefaultTimeZone, 8*60*60)
 	}
 	return location
+}
+
+func PostURL(settings Settings, post *Post) string {
+	if post == nil {
+		return ""
+	}
+	if settings.Permalinks == (PermalinkSettings{}) && post.URL != "" {
+		return post.URL
+	}
+	permalinks := normalizePermalinks(settings.Permalinks)
+	return formatPermalink(permalinks.Post, postPermalinkValues(post.Slug, post.Date))
+}
+
+func PostDraftURL(settings Settings, draft PostDraft) string {
+	date, _ := parseContentTime(draft.Date, TimeLocation(settings))
+	permalinks := normalizePermalinks(settings.Permalinks)
+	return formatPermalink(permalinks.Post, postPermalinkValues(draft.Slug, date))
+}
+
+func PageURL(settings Settings, page *Page) string {
+	if page == nil {
+		return ""
+	}
+	if settings.Permalinks == (PermalinkSettings{}) && page.URL != "" {
+		return page.URL
+	}
+	permalinks := normalizePermalinks(settings.Permalinks)
+	return formatPermalink(permalinks.Page, map[string]string{
+		"pagename": page.Slug,
+		"slug":     page.Slug,
+	})
+}
+
+func PageDraftURL(settings Settings, draft PageDraft) string {
+	permalinks := normalizePermalinks(settings.Permalinks)
+	return formatPermalink(permalinks.Page, map[string]string{
+		"pagename": draft.Slug,
+		"slug":     draft.Slug,
+	})
+}
+
+func TagURL(settings Settings, tag *Tag) string {
+	if tag == nil {
+		return ""
+	}
+	if settings.Permalinks == (PermalinkSettings{}) && tag.URL != "" {
+		return tag.URL
+	}
+	permalinks := normalizePermalinks(settings.Permalinks)
+	return formatPermalink(permalinks.Tag, map[string]string{
+		"tag":  tag.Slug,
+		"slug": tag.Slug,
+	})
+}
+
+func TagSlugURL(settings Settings, slug string) string {
+	permalinks := normalizePermalinks(settings.Permalinks)
+	return formatPermalink(permalinks.Tag, map[string]string{
+		"tag":  slug,
+		"slug": slug,
+	})
+}
+
+func postPermalinkValues(slug string, date time.Time) map[string]string {
+	values := map[string]string{
+		"postname": slug,
+		"slug":     slug,
+		"year":     "0000",
+		"monthnum": "00",
+		"day":      "00",
+	}
+	if !date.IsZero() {
+		values["year"] = date.Format("2006")
+		values["monthnum"] = date.Format("01")
+		values["day"] = date.Format("02")
+	}
+	return values
+}
+
+func formatPermalink(pattern string, values map[string]string) string {
+	path := permalinkTokenPattern.ReplaceAllStringFunc(pattern, func(token string) string {
+		name := strings.ToLower(strings.Trim(token, "%"))
+		if value, ok := values[name]; ok {
+			return value
+		}
+		return token
+	})
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return path
+}
+
+func samePermalinkPath(a, b string) bool {
+	return comparablePermalinkPath(a) == comparablePermalinkPath(b)
+}
+
+func comparablePermalinkPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	if len(value) > 1 {
+		value = strings.TrimRight(value, "/")
+	}
+	if value == "" {
+		return "/"
+	}
+	return value
+}
+
+func postPermalinkAllowedTokens() map[string]bool {
+	return map[string]bool{
+		"postname": true,
+		"slug":     true,
+		"year":     true,
+		"monthnum": true,
+		"day":      true,
+	}
+}
+
+func pagePermalinkAllowedTokens() map[string]bool {
+	return map[string]bool{
+		"pagename": true,
+		"slug":     true,
+	}
+}
+
+func tagPermalinkAllowedTokens() map[string]bool {
+	return map[string]bool{
+		"tag":  true,
+		"slug": true,
+	}
 }
 
 // normalizePackSelection 把资源包选择归一成当前设置页使用的新语义：

@@ -503,6 +503,17 @@
     color: var(--inverse-ink);
   }
 
+  .admin-nav-sub {
+    display: grid;
+    margin-left: .75rem;
+    border-left: 1px solid rgba(0, 0, 0, .28);
+  }
+
+  .admin-nav .admin-nav-sub a {
+    padding: .48rem .75rem;
+    font-size: .72rem;
+  }
+
   .admin-sidebar-footer {
     border-top: 1px solid var(--rule);
   }
@@ -798,6 +809,79 @@
     flex-wrap: wrap;
     gap: .5rem;
     align-items: center;
+  }
+
+  .permalink-settings-list {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .permalink-preset-list {
+    display: grid;
+    gap: .65rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .permalink-preset-list legend {
+    margin-bottom: .15rem;
+    font-family: var(--font-ui);
+    font-size: .78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .permalink-preset {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: .55rem;
+    align-items: start;
+    font-family: var(--font-ui);
+  }
+
+  .permalink-preset input {
+    margin-top: .15rem;
+  }
+
+  .permalink-preset span {
+    display: grid;
+    gap: .22rem;
+    min-width: 0;
+  }
+
+  .permalink-preset code {
+    width: fit-content;
+    max-width: 100%;
+    padding: .18rem .35rem;
+    background: var(--surface-soft);
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    font-weight: 400;
+    overflow-wrap: anywhere;
+  }
+
+  .permalink-preview {
+    display: inline-block;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: .4rem;
+    padding: .22rem .38rem;
+    background: var(--surface-soft);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    overflow-wrap: anywhere;
+  }
+
+  .permalink-token-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+  }
+
+  .permalink-token {
+    font-family: var(--font-mono);
   }
 
   .theme-settings-panel {

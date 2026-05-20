@@ -557,7 +557,6 @@
 
   .site-shell .article-body .article-figure img {
     border: 2px solid var(--rule-heavy);
-    filter: grayscale(1);
   }
 
   .site-shell .article-body .article-figure figcaption {
