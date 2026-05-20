@@ -734,6 +734,103 @@
     font-style: italic;
   }
 
+  .admin-error {
+    margin: 0;
+    padding: .75rem;
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: .82rem;
+  }
+
+  .admin-comment-list {
+    display: grid;
+    gap: .75rem;
+    padding: .75rem;
+  }
+
+  .admin-comment-card {
+    display: grid;
+    gap: .55rem;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+
+  .admin-comment-card__head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: .55rem .65rem;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--font-ui);
+    font-size: .8rem;
+  }
+
+  .admin-comment-card__head div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-comment-card__head time,
+  .admin-comment-card__post {
+    color: var(--muted);
+  }
+
+  .admin-comment-card__post,
+  .admin-comment-card__body,
+  .admin-comment-card__reply,
+  .admin-comment-reply-form {
+    margin: 0;
+    padding: 0 .65rem .65rem;
+  }
+
+  .admin-comment-card__post {
+    font-family: var(--font-ui);
+    font-size: .78rem;
+  }
+
+  .admin-comment-card__body,
+  .admin-comment-card__reply p {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-comment-card__reply {
+    display: grid;
+    gap: .25rem;
+    margin-inline: .65rem;
+    padding: .55rem .65rem;
+    border: 1px solid rgba(0, 0, 0, .35);
+    background: var(--surface-muted);
+    font-family: var(--font-ui);
+    font-size: .8rem;
+  }
+
+  .admin-comment-card__reply p {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: .94rem;
+  }
+
+  .admin-comment-card__reply time {
+    color: var(--muted);
+    font-size: .72rem;
+  }
+
+  .admin-comment-reply-form {
+    display: grid;
+    gap: .55rem;
+  }
+
+  .admin-comment-reply-form .ui-field {
+    padding: 0;
+    border-bottom: 0;
+  }
+
   .admin-pagination {
     display: flex;
     flex-wrap: wrap;
@@ -2718,6 +2815,116 @@
 
   .post-list-title {
     font-weight: 700;
+  }
+
+  .comments-section {
+    display: grid;
+    gap: .75rem;
+    margin-top: 2rem;
+    padding-top: .75rem;
+    border-top: 3px double var(--rule);
+  }
+
+  .comments-section__head {
+    display: flex;
+    justify-content: space-between;
+    gap: .75rem;
+    align-items: baseline;
+    border-bottom: 2px solid var(--rule);
+    font-family: var(--font-ui);
+    text-transform: uppercase;
+  }
+
+  .comments-section__head h2 {
+    margin: 0;
+    font-size: .86rem;
+  }
+
+  .comments-section__head span,
+  .comments-empty,
+  .comments-disabled {
+    color: var(--muted);
+    font-family: var(--font-ui);
+    font-size: .78rem;
+  }
+
+  .comment-list {
+    display: grid;
+    gap: .65rem;
+  }
+
+  .comment-card {
+    display: grid;
+    gap: .45rem;
+    padding-bottom: .65rem;
+    border-bottom: 1px solid rgba(0, 0, 0, .35);
+  }
+
+  .comment-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: baseline;
+    font-family: var(--font-ui);
+    font-size: .8rem;
+  }
+
+  .comment-card__meta time {
+    color: var(--muted);
+  }
+
+  .comment-card__body,
+  .comment-card__reply p {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .comment-card__reply {
+    display: grid;
+    gap: .25rem;
+    margin-top: .1rem;
+    padding: .55rem .65rem;
+    border-left: 3px double var(--rule);
+    background: var(--surface-muted);
+  }
+
+  .comment-card__reply strong {
+    font-family: var(--font-ui);
+    font-size: .78rem;
+  }
+
+  .comment-form {
+    display: grid;
+    gap: .65rem;
+    padding: .75rem;
+    border: 1px solid var(--rule);
+    background: var(--surface-soft);
+  }
+
+  .comment-form h3 {
+    margin: 0;
+    font-family: var(--font-ui);
+    font-size: .86rem;
+    text-transform: uppercase;
+  }
+
+  .comment-form .ui-field {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .comment-form__actions {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .comment-honeypot {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
   }
 
   .article-body {

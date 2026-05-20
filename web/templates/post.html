@@ -15,5 +15,59 @@
   </header>
   <div class="article-body js-math">{{.Post.HTML}}</div>
 </article>
+{{if or .Store.Settings.Comments.Enabled .Comments}}
+<section id="comments" class="comments-section">
+  <div class="comments-section__head">
+    <h2>{{msg . "comments.heading" "Comments"}}</h2>
+    <span>{{len .Comments}}</span>
+  </div>
+  <div class="comment-list">
+    {{range .Comments}}
+    <article class="comment-card">
+      <header class="comment-card__meta">
+        <strong>{{.Nickname}}</strong>
+        <time>{{date .Created}}</time>
+      </header>
+      <p class="comment-card__body">{{.Body}}</p>
+      {{if .Reply.Body}}
+      <div class="comment-card__reply">
+        <strong>{{msg $ "comments.reply_from_admin" "Reply"}}</strong>
+        <p>{{.Reply.Body}}</p>
+      </div>
+      {{end}}
+    </article>
+    {{else}}
+    <p class="comments-empty">{{msg . "comments.empty" "No comments yet."}}</p>
+    {{end}}
+  </div>
+  {{if .Store.Settings.Comments.Enabled}}
+  <form class="comment-form" method="post" action="/comments">
+    <h3>{{msg . "comments.form.title" "Leave a comment"}}</h3>
+    <input type="hidden" name="post_slug" value="{{.Post.Slug}}">
+    <label class="comment-honeypot" aria-hidden="true">
+      <span>Website</span>
+      <input name="website" tabindex="-1" autocomplete="off">
+    </label>
+    <label class="ui-field">
+      <span>{{msg . "comments.form.nickname" "Nickname"}}</span>
+      <input class="ui-input" name="nickname" type="text" maxlength="80" required>
+    </label>
+    <label class="ui-field">
+      <span>{{msg . "comments.form.email" "Email"}}</span>
+      <input class="ui-input" name="email" type="email" maxlength="254" required>
+    </label>
+    <label class="ui-field">
+      <span>{{msg . "comments.form.comment" "Comment"}}</span>
+      <textarea class="ui-textarea" name="comment" rows="5" maxlength="4000" required></textarea>
+    </label>
+    <div class="comment-form__actions">
+      <button class="ui-button ui-button--primary" type="submit">{{msg . "comments.form.submit" "Submit comment"}}</button>
+    </div>
+  </form>
+  {{else}}
+  <p class="comments-disabled">{{msg . "comments.disabled" "Comments are closed."}}</p>
+  {{end}}
+</section>
+{{end}}
 {{template "chromeEnd" .}}
 {{end}}

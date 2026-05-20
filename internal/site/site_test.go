@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"postizer/internal/appearance"
 )
@@ -875,6 +876,16 @@ func TestLoadSettingsDefaultsAutoUpdateDisabled(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsDefaultsCommentsDisabled(t *testing.T) {
+	settings, err := LoadSettings(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.Comments.Enabled {
+		t.Fatal("comments should be disabled by default")
+	}
+}
+
 func TestSaveSettingsNormalizesSiteTitle(t *testing.T) {
 	root := t.TempDir()
 	settings := defaultSettings()
@@ -909,6 +920,42 @@ func TestSaveSettingsNormalizesSiteTitle(t *testing.T) {
 	}
 	if got, want := loaded.SiteTitle.Subtitle, "Still here"; got != want {
 		t.Fatalf("site title subtitle = %q, want %q", got, want)
+	}
+}
+
+func TestAddCommentAndReply(t *testing.T) {
+	root := t.TempDir()
+	created := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	comment, err := AddComment(root, CommentInput{
+		PostSlug: "hello-world",
+		Nickname: "Reader",
+		Email:    "reader@example.com",
+		Body:     "First line\n\nSecond line",
+	}, created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comment.ID == "" {
+		t.Fatal("comment id should be generated")
+	}
+
+	comments, err := CommentsForPost(root, "hello-world")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("comments = %d, want 1", len(comments))
+	}
+	if got, want := comments[0].Nickname, "Reader"; got != want {
+		t.Fatalf("nickname = %q, want %q", got, want)
+	}
+
+	replied, err := ReplyToComment(root, comment.ID, "Thanks for reading.", created.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := replied.Reply.Body, "Thanks for reading."; got != want {
+		t.Fatalf("reply = %q, want %q", got, want)
 	}
 }
 

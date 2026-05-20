@@ -33,6 +33,9 @@ const permalinkPostPresetInputs = Array.from(document.querySelectorAll('input[na
 const autoUpdateSettingsForm = document.querySelector("#autoUpdateSettingsForm");
 const autoUpdateStatus = document.querySelector("#autoUpdateStatus");
 const autoUpdateEnabled = document.querySelector("#autoUpdateEnabled");
+const commentSettingsForm = document.querySelector("#commentSettingsForm");
+const commentSettingsStatus = document.querySelector("#commentSettingsStatus");
+const commentsEnabled = document.querySelector("#commentsEnabled");
 const timeZoneSettingsForm = document.querySelector("#timeZoneSettingsForm");
 const timeZoneStatus = document.querySelector("#timeZoneStatus");
 const siteTimeZone = document.querySelector("#siteTimeZone");
@@ -85,6 +88,10 @@ function setPermalinkStatus(message) {
 
 function setAutoUpdateStatus(message) {
   if (autoUpdateStatus) autoUpdateStatus.textContent = message;
+}
+
+function setCommentSettingsStatus(message) {
+  if (commentSettingsStatus) commentSettingsStatus.textContent = message;
 }
 
 function setTimeZoneStatus(message) {
@@ -903,6 +910,27 @@ if (autoUpdateSettingsForm && autoUpdateEnabled) {
     const result = await response.json();
     autoUpdateEnabled.checked = Boolean(result.enabled);
     setAutoUpdateStatus(tr("settings.status.saved", "Saved"));
+  });
+}
+
+if (commentSettingsForm && commentsEnabled) {
+  commentSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setCommentSettingsStatus(tr("settings.status.saving", "Saving"));
+    const response = await fetch(apiURL("/admin/api/settings/comments"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: Boolean(commentsEnabled.checked)
+      })
+    });
+    if (!response.ok) {
+      setCommentSettingsStatus((await response.text()).trim());
+      return;
+    }
+    const result = await response.json();
+    commentsEnabled.checked = Boolean(result.enabled);
+    setCommentSettingsStatus(tr("settings.status.saved", "Saved"));
   });
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -516,6 +517,94 @@ func TestUpdateAutoUpdateSettingsSavesToggle(t *testing.T) {
 	}
 	if !settings.AutoUpdate.Enabled {
 		t.Fatal("auto update should be enabled")
+	}
+}
+
+func TestUpdateCommentSettingsSavesToggle(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/settings/comments", bytes.NewBufferString(`{"enabled": true}`))
+	response := httptest.NewRecorder()
+
+	s.updateCommentSettings(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateCommentSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.Comments.Enabled {
+		t.Fatal("comments should be enabled")
+	}
+}
+
+func TestSubmitCommentWritesComment(t *testing.T) {
+	contentRoot := t.TempDir()
+	if _, err := site.SavePost(contentRoot, site.PostDraft{
+		Title: "Hello Comments",
+		Date:  "2026-05-20T10:30",
+		Body:  "Body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Comments.Enabled = true
+	if err := site.SaveSettings(contentRoot, settings); err != nil {
+		t.Fatal(err)
+	}
+	store, err := site.Load(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{store: store, contentRoot: contentRoot}
+	form := url.Values{
+		"post_slug": {"hello-comments"},
+		"nickname":  {"Reader"},
+		"email":     {"reader@example.com"},
+		"comment":   {"Nice post."},
+	}
+	request := httptest.NewRequest("POST", "/comments", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+
+	s.submitComment(response, request)
+
+	if response.Code != 303 {
+		t.Fatalf("submitComment status = %d, body = %s", response.Code, response.Body.String())
+	}
+	comments, err := site.CommentsForPost(contentRoot, "hello-comments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("comments = %d, want 1", len(comments))
+	}
+	if got, want := comments[0].Body, "Nice post."; got != want {
+		t.Fatalf("comment body = %q, want %q", got, want)
 	}
 }
 

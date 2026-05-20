@@ -84,6 +84,7 @@ type Settings struct {
 	SiteTitle       SiteTitle            `json:"site_title"`
 	Permalinks      PermalinkSettings    `json:"permalinks"`
 	AutoUpdate      AutoUpdateSettings   `json:"auto_update"`
+	Comments        CommentSettings      `json:"comments"`
 	HomeImage       HomeImage            `json:"home_image"`
 	MediaProcessing MediaProcessing      `json:"media_processing"`
 	ThemeSettings   ThemeSettings        `json:"theme_settings"`
@@ -662,6 +663,7 @@ func defaultSettings() Settings {
 		SiteTitle:       defaultSiteTitle(),
 		Permalinks:      defaultPermalinks(),
 		AutoUpdate:      defaultAutoUpdate(),
+		Comments:        defaultCommentSettings(),
 		MediaProcessing: defaultMediaProcessing(),
 		TimeZone:        DefaultTimeZone,
 		ThemePack: appearance.Selection{
@@ -730,6 +732,7 @@ func normalizeSettings(settings *Settings) {
 	settings.SiteTitle = normalizeSiteTitle(settings.SiteTitle)
 	settings.Permalinks = normalizePermalinks(settings.Permalinks)
 	settings.AutoUpdate = normalizeAutoUpdate(settings.AutoUpdate)
+	settings.Comments = normalizeCommentSettings(settings.Comments)
 
 	// 旧版文字包迁移：
 	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。

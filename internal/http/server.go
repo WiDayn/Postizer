@@ -45,6 +45,7 @@ type Server struct {
 	pluginJobs         map[string]*importJob
 	auth               authConfig
 	mu                 sync.RWMutex
+	commentMu          sync.RWMutex
 	pluginUploadMu     sync.Mutex
 	pluginJobMu        sync.RWMutex
 }
@@ -61,28 +62,37 @@ type importJob struct {
 }
 
 type ViewData struct {
-	Title        string
-	TitleKey     string
-	Store        *site.Store
-	Appearance   *appearance.Catalog
-	Posts        []*site.Post
-	Pages        []*site.Page
-	Tags         []*site.Tag
-	Post         *site.Post
-	Page         *site.Page
-	Tag          *site.Tag
-	Media        []media.Item
-	Plugin       *appearance.Pack
-	PluginUI     *appearance.PluginUI
-	MediaFilters []MediaTypeFilter
-	MediaFilter  string
-	Home         bool
-	ActiveAdmin  string
-	Error        string
-	Remember     bool
-	EditorKind   string
-	EditorSlug   string
-	Pagination   Pagination
+	Title         string
+	TitleKey      string
+	Store         *site.Store
+	Appearance    *appearance.Catalog
+	Posts         []*site.Post
+	Pages         []*site.Page
+	Tags          []*site.Tag
+	Comments      []site.Comment
+	AdminComments []AdminComment
+	Post          *site.Post
+	Page          *site.Page
+	Tag           *site.Tag
+	Media         []media.Item
+	Plugin        *appearance.Pack
+	PluginUI      *appearance.PluginUI
+	MediaFilters  []MediaTypeFilter
+	MediaFilter   string
+	Home          bool
+	ActiveAdmin   string
+	Error         string
+	Remember      bool
+	EditorKind    string
+	EditorSlug    string
+	Pagination    Pagination
+}
+
+type AdminComment struct {
+	Comment     site.Comment
+	PostTitle   string
+	PostURL     string
+	PostMissing bool
 }
 
 type Pagination struct {
@@ -154,6 +164,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.HandleFunc("GET /", s.home)
 	mux.HandleFunc("GET /archive", s.archive)
 	mux.HandleFunc("GET /posts/{slug}", s.post)
+	mux.HandleFunc("POST /comments", s.submitComment)
 	mux.HandleFunc("GET /pages/{slug}", s.page)
 	mux.HandleFunc("GET /tags", s.tags)
 	mux.HandleFunc("GET /tags/{slug}", s.tag)
@@ -174,6 +185,8 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/pages/new", s.requireAdmin(http.HandlerFunc(s.adminNewPage)))
 	mux.Handle("GET /admin/pages/{slug}/edit", s.requireAdmin(http.HandlerFunc(s.adminEditPage)))
 	mux.Handle("POST /admin/pages/{slug}/delete", s.requireAdmin(http.HandlerFunc(s.deletePageAndRedirect)))
+	mux.Handle("GET /admin/comments", s.requireAdmin(http.HandlerFunc(s.adminComments)))
+	mux.Handle("POST /admin/comments/{id}/reply", s.requireAdmin(http.HandlerFunc(s.replyToComment)))
 	mux.Handle("GET /admin/media", s.requireAdmin(http.HandlerFunc(s.adminMedia)))
 	mux.Handle("GET /admin/appearance", s.requireAdmin(http.HandlerFunc(s.adminAppearance)))
 	mux.Handle("GET /admin/plugins", s.requireAdmin(http.HandlerFunc(s.adminPlugins)))
@@ -202,6 +215,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/settings/site-title", s.requireAdmin(http.HandlerFunc(s.updateSiteTitleSettings)))
 	mux.Handle("POST /admin/api/settings/permalinks", s.requireAdmin(http.HandlerFunc(s.updatePermalinkSettings)))
 	mux.Handle("POST /admin/api/settings/auto-update", s.requireAdmin(http.HandlerFunc(s.updateAutoUpdateSettings)))
+	mux.Handle("POST /admin/api/settings/comments", s.requireAdmin(http.HandlerFunc(s.updateCommentSettings)))
 	mux.Handle("POST /admin/api/settings/time-zone", s.requireAdmin(http.HandlerFunc(s.updateTimeZoneSettings)))
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/menus", s.requireAdmin(http.HandlerFunc(s.updateMenus)))
@@ -365,7 +379,21 @@ func (s *Server) post(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, "post.html", ViewData{Title: post.Title, Store: store, Post: post, Tags: store.Tags})
+	s.renderPost(w, post, store)
+}
+
+func (s *Server) renderPost(w http.ResponseWriter, post *site.Post, store *site.Store) {
+	comments, err := s.commentsForPost(post.Slug)
+	if err != nil {
+		log.Printf("load comments for %s: %v", post.Slug, err)
+	}
+	s.render(w, "post.html", ViewData{Title: post.Title, Store: store, Post: post, Tags: store.Tags, Comments: comments})
+}
+
+func (s *Server) commentsForPost(slug string) ([]site.Comment, error) {
+	s.commentMu.RLock()
+	defer s.commentMu.RUnlock()
+	return site.CommentsForPost(s.contentRoot, slug)
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
@@ -404,7 +432,7 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderPublicPermalink(w http.ResponseWriter, r *http.Request) bool {
 	store := s.currentStore()
 	if post := store.PostByPermalink(r.URL.Path); post != nil {
-		s.render(w, "post.html", ViewData{Title: post.Title, Store: store, Post: post, Tags: store.Tags})
+		s.renderPost(w, post, store)
 		return true
 	}
 	if page := store.PageByPermalink(r.URL.Path); page != nil {
@@ -416,6 +444,42 @@ func (s *Server) renderPublicPermalink(w http.ResponseWriter, r *http.Request) b
 		return true
 	}
 	return false
+}
+
+func (s *Server) submitComment(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	if !store.Settings.Comments.Enabled {
+		http.Error(w, "comments are disabled", http.StatusForbidden)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(r.FormValue("website")) != "" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	input := site.CommentInput{
+		PostSlug: r.FormValue("post_slug"),
+		Nickname: r.FormValue("nickname"),
+		Email:    r.FormValue("email"),
+		Body:     r.FormValue("comment"),
+	}
+	post := store.PostsBySlug[strings.TrimSpace(input.PostSlug)]
+	if post == nil {
+		http.NotFound(w, r)
+		return
+	}
+	s.commentMu.Lock()
+	_, err := site.AddComment(s.contentRoot, input, time.Now().In(site.TimeLocation(store.Settings)))
+	s.commentMu.Unlock()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, site.PostURL(store.Settings, post)+"#comments", http.StatusSeeOther)
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
@@ -498,6 +562,48 @@ func (s *Server) adminPages(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	pages, pagination := paginateItems(r, store.AllPages, adminListPageSize)
 	s.render(w, "admin_pages.html", ViewData{Title: "Pages", TitleKey: "title.admin.pages", Store: store, Pages: pages, Pagination: pagination, ActiveAdmin: "pages"})
+}
+
+func (s *Server) adminComments(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.commentMu.RLock()
+	comments, err := site.LoadComments(s.contentRoot)
+	s.commentMu.RUnlock()
+	if err != nil {
+		s.render(w, "admin_comments.html", ViewData{Title: "Comments", TitleKey: "title.admin.comments", Store: store, ActiveAdmin: "comments", Error: err.Error()})
+		return
+	}
+	site.SortCommentsNewestFirst(comments)
+	pageComments, pagination := paginateItems(r, comments, adminListPageSize)
+	s.render(w, "admin_comments.html", ViewData{
+		Title:         "Comments",
+		TitleKey:      "title.admin.comments",
+		Store:         store,
+		AdminComments: adminCommentsForStore(store, pageComments),
+		Pagination:    pagination,
+		ActiveAdmin:   "comments",
+	})
+}
+
+func adminCommentsForStore(store *site.Store, comments []site.Comment) []AdminComment {
+	items := make([]AdminComment, 0, len(comments))
+	for _, comment := range comments {
+		item := AdminComment{
+			Comment:   comment,
+			PostTitle: comment.PostSlug,
+			PostURL:   "/posts/" + comment.PostSlug,
+		}
+		if store != nil {
+			if post := store.AllPostsBySlug[comment.PostSlug]; post != nil {
+				item.PostTitle = post.Title
+				item.PostURL = site.PostURL(store.Settings, post)
+			} else {
+				item.PostMissing = true
+			}
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func (s *Server) adminNewPage(w http.ResponseWriter, r *http.Request) {
@@ -765,6 +871,23 @@ func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "admin_updates.html", ViewData{Title: "Auto Update", TitleKey: "title.admin.updates", Store: store, ActiveAdmin: "updates"})
 }
 
+func (s *Server) replyToComment(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	store := s.currentStore()
+	s.commentMu.Lock()
+	_, err := site.ReplyToComment(s.contentRoot, r.PathValue("id"), r.FormValue("reply"), time.Now().In(site.TimeLocation(store.Settings)))
+	s.commentMu.Unlock()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/admin/comments#comment-"+r.PathValue("id"), http.StatusSeeOther)
+}
+
 func (s *Server) listPosts(w http.ResponseWriter, r *http.Request) {
 	type postSummary struct {
 		Title   string   `json:"title"`
@@ -825,6 +948,15 @@ func (s *Server) savePost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if originalSlug := strings.TrimSpace(draft.OriginalSlug); originalSlug != "" && originalSlug != saved.Slug {
+		s.commentMu.Lock()
+		err = site.MoveComments(s.contentRoot, originalSlug, saved.Slug)
+		s.commentMu.Unlock()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := s.reloadRuntime(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1158,6 +1290,26 @@ func (s *Server) updateAutoUpdateSettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, s.currentStore().Settings.AutoUpdate)
+}
+
+func (s *Server) updateCommentSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload site.CommentSettings
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.Comments = payload
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.currentStore().Settings.Comments)
 }
 
 func (s *Server) updateTimeZoneSettings(w http.ResponseWriter, r *http.Request) {
