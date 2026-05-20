@@ -85,6 +85,7 @@ type Settings struct {
 	Permalinks      PermalinkSettings    `json:"permalinks"`
 	AutoUpdate      AutoUpdateSettings   `json:"auto_update"`
 	Comments        CommentSettings      `json:"comments"`
+	HomePage        HomePageSettings     `json:"home_page"`
 	HomeImage       HomeImage            `json:"home_image"`
 	MediaProcessing MediaProcessing      `json:"media_processing"`
 	ThemeSettings   ThemeSettings        `json:"theme_settings"`
@@ -111,6 +112,10 @@ type PermalinkSettings struct {
 
 type AutoUpdateSettings struct {
 	Enabled bool `json:"enabled"`
+}
+
+type HomePageSettings struct {
+	PageSize int `json:"page_size"`
 }
 
 type HomeImage struct {
@@ -664,6 +669,7 @@ func defaultSettings() Settings {
 		Permalinks:      defaultPermalinks(),
 		AutoUpdate:      defaultAutoUpdate(),
 		Comments:        defaultCommentSettings(),
+		HomePage:        defaultHomePageSettings(),
 		MediaProcessing: defaultMediaProcessing(),
 		TimeZone:        DefaultTimeZone,
 		ThemePack: appearance.Selection{
@@ -691,6 +697,12 @@ func defaultSiteTitle() SiteTitle {
 func defaultAutoUpdate() AutoUpdateSettings {
 	return AutoUpdateSettings{
 		Enabled: false,
+	}
+}
+
+func defaultHomePageSettings() HomePageSettings {
+	return HomePageSettings{
+		PageSize: 10,
 	}
 }
 
@@ -733,6 +745,7 @@ func normalizeSettings(settings *Settings) {
 	settings.Permalinks = normalizePermalinks(settings.Permalinks)
 	settings.AutoUpdate = normalizeAutoUpdate(settings.AutoUpdate)
 	settings.Comments = normalizeCommentSettings(settings.Comments)
+	settings.HomePage = normalizeHomePageSettings(settings.HomePage)
 
 	// 旧版文字包迁移：
 	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。
@@ -777,6 +790,20 @@ func normalizePermalinks(settings PermalinkSettings) PermalinkSettings {
 
 func normalizeAutoUpdate(settings AutoUpdateSettings) AutoUpdateSettings {
 	return AutoUpdateSettings{Enabled: settings.Enabled}
+}
+
+func normalizeHomePageSettings(settings HomePageSettings) HomePageSettings {
+	defaults := defaultHomePageSettings()
+	if settings.PageSize == 0 {
+		settings.PageSize = defaults.PageSize
+	}
+	if settings.PageSize < 1 {
+		settings.PageSize = 1
+	}
+	if settings.PageSize > 100 {
+		settings.PageSize = 100
+	}
+	return settings
 }
 
 func normalizePermalinkPattern(pattern, fallback string, allowed map[string]bool, required []string) string {

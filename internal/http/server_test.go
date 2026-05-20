@@ -559,6 +559,94 @@ func TestUpdateCommentSettingsSavesToggle(t *testing.T) {
 	}
 }
 
+func TestUpdateHomePageSettingsSavesPageSize(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/settings/home-page", bytes.NewBufferString(`{"page_size": 7}`))
+	response := httptest.NewRecorder()
+
+	s.updateHomePageSettings(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateHomePageSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.HomePage.PageSize, 7; got != want {
+		t.Fatalf("home page size = %d, want %d", got, want)
+	}
+}
+
+func TestHomeUsesConfiguredPageSize(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	templates, err := loadTemplates(appearance.Pack{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		store: &site.Store{
+			Settings: site.Settings{HomePage: site.HomePageSettings{PageSize: 2}},
+			Posts: []*site.Post{
+				{Title: "Post One", Slug: "post-one", URL: "/posts/post-one", Summary: "First"},
+				{Title: "Post Two", Slug: "post-two", URL: "/posts/post-two", Summary: "Second"},
+				{Title: "Post Three", Slug: "post-three", URL: "/posts/post-three", Summary: "Third"},
+			},
+		},
+		templates: templates,
+	}
+	request := httptest.NewRequest("GET", "/?page=2", nil)
+	response := httptest.NewRecorder()
+
+	s.home(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("home status = %d, body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "Post Three") {
+		t.Fatalf("second home page should include third post:\n%s", body)
+	}
+	if strings.Contains(body, "Post One") || strings.Contains(body, "Post Two") {
+		t.Fatalf("second home page should not include first-page posts:\n%s", body)
+	}
+	if !strings.Contains(body, `aria-current="page">2`) {
+		t.Fatalf("home page should render current pagination link:\n%s", body)
+	}
+}
+
 func TestSubmitCommentWritesComment(t *testing.T) {
 	contentRoot := t.TempDir()
 	if _, err := site.SavePost(contentRoot, site.PostDraft{

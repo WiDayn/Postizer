@@ -886,6 +886,16 @@ func TestLoadSettingsDefaultsCommentsDisabled(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsDefaultsHomePagePageSize(t *testing.T) {
+	settings, err := LoadSettings(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.HomePage.PageSize, 10; got != want {
+		t.Fatalf("home page size = %d, want %d", got, want)
+	}
+}
+
 func TestSaveSettingsNormalizesSiteTitle(t *testing.T) {
 	root := t.TempDir()
 	settings := defaultSettings()
@@ -1264,5 +1274,28 @@ func TestLoadSettingsNormalizesMediaProcessingQuality(t *testing.T) {
 	}
 	if !settings.MediaProcessing.KeepOriginal {
 		t.Fatal("keep original should be preserved")
+	}
+}
+
+func TestLoadSettingsNormalizesHomePagePageSize(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "home_page": {
+    "page_size": 140
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.HomePage.PageSize, 100; got != want {
+		t.Fatalf("home page size = %d, want %d", got, want)
+	}
+	if got, want := normalizeHomePageSettings(HomePageSettings{PageSize: -5}).PageSize, 1; got != want {
+		t.Fatalf("negative home page size = %d, want %d", got, want)
 	}
 }

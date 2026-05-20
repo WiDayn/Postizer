@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{pageTitle .}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=106">
+  <link rel="stylesheet" href="/static/site.css?v=107">
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
@@ -99,6 +99,24 @@
     <span class="ui-button ui-button--ghost is-disabled">{{msg . "pagination.next" "Next"}}</span>
     {{end}}
   </div>
+</nav>
+{{end}}
+{{end}}
+
+{{define "sitePagination"}}
+{{if .Pagination.Show}}
+<nav class="site-pagination" aria-label="Pagination">
+  <a class="site-pagination__link {{if not .Pagination.PrevURL}}is-disabled{{end}}" {{if .Pagination.PrevURL}}href="{{.Pagination.PrevURL}}"{{end}}>{{msg . "pagination.previous" "Previous"}}</a>
+  <div class="site-pagination__pages">
+    {{range .Pagination.Pages}}
+      {{if .Current}}
+      <span class="site-pagination__page is-current" aria-current="page">{{.Page}}</span>
+      {{else}}
+      <a class="site-pagination__page" href="{{.URL}}">{{.Page}}</a>
+      {{end}}
+    {{end}}
+  </div>
+  <a class="site-pagination__link {{if not .Pagination.NextURL}}is-disabled{{end}}" {{if .Pagination.NextURL}}href="{{.Pagination.NextURL}}"{{end}}>{{msg . "pagination.next" "Next"}}</a>
 </nav>
 {{end}}
 {{end}}

@@ -36,6 +36,9 @@ const autoUpdateEnabled = document.querySelector("#autoUpdateEnabled");
 const commentSettingsForm = document.querySelector("#commentSettingsForm");
 const commentSettingsStatus = document.querySelector("#commentSettingsStatus");
 const commentsEnabled = document.querySelector("#commentsEnabled");
+const homePageSettingsForm = document.querySelector("#homePageSettingsForm");
+const homePageSettingsStatus = document.querySelector("#homePageSettingsStatus");
+const homePagePageSize = document.querySelector("#homePagePageSize");
 const timeZoneSettingsForm = document.querySelector("#timeZoneSettingsForm");
 const timeZoneStatus = document.querySelector("#timeZoneStatus");
 const siteTimeZone = document.querySelector("#siteTimeZone");
@@ -94,6 +97,10 @@ function setCommentSettingsStatus(message) {
   if (commentSettingsStatus) commentSettingsStatus.textContent = message;
 }
 
+function setHomePageSettingsStatus(message) {
+  if (homePageSettingsStatus) homePageSettingsStatus.textContent = message;
+}
+
 function setTimeZoneStatus(message) {
   if (timeZoneStatus) timeZoneStatus.textContent = message;
 }
@@ -105,6 +112,12 @@ function setMediaProcessingStatus(message) {
 function normalizedQuality(value) {
   const parsed = Number.parseInt(String(value || ""), 10);
   if (!Number.isFinite(parsed)) return 82;
+  return Math.min(100, Math.max(1, parsed));
+}
+
+function normalizedHomePageSize(value) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) return 10;
   return Math.min(100, Math.max(1, parsed));
 }
 
@@ -931,6 +944,29 @@ if (commentSettingsForm && commentsEnabled) {
     const result = await response.json();
     commentsEnabled.checked = Boolean(result.enabled);
     setCommentSettingsStatus(tr("settings.status.saved", "Saved"));
+  });
+}
+
+if (homePageSettingsForm && homePagePageSize) {
+  homePageSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const pageSize = normalizedHomePageSize(homePagePageSize.value);
+    homePagePageSize.value = String(pageSize);
+    setHomePageSettingsStatus(tr("settings.status.saving", "Saving"));
+    const response = await fetch(apiURL("/admin/api/settings/home-page"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        page_size: pageSize
+      })
+    });
+    if (!response.ok) {
+      setHomePageSettingsStatus((await response.text()).trim());
+      return;
+    }
+    const result = await response.json();
+    homePagePageSize.value = String(normalizedHomePageSize(result.page_size));
+    setHomePageSettingsStatus(tr("settings.status.saved", "Saved"));
   });
 }
 

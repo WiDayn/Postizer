@@ -14,6 +14,7 @@
     </li>
     {{end}}
   </ol>
+  {{template "sitePagination" .}}
   {{else}}
   <article class="front-empty">
     <h2>{{msg . "home.empty.title"}}</h2>

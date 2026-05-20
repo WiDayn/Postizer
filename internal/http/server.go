@@ -216,6 +216,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/settings/permalinks", s.requireAdmin(http.HandlerFunc(s.updatePermalinkSettings)))
 	mux.Handle("POST /admin/api/settings/auto-update", s.requireAdmin(http.HandlerFunc(s.updateAutoUpdateSettings)))
 	mux.Handle("POST /admin/api/settings/comments", s.requireAdmin(http.HandlerFunc(s.updateCommentSettings)))
+	mux.Handle("POST /admin/api/settings/home-page", s.requireAdmin(http.HandlerFunc(s.updateHomePageSettings)))
 	mux.Handle("POST /admin/api/settings/time-zone", s.requireAdmin(http.HandlerFunc(s.updateTimeZoneSettings)))
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/menus", s.requireAdmin(http.HandlerFunc(s.updateMenus)))
@@ -360,7 +361,8 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	store := s.currentStore()
-	s.render(w, "home.html", ViewData{Title: "Postizer", TitleKey: "title.home", Store: store, Posts: store.Posts, Pages: store.Pages, Tags: store.Tags, Home: true})
+	posts, pagination := paginateItems(r, store.Posts, store.Settings.HomePage.PageSize)
+	s.render(w, "home.html", ViewData{Title: "Postizer", TitleKey: "title.home", Store: store, Posts: posts, Pages: store.Pages, Tags: store.Tags, Home: true, Pagination: pagination})
 }
 
 func (s *Server) archive(w http.ResponseWriter, r *http.Request) {
@@ -1310,6 +1312,26 @@ func (s *Server) updateCommentSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.currentStore().Settings.Comments)
+}
+
+func (s *Server) updateHomePageSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload site.HomePageSettings
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.HomePage = payload
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.currentStore().Settings.HomePage)
 }
 
 func (s *Server) updateTimeZoneSettings(w http.ResponseWriter, r *http.Request) {
