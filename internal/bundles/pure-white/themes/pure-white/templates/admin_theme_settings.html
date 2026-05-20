@@ -24,7 +24,7 @@
         <strong>{{msg . "theme_settings.pure_white.hero.title.label" "Hero title"}}</strong>
         <span>{{msg . "theme_settings.pure_white.hero.title.description" "Override the large Pure White title shown on the cover image. Leave empty to use the theme default."}}</span>
       </span>
-      <input id="pureWhiteHeroTitle" class="ui-input" type="text" maxlength="80" placeholder="{{msg . "site.brand" "Postizer"}}">
+      <input id="pureWhiteHeroTitle" class="ui-input" type="text" maxlength="80" placeholder="{{siteMainTitle .}}">
     </label>
     <label class="theme-location-row">
       <span class="theme-location-row__copy">
@@ -41,7 +41,7 @@
         <strong>{{msg . "theme_settings.pure_white.hero.subtitle.label" "Hero subtitle"}}</strong>
         <span>{{msg . "theme_settings.pure_white.hero.subtitle.description" "Override the small Pure White subtitle below the cover title. Leave empty to use the theme default."}}</span>
       </span>
-      <input id="pureWhiteHeroSubtitle" class="ui-input" type="text" maxlength="120" placeholder="{{msg . "site.edition_line" "Dear Reader"}}">
+      <input id="pureWhiteHeroSubtitle" class="ui-input" type="text" maxlength="120" placeholder="{{siteEditionLine .}}">
     </label>
     <label class="theme-location-row">
       <span class="theme-location-row__copy">

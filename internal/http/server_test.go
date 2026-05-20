@@ -386,6 +386,65 @@ func TestUpdateThemeSettingsSavesCustomPrimitiveSettings(t *testing.T) {
 	}
 }
 
+func TestUpdateSiteTitleSettingsSavesTitle(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/settings/site-title", bytes.NewBufferString(`{
+  "main": "  Field Notes  ",
+  "subtitle": "  Daily log  "
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateSiteTitleSettings(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateSiteTitleSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.SiteTitle.Main, "Field Notes"; got != want {
+		t.Fatalf("site title main = %q, want %q", got, want)
+	}
+	if got, want := settings.SiteTitle.Subtitle, "Daily log"; got != want {
+		t.Fatalf("site title subtitle = %q, want %q", got, want)
+	}
+}
+
+func TestPageTitleFromViewDataUsesConfiguredSiteTitle(t *testing.T) {
+	store := &site.Store{Settings: site.Settings{SiteTitle: site.SiteTitle{
+		Main:     "Field Notes",
+		Subtitle: "Daily log",
+	}}}
+
+	if got, want := pageTitleFromViewData(ViewData{Title: "Archive", Store: store}), "Archive | Field Notes | Daily log"; got != want {
+		t.Fatalf("archive title = %q, want %q", got, want)
+	}
+	if got, want := pageTitleFromViewData(ViewData{Title: "Postizer", Store: store, Home: true}), "Field Notes | Daily log"; got != want {
+		t.Fatalf("home title = %q, want %q", got, want)
+	}
+}
+
 func TestResolvedThemeLocaleDoesNotSwitchToPluginLocaleWhenRequestedEmpty(t *testing.T) {
 	themes := []appearance.Pack{
 		{

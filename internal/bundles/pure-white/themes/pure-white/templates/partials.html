@@ -1,7 +1,7 @@
 {{define "chromeStart"}}
 {{template "head" .}}
-{{$pureWhiteBrand := .Store.ThemeStringSetting "pure-white" "hero_title" (msg . "site.brand" "Postizer")}}
-{{$pureWhiteEditionLine := .Store.ThemeStringSetting "pure-white" "hero_subtitle" (msg . "site.edition_line")}}
+{{$pureWhiteBrand := .Store.ThemeStringSetting "pure-white" "hero_title" (siteMainTitle .)}}
+{{$pureWhiteEditionLine := .Store.ThemeStringSetting "pure-white" "hero_subtitle" (siteEditionLine .)}}
 {{$pureWhiteBrandScale := .Store.ThemeFloatSetting "pure-white" "hero_title_scale" 1}}
 {{$pureWhiteEditionLineScale := .Store.ThemeFloatSetting "pure-white" "hero_subtitle_scale" 1}}
 <div class="site-shell" style="--pure-brand-scale: {{$pureWhiteBrandScale}}; --pure-edition-scale: {{$pureWhiteEditionLineScale}};{{if .Store.Settings.HomeImage.Enabled}} --home-image-src: url('{{.Store.Settings.HomeImage.Src}}');{{end}}">

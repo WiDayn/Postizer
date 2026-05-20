@@ -197,6 +197,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/media/paste", s.requireAdmin(http.HandlerFunc(s.uploadMedia)))
 	mux.Handle("POST /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.uploadHomeImage)))
 	mux.Handle("DELETE /admin/api/home-image", s.requireAdmin(http.HandlerFunc(s.clearHomeImage)))
+	mux.Handle("POST /admin/api/settings/site-title", s.requireAdmin(http.HandlerFunc(s.updateSiteTitleSettings)))
 	mux.Handle("POST /admin/api/settings/time-zone", s.requireAdmin(http.HandlerFunc(s.updateTimeZoneSettings)))
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/menus", s.requireAdmin(http.HandlerFunc(s.updateMenus)))
@@ -266,6 +267,18 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 		"timeZones": func(current string) []string {
 			return site.TimeZoneOptions(current)
 		},
+		"siteMainTitle": func(data ViewData) string {
+			return siteMainTitle(data)
+		},
+		"siteSubtitle": func(data ViewData) string {
+			return siteSubtitle(data)
+		},
+		"siteEditionLine": func(data ViewData) string {
+			return siteEditionLine(data)
+		},
+		"siteFeedDescription": func(data ViewData) string {
+			return siteFeedDescription(data)
+		},
 		"menuLinks": func(data ViewData, location string) []site.MenuLink {
 			return menuLinksForLocation(data, location)
 		},
@@ -279,10 +292,7 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 			return messageFromViewData(data, key, fallback...)
 		},
 		"pageTitle": func(data ViewData) string {
-			if strings.TrimSpace(data.TitleKey) == "" {
-				return data.Title
-			}
-			return messageFromViewData(data, data.TitleKey, data.Title)
+			return pageTitleFromViewData(data)
 		},
 		"toJSON": func(value any) template.HTML {
 			body, err := json.Marshal(value)
@@ -1022,6 +1032,26 @@ func (s *Server) clearHomeImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]bool{"enabled": false})
+}
+
+func (s *Server) updateSiteTitleSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload site.SiteTitle
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings := s.currentStore().Settings
+	settings.SiteTitle = payload
+	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.currentStore().Settings.SiteTitle)
 }
 
 func (s *Server) updateTimeZoneSettings(w http.ResponseWriter, r *http.Request) {
@@ -2326,6 +2356,56 @@ func messageFromViewData(data ViewData, key string, fallback ...string) string {
 		return fallback[0]
 	}
 	return key
+}
+
+func siteMainTitle(data ViewData) string {
+	if data.Store == nil {
+		return site.DefaultSiteTitle
+	}
+	title := strings.TrimSpace(data.Store.Settings.SiteTitle.Main)
+	if title == "" {
+		return site.DefaultSiteTitle
+	}
+	return title
+}
+
+func siteSubtitle(data ViewData) string {
+	if data.Store == nil {
+		return ""
+	}
+	return strings.TrimSpace(data.Store.Settings.SiteTitle.Subtitle)
+}
+
+func siteEditionLine(data ViewData) string {
+	if subtitle := siteSubtitle(data); subtitle != "" {
+		return subtitle
+	}
+	return messageFromViewData(data, "site.edition_line", "")
+}
+
+func pageTitleFromViewData(data ViewData) string {
+	pageTitle := strings.TrimSpace(data.Title)
+	if strings.TrimSpace(data.TitleKey) != "" {
+		pageTitle = strings.TrimSpace(messageFromViewData(data, data.TitleKey, data.Title))
+	}
+	mainTitle := siteMainTitle(data)
+	if data.Home || pageTitle == "" || strings.EqualFold(pageTitle, mainTitle) || strings.EqualFold(pageTitle, site.DefaultSiteTitle) {
+		pageTitle = mainTitle
+	} else {
+		pageTitle += " | " + mainTitle
+	}
+	if subtitle := siteSubtitle(data); subtitle != "" {
+		pageTitle += " | " + subtitle
+	}
+	return pageTitle
+}
+
+func siteFeedDescription(data ViewData) string {
+	title := siteMainTitle(data)
+	if subtitle := siteSubtitle(data); subtitle != "" {
+		return title + " | " + subtitle
+	}
+	return title + " feed"
 }
 
 func menuLinksForLocation(data ViewData, location string) []site.MenuLink {

@@ -22,9 +22,9 @@
 {{template "head" .}}
 <div class="site-shell">
   <header class="newspaper-header">
-    <a class="brand compact-brand" href="/">Postizer</a>
+    <a class="brand compact-brand" href="/">{{siteMainTitle .}}</a>
     <div class="edition-line">
-      <span>{{msg . "site.edition_line"}}</span>
+      <span>{{siteEditionLine .}}</span>
     </div>
   </header>
   {{if and .Home .Store.Settings.HomeImage.Enabled}}
@@ -120,7 +120,7 @@
   {{$footerLinks := menuLinks . "footer"}}
   <footer class="site-footer">
     <div class="site-footer__meta">
-      <a class="site-footer__brand" href="/">Postizer</a>
+      <a class="site-footer__brand" href="/">{{siteMainTitle .}}</a>
       <span class="site-footer__powered">{{msg . "site.footer.powered_by" "Powered by Postizer"}}</span>
     </div>
     {{if $footerLinks}}

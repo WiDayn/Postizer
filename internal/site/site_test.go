@@ -852,6 +852,56 @@ func TestLoadSettingsDefaultsMediaProcessing(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsDefaultsSiteTitle(t *testing.T) {
+	settings, err := LoadSettings(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.SiteTitle.Main, DefaultSiteTitle; got != want {
+		t.Fatalf("site title main = %q, want %q", got, want)
+	}
+	if settings.SiteTitle.Subtitle != "" {
+		t.Fatalf("site title subtitle = %q, want empty", settings.SiteTitle.Subtitle)
+	}
+}
+
+func TestSaveSettingsNormalizesSiteTitle(t *testing.T) {
+	root := t.TempDir()
+	settings := defaultSettings()
+	settings.SiteTitle = SiteTitle{
+		Main:     "  Field Notes  ",
+		Subtitle: "  Daily log  ",
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := loaded.SiteTitle.Main, "Field Notes"; got != want {
+		t.Fatalf("site title main = %q, want %q", got, want)
+	}
+	if got, want := loaded.SiteTitle.Subtitle, "Daily log"; got != want {
+		t.Fatalf("site title subtitle = %q, want %q", got, want)
+	}
+
+	settings.SiteTitle = SiteTitle{Main: " ", Subtitle: "  Still here  "}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := loaded.SiteTitle.Main, DefaultSiteTitle; got != want {
+		t.Fatalf("site title main = %q, want %q", got, want)
+	}
+	if got, want := loaded.SiteTitle.Subtitle, "Still here"; got != want {
+		t.Fatalf("site title subtitle = %q, want %q", got, want)
+	}
+}
+
 func TestThemeMenuLinksResolveSupportedItems(t *testing.T) {
 	root := t.TempDir()
 	page, err := SavePage(root, PageDraft{

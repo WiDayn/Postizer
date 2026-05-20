@@ -16,6 +16,10 @@ const homeImageUpload = document.querySelector("#homeImageUpload");
 const homeImageInput = document.querySelector("#homeImageInput");
 const selectHomeImageButton = document.querySelector("#selectHomeImageButton");
 const clearHomeImageButton = document.querySelector("#clearHomeImageButton");
+const siteTitleSettingsForm = document.querySelector("#siteTitleSettingsForm");
+const siteTitleStatus = document.querySelector("#siteTitleStatus");
+const siteTitleMain = document.querySelector("#siteTitleMain");
+const siteTitleSubtitle = document.querySelector("#siteTitleSubtitle");
 const timeZoneSettingsForm = document.querySelector("#timeZoneSettingsForm");
 const timeZoneStatus = document.querySelector("#timeZoneStatus");
 const siteTimeZone = document.querySelector("#siteTimeZone");
@@ -56,6 +60,10 @@ function setPackSettingsStatus(message) {
 
 function setHomeImageStatus(message) {
   if (homeImageStatus) homeImageStatus.textContent = message;
+}
+
+function setSiteTitleStatus(message) {
+  if (siteTitleStatus) siteTitleStatus.textContent = message;
 }
 
 function setTimeZoneStatus(message) {
@@ -719,6 +727,29 @@ if (timeZoneSettingsForm && siteTimeZone) {
     const result = await response.json();
     if (result.time_zone) siteTimeZone.value = result.time_zone;
     setTimeZoneStatus(tr("settings.status.saved", "Saved"));
+  });
+}
+
+if (siteTitleSettingsForm && siteTitleMain && siteTitleSubtitle) {
+  siteTitleSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setSiteTitleStatus(tr("settings.status.saving", "Saving"));
+    const response = await fetch(apiURL("/admin/api/settings/site-title"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        main: String(siteTitleMain.value || "").trim(),
+        subtitle: String(siteTitleSubtitle.value || "").trim()
+      })
+    });
+    if (!response.ok) {
+      setSiteTitleStatus((await response.text()).trim());
+      return;
+    }
+    const result = await response.json();
+    if (typeof result.main === "string") siteTitleMain.value = result.main;
+    if (typeof result.subtitle === "string") siteTitleSubtitle.value = result.subtitle;
+    setSiteTitleStatus(tr("settings.status.saved", "Saved"));
   });
 }
 

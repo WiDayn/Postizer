@@ -30,6 +30,7 @@ import (
 
 const (
 	DefaultTimeZone      = "Asia/Hong_Kong"
+	DefaultSiteTitle     = "Postizer"
 	inputMinuteLayout    = "2006-01-02T15:04"
 	displayMinuteLayout  = "2006-01-02 15:04"
 	legacyDateOnlyLayout = "2006-01-02"
@@ -76,6 +77,7 @@ type Store struct {
 }
 
 type Settings struct {
+	SiteTitle       SiteTitle            `json:"site_title"`
 	HomeImage       HomeImage            `json:"home_image"`
 	MediaProcessing MediaProcessing      `json:"media_processing"`
 	ThemeSettings   ThemeSettings        `json:"theme_settings"`
@@ -87,6 +89,11 @@ type Settings struct {
 	// Theme / TextPack 仅用于兼容读取旧版配置，保存时会被清空。
 	TextPack appearance.Selection `json:"text_pack,omitempty"`
 	Theme    string               `json:"theme,omitempty"`
+}
+
+type SiteTitle struct {
+	Main     string `json:"main"`
+	Subtitle string `json:"subtitle"`
 }
 
 type HomeImage struct {
@@ -580,6 +587,7 @@ func SaveSettings(root string, settings Settings) error {
 // defaultSettings 返回系统启动时应采用的默认设置。
 func defaultSettings() Settings {
 	return Settings{
+		SiteTitle:       defaultSiteTitle(),
 		MediaProcessing: defaultMediaProcessing(),
 		TimeZone:        DefaultTimeZone,
 		ThemePack: appearance.Selection{
@@ -587,6 +595,12 @@ func defaultSettings() Settings {
 			PackID:  appearance.DefaultThemePackID,
 		},
 		ThemeLocale: "en",
+	}
+}
+
+func defaultSiteTitle() SiteTitle {
+	return SiteTitle{
+		Main: DefaultSiteTitle,
 	}
 }
 
@@ -625,6 +639,7 @@ func normalizeSettings(settings *Settings) {
 	settings.MediaProcessing = normalizeMediaProcessing(settings.MediaProcessing)
 	settings.ThemeSettings = normalizeThemeSettings(settings.ThemeSettings)
 	settings.TimeZone = NormalizeTimeZone(settings.TimeZone)
+	settings.SiteTitle = normalizeSiteTitle(settings.SiteTitle)
 
 	// 旧版文字包迁移：
 	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。
@@ -647,6 +662,16 @@ func normalizeSettings(settings *Settings) {
 	if strings.TrimSpace(settings.ThemeLocale) == "" {
 		settings.ThemeLocale = defaults.ThemeLocale
 	}
+}
+
+func normalizeSiteTitle(title SiteTitle) SiteTitle {
+	defaults := defaultSiteTitle()
+	title.Main = strings.TrimSpace(title.Main)
+	title.Subtitle = strings.TrimSpace(title.Subtitle)
+	if title.Main == "" {
+		title.Main = defaults.Main
+	}
+	return title
 }
 
 func normalizeMediaProcessing(settings MediaProcessing) MediaProcessing {
