@@ -67,6 +67,18 @@
     </div>
   </aside>
   <main class="admin-main">
+  {{if .LoginNotice.Show}}
+  <section class="ui-panel admin-login-notice" role="status">
+    <div>
+      <span>{{msg . "admin.login_notice.previous" "Last login"}}</span>
+      <strong>{{if .LoginNotice.HasPreviousLogin}}{{date .LoginNotice.PreviousLogin}}{{else}}{{msg . "admin.login_notice.none" "No previous login recorded"}}{{end}}</strong>
+    </div>
+    <div>
+      <span>{{msg . "admin.login_notice.failed" "Failed attempts since then"}}</span>
+      <strong>{{.LoginNotice.FailedAttempts}}</strong>
+    </div>
+  </section>
+  {{end}}
 {{end}}
 
 {{define "adminEnd"}}

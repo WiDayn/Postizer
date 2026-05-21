@@ -560,6 +560,32 @@
     margin-bottom: .75rem;
   }
 
+  .admin-login-notice {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .75rem;
+    margin-bottom: .75rem;
+    padding: .75rem;
+    font-family: var(--font-ui);
+  }
+
+  .admin-login-notice div {
+    display: grid;
+    gap: .25rem;
+    min-width: 0;
+  }
+
+  .admin-login-notice span {
+    font-size: .72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .admin-login-notice strong {
+    overflow-wrap: anywhere;
+    font-size: .95rem;
+  }
+
   .admin-panel-actions {
     display: flex;
     flex-wrap: wrap;
@@ -3921,6 +3947,10 @@
 
     .admin-stats {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .admin-login-notice {
+      grid-template-columns: 1fr;
     }
 
     .admin-table-list li {

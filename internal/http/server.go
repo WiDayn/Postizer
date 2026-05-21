@@ -16,6 +16,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -49,6 +50,7 @@ type Server struct {
 	pluginUploads      map[string]pluginrpc.ActionFile
 	pluginDownloads    map[string]pluginDownload
 	pluginJobs         map[string]*importJob
+	loginAttempts      map[string]loginAttemptState
 	auth               authConfig
 	mu                 sync.RWMutex
 	authMu             sync.RWMutex
@@ -56,6 +58,8 @@ type Server struct {
 	pluginUploadMu     sync.Mutex
 	pluginDownloadMu   sync.Mutex
 	pluginJobMu        sync.RWMutex
+	loginAttemptMu     sync.Mutex
+	loginAuditMu       sync.Mutex
 }
 
 type pluginDownload struct {
@@ -97,9 +101,11 @@ type ViewData struct {
 	Home          bool
 	ActiveAdmin   string
 	Error         string
+	ErrorKey      string
 	Remember      bool
 	IsAdmin       bool
 	AdminUsername string
+	LoginNotice   LoginNotice
 	AppVersion    string
 	Changelog     []ChangelogRelease
 	EditorKind    string
@@ -155,6 +161,13 @@ type ChangelogItem struct {
 	Summary string
 }
 
+type LoginNotice struct {
+	Show             bool
+	HasPreviousLogin bool
+	PreviousLogin    time.Time
+	FailedAttempts   int
+}
+
 type authConfig struct {
 	user         string
 	pass         string
@@ -167,11 +180,30 @@ type storedAdminCredentials struct {
 	PasswordHash string `json:"password_hash"`
 }
 
+type loginAttemptState struct {
+	Failures    int
+	FirstFailed time.Time
+	LockedUntil time.Time
+}
+
+type storedLoginAudit struct {
+	LastSuccessfulLogin time.Time        `json:"last_successful_login,omitempty"`
+	FailedSinceLogin    int              `json:"failed_since_login"`
+	LastNotice          loginAuditNotice `json:"last_notice,omitempty"`
+}
+
+type loginAuditNotice struct {
+	PreviousLogin  time.Time `json:"previous_login,omitempty"`
+	CurrentLogin   time.Time `json:"current_login,omitempty"`
+	FailedAttempts int       `json:"failed_attempts"`
+}
+
 const (
 	sessionCookieName        = "postizer_session"
 	sessionDuration          = 8 * time.Hour
 	rememberSessionDuration  = 30 * 24 * time.Hour
 	adminCredentialsFile     = ".admin_credentials.json"
+	adminLoginAuditFile      = ".admin_login_audit.json"
 	adminPasswordHashScheme  = "pbkdf2-sha256"
 	adminPasswordHashRounds  = 120000
 	adminPasswordHashSaltLen = 16
@@ -181,6 +213,9 @@ const (
 	adminListPageSize        = 20
 	maxPluginActionFileBytes = 32 << 20
 	maxPluginMediaBytes      = 64 << 20
+	loginFailureLimit        = 5
+	loginFailureWindow       = 15 * time.Minute
+	loginLockoutDuration     = 15 * time.Minute
 	pluginSettingsUIOutlet   = "admin.plugin"
 )
 
@@ -201,6 +236,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 		pluginUploads:      map[string]pluginrpc.ActionFile{},
 		pluginDownloads:    map[string]pluginDownload{},
 		pluginJobs:         map[string]*importJob{},
+		loginAttempts:      map[string]loginAttemptState{},
 		auth:               newAuthConfig(contentRoot),
 	}
 	s.pluginHost = pluginhost.New(appRoot, s)
@@ -566,6 +602,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -573,15 +610,43 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 	user := r.FormValue("username")
 	pass := r.FormValue("password")
 	remember := r.FormValue("remember") == "on"
-	auth := s.authSnapshot()
-	if subtle.ConstantTimeCompare([]byte(user), []byte(auth.user)) != 1 || !auth.verifyPassword(pass) {
-		store := s.currentStore()
-		w.WriteHeader(http.StatusUnauthorized)
-		s.render(w, "login.html", ViewData{Title: "Admin Login", TitleKey: "title.admin.login", Store: store, Error: "Invalid username or password", Remember: remember})
+	now := s.loginAuditTime()
+	rateKey := loginRateLimitKey(r)
+	if retryAfter := s.loginRetryAfter(rateKey, now); retryAfter > 0 {
+		s.recordLoginFailureAudit(now)
+		writeRetryAfter(w, retryAfter)
+		s.renderLoginError(w, remember, http.StatusTooManyRequests, "login.error.rate_limited", "Too many login attempts. Try again later.")
 		return
 	}
+	auth := s.authSnapshot()
+	if subtle.ConstantTimeCompare([]byte(user), []byte(auth.user)) != 1 || !auth.verifyPassword(pass) {
+		retryAfter := s.recordLoginFailure(rateKey, now)
+		s.recordLoginFailureAudit(now)
+		if retryAfter > 0 {
+			writeRetryAfter(w, retryAfter)
+			s.renderLoginError(w, remember, http.StatusTooManyRequests, "login.error.rate_limited", "Too many login attempts. Try again later.")
+			return
+		}
+		s.renderLoginError(w, remember, http.StatusUnauthorized, "login.error.invalid", "Invalid username or password")
+		return
+	}
+	s.clearLoginFailures(rateKey)
+	s.recordLoginSuccessAudit(now)
 	http.SetCookie(w, s.sessionCookie(auth.user, remember))
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+func (s *Server) renderLoginError(w http.ResponseWriter, remember bool, status int, errorKey, fallback string) {
+	store := s.currentStore()
+	w.WriteHeader(status)
+	s.render(w, "login.html", ViewData{
+		Title:    "Admin Login",
+		TitleKey: "title.admin.login",
+		Store:    store,
+		Error:    fallback,
+		ErrorKey: errorKey,
+		Remember: remember,
+	})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -2743,6 +2808,9 @@ func (s *Server) render(w http.ResponseWriter, name string, data ViewData) {
 	if data.Appearance == nil {
 		data.Appearance = s.currentAppearance()
 	}
+	if data.ActiveAdmin != "" {
+		data.LoginNotice = s.loginNotice()
+	}
 	if err := s.currentTemplates().ExecuteTemplate(w, name, data); err != nil {
 		log.Printf("template %s: %v", name, err)
 	}
@@ -3254,6 +3322,169 @@ func saveStoredAdminCredentials(contentRoot string, credentials storedAdminCrede
 		return err
 	}
 	return os.Chmod(path, 0600)
+}
+
+func adminLoginAuditPath(contentRoot string) string {
+	return filepath.Join(contentRoot, adminLoginAuditFile)
+}
+
+func loadStoredLoginAudit(contentRoot string) (storedLoginAudit, error) {
+	body, err := os.ReadFile(adminLoginAuditPath(contentRoot))
+	if errors.Is(err, os.ErrNotExist) {
+		return storedLoginAudit{}, nil
+	}
+	if err != nil {
+		return storedLoginAudit{}, err
+	}
+	var audit storedLoginAudit
+	if err := json.Unmarshal(body, &audit); err != nil {
+		return storedLoginAudit{}, err
+	}
+	if audit.FailedSinceLogin < 0 {
+		audit.FailedSinceLogin = 0
+	}
+	if audit.LastNotice.FailedAttempts < 0 {
+		audit.LastNotice.FailedAttempts = 0
+	}
+	return audit, nil
+}
+
+func saveStoredLoginAudit(contentRoot string, audit storedLoginAudit) error {
+	if err := os.MkdirAll(contentRoot, 0755); err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(audit, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := adminLoginAuditPath(contentRoot)
+	if err := os.WriteFile(path, append(body, '\n'), 0600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0600)
+}
+
+func (s *Server) recordLoginFailureAudit(now time.Time) {
+	s.loginAuditMu.Lock()
+	defer s.loginAuditMu.Unlock()
+	audit, err := loadStoredLoginAudit(s.contentRoot)
+	if err != nil {
+		log.Printf("load login audit: %v", err)
+		return
+	}
+	audit.FailedSinceLogin++
+	if err := saveStoredLoginAudit(s.contentRoot, audit); err != nil {
+		log.Printf("save login audit: %v", err)
+	}
+}
+
+func (s *Server) recordLoginSuccessAudit(now time.Time) {
+	s.loginAuditMu.Lock()
+	defer s.loginAuditMu.Unlock()
+	audit, err := loadStoredLoginAudit(s.contentRoot)
+	if err != nil {
+		log.Printf("load login audit: %v", err)
+		audit = storedLoginAudit{}
+	}
+	audit.LastNotice = loginAuditNotice{
+		PreviousLogin:  audit.LastSuccessfulLogin,
+		CurrentLogin:   now,
+		FailedAttempts: audit.FailedSinceLogin,
+	}
+	audit.LastSuccessfulLogin = now
+	audit.FailedSinceLogin = 0
+	if err := saveStoredLoginAudit(s.contentRoot, audit); err != nil {
+		log.Printf("save login audit: %v", err)
+	}
+}
+
+func (s *Server) loginNotice() LoginNotice {
+	s.loginAuditMu.Lock()
+	defer s.loginAuditMu.Unlock()
+	audit, err := loadStoredLoginAudit(s.contentRoot)
+	if err != nil {
+		log.Printf("load login audit: %v", err)
+		return LoginNotice{}
+	}
+	notice := audit.LastNotice
+	if notice.CurrentLogin.IsZero() && notice.PreviousLogin.IsZero() && notice.FailedAttempts == 0 {
+		return LoginNotice{}
+	}
+	return LoginNotice{
+		Show:             true,
+		HasPreviousLogin: !notice.PreviousLogin.IsZero(),
+		PreviousLogin:    notice.PreviousLogin,
+		FailedAttempts:   notice.FailedAttempts,
+	}
+}
+
+func (s *Server) loginAuditTime() time.Time {
+	if store := s.currentStore(); store != nil {
+		return time.Now().In(site.TimeLocation(store.Settings)).Truncate(time.Second)
+	}
+	return time.Now().Truncate(time.Second)
+}
+
+func loginRateLimitKey(r *http.Request) string {
+	addr := strings.TrimSpace(r.RemoteAddr)
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	}
+	if addr == "" {
+		return "unknown"
+	}
+	return addr
+}
+
+func (s *Server) loginRetryAfter(key string, now time.Time) time.Duration {
+	s.loginAttemptMu.Lock()
+	defer s.loginAttemptMu.Unlock()
+	state, ok := s.loginAttempts[key]
+	if !ok {
+		return 0
+	}
+	if !state.LockedUntil.IsZero() && now.Before(state.LockedUntil) {
+		return state.LockedUntil.Sub(now)
+	}
+	if state.FirstFailed.IsZero() || now.Sub(state.FirstFailed) > loginFailureWindow {
+		delete(s.loginAttempts, key)
+	}
+	return 0
+}
+
+func (s *Server) recordLoginFailure(key string, now time.Time) time.Duration {
+	s.loginAttemptMu.Lock()
+	defer s.loginAttemptMu.Unlock()
+	if s.loginAttempts == nil {
+		s.loginAttempts = map[string]loginAttemptState{}
+	}
+	state := s.loginAttempts[key]
+	if state.FirstFailed.IsZero() || now.Sub(state.FirstFailed) > loginFailureWindow || (!state.LockedUntil.IsZero() && !now.Before(state.LockedUntil)) {
+		state = loginAttemptState{FirstFailed: now}
+	}
+	state.Failures++
+	if state.Failures >= loginFailureLimit {
+		state.LockedUntil = now.Add(loginLockoutDuration)
+	}
+	s.loginAttempts[key] = state
+	if !state.LockedUntil.IsZero() && now.Before(state.LockedUntil) {
+		return state.LockedUntil.Sub(now)
+	}
+	return 0
+}
+
+func (s *Server) clearLoginFailures(key string) {
+	s.loginAttemptMu.Lock()
+	defer s.loginAttemptMu.Unlock()
+	delete(s.loginAttempts, key)
+}
+
+func writeRetryAfter(w http.ResponseWriter, retryAfter time.Duration) {
+	if retryAfter <= 0 {
+		return
+	}
+	seconds := int((retryAfter + time.Second - 1) / time.Second)
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 }
 
 func (s *Server) authSnapshot() authConfig {

@@ -6,7 +6,7 @@
       <p class="kicker">{{msg . "login.kicker"}}</p>
       <h1>{{msg . "common.login"}}</h1>
     </header>
-    {{if .Error}}<p class="login-error">{{msg . "login.error.invalid" .Error}}</p>{{end}}
+    {{if .Error}}<p class="login-error">{{if .ErrorKey}}{{msg . .ErrorKey .Error}}{{else}}{{.Error}}{{end}}</p>{{end}}
     <label class="ui-field">
       <span>{{msg . "common.username"}}</span>
       <input class="ui-input" name="username" autocomplete="username" autofocus>

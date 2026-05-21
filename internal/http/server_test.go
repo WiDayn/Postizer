@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"postizer/internal/appearance"
 	"postizer/internal/media"
@@ -718,6 +720,102 @@ func TestNewAuthConfigLoadsStoredAdminCredentials(t *testing.T) {
 	}
 	if auth.verifyPassword("postizer") {
 		t.Fatal("auth should not fall back to default password when stored credentials exist")
+	}
+}
+
+func TestLoginRateLimiterLocksAfterFailures(t *testing.T) {
+	s := &Server{}
+	key := "203.0.113.7"
+	now := time.Date(2026, 5, 22, 4, 30, 0, 0, time.UTC)
+
+	for i := 0; i < loginFailureLimit-1; i++ {
+		if retryAfter := s.recordLoginFailure(key, now); retryAfter > 0 {
+			t.Fatalf("failure %d should not lock, retry after = %s", i+1, retryAfter)
+		}
+	}
+	retryAfter := s.recordLoginFailure(key, now)
+	if retryAfter <= 0 {
+		t.Fatal("final allowed failure should lock the login key")
+	}
+	if got := s.loginRetryAfter(key, now.Add(time.Minute)); got <= 0 {
+		t.Fatalf("locked key retry after = %s, want positive", got)
+	}
+	if got := s.loginRetryAfter(key, now.Add(loginLockoutDuration+time.Second)); got != 0 {
+		t.Fatalf("expired lock retry after = %s, want 0", got)
+	}
+}
+
+func TestLoginPostRateLimitRecordsFailedAudit(t *testing.T) {
+	contentRoot := t.TempDir()
+	s := &Server{
+		contentRoot: contentRoot,
+		auth: authConfig{
+			user:   "admin",
+			pass:   "correct-password",
+			secret: []byte("test-session-secret-that-is-long-enough"),
+		},
+		templates: template.Must(template.New("").Parse(`{{define "login.html"}}{{.ErrorKey}}{{end}}`)),
+	}
+
+	for i := 0; i < loginFailureLimit; i++ {
+		form := url.Values{"username": {"admin"}, "password": {"wrong-password"}}
+		request := httptest.NewRequest("POST", "/admin/login", strings.NewReader(form.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.RemoteAddr = "203.0.113.9:12345"
+		response := httptest.NewRecorder()
+
+		s.loginPost(response, request)
+
+		if i < loginFailureLimit-1 && response.Code != http.StatusUnauthorized {
+			t.Fatalf("failure %d status = %d, want %d", i+1, response.Code, http.StatusUnauthorized)
+		}
+		if i == loginFailureLimit-1 && response.Code != http.StatusTooManyRequests {
+			t.Fatalf("locked failure status = %d, want %d", response.Code, http.StatusTooManyRequests)
+		}
+	}
+
+	audit, err := loadStoredLoginAudit(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := audit.FailedSinceLogin, loginFailureLimit; got != want {
+		t.Fatalf("failed login audit count = %d, want %d", got, want)
+	}
+}
+
+func TestLoginAuditNoticeTracksPreviousLoginFailures(t *testing.T) {
+	contentRoot := t.TempDir()
+	s := &Server{contentRoot: contentRoot}
+	firstLogin := time.Date(2026, 5, 22, 5, 0, 0, 0, time.UTC)
+	secondLogin := firstLogin.Add(10 * time.Minute)
+
+	s.recordLoginSuccessAudit(firstLogin)
+	s.recordLoginFailureAudit(firstLogin.Add(time.Minute))
+	s.recordLoginFailureAudit(firstLogin.Add(2 * time.Minute))
+	s.recordLoginSuccessAudit(secondLogin)
+
+	notice := s.loginNotice()
+	if !notice.Show {
+		t.Fatal("login notice should be visible after a successful login")
+	}
+	if !notice.HasPreviousLogin {
+		t.Fatal("login notice should include the previous successful login")
+	}
+	if !notice.PreviousLogin.Equal(firstLogin) {
+		t.Fatalf("previous login = %s, want %s", notice.PreviousLogin, firstLogin)
+	}
+	if got, want := notice.FailedAttempts, 2; got != want {
+		t.Fatalf("failed attempts in notice = %d, want %d", got, want)
+	}
+	audit, err := loadStoredLoginAudit(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.FailedSinceLogin != 0 {
+		t.Fatalf("failed attempts should reset after successful login, got %d", audit.FailedSinceLogin)
+	}
+	if !audit.LastSuccessfulLogin.Equal(secondLogin) {
+		t.Fatalf("last successful login = %s, want %s", audit.LastSuccessfulLogin, secondLogin)
 	}
 }
 
