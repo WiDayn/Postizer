@@ -38,6 +38,9 @@ type Server struct {
 	appearance         *appearance.Catalog
 	media              *media.Store
 	contentRoot        string
+	staticRoot         string
+	templatesRoot      string
+	appRoot            string
 	builtinBundlesRoot string
 	userContentRoot    string
 	userBundlesRoot    string
@@ -175,24 +178,28 @@ const (
 var AppVersion = "dev"
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
+	appRoot := env("POSTIZER_APP_ROOT", ".")
 	s := &Server{
 		store:              store,
 		media:              mediaStore,
 		contentRoot:        contentRoot,
-		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		staticRoot:         env("POSTIZER_STATIC_ROOT", filepath.Join("web", "static")),
+		templatesRoot:      env("POSTIZER_TEMPLATES_ROOT", filepath.Join("web", "templates")),
+		appRoot:            appRoot,
+		builtinBundlesRoot: env("POSTIZER_BUILTIN_BUNDLES_ROOT", filepath.Join("internal", "bundles")),
 		userContentRoot:    contentRoot,
 		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
 		pluginUploads:      map[string]pluginrpc.ActionFile{},
 		pluginJobs:         map[string]*importJob{},
 		auth:               newAuthConfig(contentRoot),
 	}
-	s.pluginHost = pluginhost.New(".", s)
+	s.pluginHost = pluginhost.New(appRoot, s)
 	if err := s.reloadRuntime(); err != nil {
 		return nil, err
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", cache(http.StripPrefix("/static/", http.FileServer(http.Dir("web/static")))))
+	mux.Handle("GET /static/", cache(http.StripPrefix("/static/", http.FileServer(http.Dir(s.staticRoot)))))
 	mux.Handle("GET /media/", cache(http.StripPrefix("/media/", http.FileServer(http.Dir(mediaStore.PublicDir())))))
 	mux.Handle("GET /packs/official/bundles/", cache(http.StripPrefix("/packs/official/bundles/", http.FileServer(http.Dir(s.builtinBundlesRoot)))))
 	mux.Handle("GET /packs/user/bundles/", cache(http.StripPrefix("/packs/user/bundles/", http.FileServer(http.Dir(s.userBundlesRoot)))))
@@ -267,6 +274,18 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 }
 
 func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
+	return loadTemplatesFromRoot(activeTheme, env("POSTIZER_TEMPLATES_ROOT", filepath.Join("web", "templates")))
+}
+
+func (s *Server) loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
+	templatesRoot := s.templatesRoot
+	if templatesRoot == "" {
+		templatesRoot = env("POSTIZER_TEMPLATES_ROOT", filepath.Join("web", "templates"))
+	}
+	return loadTemplatesFromRoot(activeTheme, templatesRoot)
+}
+
+func loadTemplatesFromRoot(activeTheme appearance.Pack, templatesRoot string) (*template.Template, error) {
 	templates, err := template.New("").Funcs(template.FuncMap{
 		"date": func(t time.Time) string {
 			if t.IsZero() {
@@ -372,11 +391,11 @@ func loadTemplates(activeTheme appearance.Pack) (*template.Template, error) {
 			}
 			return template.JS(body)
 		},
-	}).ParseGlob(filepath.Join("web", "templates", "*.html"))
+	}).ParseGlob(filepath.Join(templatesRoot, "*.html"))
 	if err != nil {
 		return nil, err
 	}
-	templates, err = templates.ParseGlob(filepath.Join("web", "templates", "*.xml"))
+	templates, err = templates.ParseGlob(filepath.Join(templatesRoot, "*.xml"))
 	if err != nil {
 		return nil, err
 	}
@@ -2735,7 +2754,7 @@ func (s *Server) reloadRuntime() error {
 	if err != nil {
 		return err
 	}
-	templates, err := loadTemplates(catalog.ActiveTheme)
+	templates, err := s.loadTemplates(catalog.ActiveTheme)
 	if err != nil {
 		return err
 	}

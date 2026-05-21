@@ -11,7 +11,7 @@
     <span id="autoUpdateStatus" class="ui-status">{{msg . "settings.status.ready"}}</span>
   </div>
   <form id="autoUpdateSettingsForm" class="settings-form">
-    <p class="settings-form-note">{{msg . "settings.auto_update.help" "When enabled, the Linux service installer timer periodically checks the Git repository and updates the running service only when a newer release tag matching vX.X.X is available."}}</p>
+    <p class="settings-form-note">{{msg . "settings.auto_update.help" "When enabled, Postizer checks GitHub Releases and updates the running service only when a newer vX.X.X release asset is available."}}</p>
     <div class="settings-readonly-row">
       <span>{{msg . "settings.auto_update.current_version" "Current version"}}</span>
       <strong>{{if .AppVersion}}{{.AppVersion}}{{else}}{{msg . "settings.auto_update.version_unknown" "Unknown"}}{{end}}</strong>
@@ -20,7 +20,7 @@
       <input id="autoUpdateEnabled" name="enabled" type="checkbox" {{if .Store.Settings.AutoUpdate.Enabled}}checked{{end}}>
       <span>{{msg . "settings.auto_update.enabled" "Enable automatic updates"}}</span>
     </label>
-    <p class="settings-form-note">{{msg . "settings.auto_update.note" "This requires the Linux service installer to have registered the Postizer update timer."}}</p>
+    <p class="settings-form-note">{{msg . "settings.auto_update.note" "Docker images use the writable runtime volume; Linux services use the registered Postizer update timer."}}</p>
     <div class="settings-actions">
       <button type="submit" class="ui-button ui-button--primary">{{msg . "settings.auto_update.save" "Save update settings"}}</button>
     </div>
@@ -32,7 +32,7 @@
     <h2>{{msg . "settings.auto_update.changelog.title" "Changelog"}}</h2>
   </div>
   <div class="settings-form">
-    <p class="settings-form-note">{{msg . "settings.auto_update.changelog.help" "Recent release tags and the commits included in each version."}}</p>
+    <p class="settings-form-note">{{msg . "settings.auto_update.changelog.help" "Recent release tags and the commits included in each version when Git metadata is available."}}</p>
     {{if .Changelog}}
     <div class="changelog-list">
       {{range .Changelog}}
@@ -61,7 +61,7 @@
       {{end}}
     </div>
     {{else}}
-    <p class="settings-form-note">{{msg . "settings.auto_update.changelog.empty" "No release changelog is available. The Linux service installer keeps release history in the source checkout."}}</p>
+    <p class="settings-form-note">{{msg . "settings.auto_update.changelog.empty" "No release changelog is available in this runtime."}}</p>
     {{end}}
   </div>
 </section>

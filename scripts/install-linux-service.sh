@@ -4,6 +4,7 @@ set -Eeuo pipefail
 APP_NAME="postizer"
 ORIGINAL_ARGS=("$@")
 REPO_URL="${POSTIZER_REPO_URL:-https://github.com/WiDayn/Postizer.git}"
+RELEASE_VERSION_REQUESTED="${POSTIZER_RELEASE_VERSION:-latest}"
 SERVICE_NAME="${POSTIZER_SERVICE_NAME:-postizer}"
 SERVICE_USER="${POSTIZER_SERVICE_USER:-postizer}"
 SERVICE_GROUP="${POSTIZER_SERVICE_GROUP:-$SERVICE_USER}"
@@ -29,7 +30,8 @@ ENV_FILE_EXPLICIT=0
 GO_CACHE_ROOT_EXPLICIT=0
 START_SERVICE=1
 ENABLE_SERVICE=1
-BUILD_BINARY=1
+INSTALL_FROM_RELEASE=1
+BUILD_BINARY=0
 SKIP_DEPS=0
 GIT_PULL=1
 GIT_UPDATED=0
@@ -53,6 +55,8 @@ fi
 BINARY_SOURCE="${POSTIZER_BINARY:-}"
 GO_CMD="${POSTIZER_GO:-go}"
 REQUIRED_GO_VERSION="${POSTIZER_GO_VERSION:-}"
+RELEASE_EXTRACT_DIR=""
+RESOLVED_RELEASE_VERSION=""
 
 [[ -n "${POSTIZER_INSTALL_DIR:-}" ]] && INSTALL_DIR_EXPLICIT=1
 [[ -n "${POSTIZER_SOURCE_DIR:-}" ]] && SOURCE_DIR_EXPLICIT=1
@@ -67,12 +71,13 @@ usage() {
   cat <<EOF
 Usage: $0 [options]
 
-Build and install Postizer into a Linux systemd service.
+Install Postizer into a Linux systemd service.
 
 Options:
   --install-dir PATH    Runtime directory (default: $INSTALL_DIR)
-  --source-dir PATH     Source checkout directory (default: $DEFAULT_SOURCE_DIR)
-  --repo-url URL        Git repository to clone (default: $REPO_URL)
+  --release-version V   GitHub release version to install (default: $RELEASE_VERSION_REQUESTED)
+  --repo-url URL        GitHub repository for release assets (default: $REPO_URL)
+  --source-dir PATH     Source checkout directory, only used with --build-from-source
   --update-interval N   Auto-update systemd timer interval (default: $UPDATE_TIMER_INTERVAL)
   --service-name NAME   systemd service name (default: $SERVICE_NAME)
   --update-service-name NAME
@@ -89,6 +94,7 @@ Options:
   --go-cache-dir PATH   Go build/module cache root (default: /var/cache/<service>/go)
   --binary PATH         Install an existing binary instead of building
   --no-build            Use ./postizer from the repository root
+  --build-from-source   Build from the Git source checkout instead of using a release asset
   --no-git-pull         Do not update an existing Git checkout before building
   --skip-deps           Do not install missing OS packages or Go
   --no-update-timer     Do not register the auto-update systemd timer
@@ -139,6 +145,11 @@ while [[ $# -gt 0 ]]; do
     --repo-url)
       require_arg "$1" "${2:-}"
       REPO_URL="$2"
+      shift 2
+      ;;
+    --release-version)
+      require_arg "$1" "${2:-}"
+      RELEASE_VERSION_REQUESTED="$2"
       shift 2
       ;;
     --update-interval)
@@ -210,12 +221,19 @@ while [[ $# -gt 0 ]]; do
     --binary)
       require_arg "$1" "${2:-}"
       BINARY_SOURCE="$2"
+      INSTALL_FROM_RELEASE=0
       BUILD_BINARY=0
       shift 2
       ;;
     --no-build)
       NO_BUILD_BINARY=1
+      INSTALL_FROM_RELEASE=0
       BUILD_BINARY=0
+      shift
+      ;;
+    --build-from-source)
+      INSTALL_FROM_RELEASE=0
+      BUILD_BINARY=1
       shift
       ;;
     --no-git-pull|--skip-git-pull)
@@ -682,6 +700,17 @@ needs_dependency_install() {
       return 0
     fi
   done
+  if [[ "$INSTALL_FROM_RELEASE" -eq 1 ]]; then
+    if ! optional_command_exists curl && ! optional_command_exists wget; then
+      return 0
+    fi
+    for cmd in tar gzip sha256sum; do
+      if ! optional_command_exists "$cmd"; then
+        return 0
+      fi
+    done
+    return 1
+  fi
   if { [[ "$GIT_PULL" -eq 1 && -e "$SOURCE_DIR/.git" ]] || ! source_tree_available; } && ! optional_command_exists git; then
     return 0
   fi
@@ -702,13 +731,146 @@ download_file() {
   local url="$1"
   local output="$2"
   if optional_command_exists curl; then
-    curl -fsSL "$url" -o "$output"
+    if [[ -n "${POSTIZER_GITHUB_TOKEN:-}" ]]; then
+      curl -fsSL -H "Authorization: Bearer $POSTIZER_GITHUB_TOKEN" "$url" -o "$output"
+    else
+      curl -fsSL "$url" -o "$output"
+    fi
   elif optional_command_exists wget; then
     wget -qO "$output" "$url"
   else
-    echo "Missing curl or wget for downloading Go." >&2
+    echo "Missing curl or wget for downloading files." >&2
     exit 1
   fi
+}
+
+github_repo_slug() {
+  local value="$REPO_URL"
+  value="${value#https://github.com/}"
+  value="${value#http://github.com/}"
+  value="${value#git@github.com:}"
+  value="${value%.git}"
+  if [[ "$value" != */* ]]; then
+    echo "Repository URL must point to GitHub: $REPO_URL" >&2
+    exit 1
+  fi
+  printf '%s' "$value"
+}
+
+release_platform() {
+  local arch
+  case "$(uname -m)" in
+    x86_64|amd64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *)
+      echo "Unsupported Linux architecture for Postizer release assets: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+  printf 'linux-%s' "$arch"
+}
+
+latest_github_release_tag() {
+  local slug tmp tag
+  slug="$(github_repo_slug)"
+  tmp="$(mktemp)"
+  download_file "https://api.github.com/repos/$slug/releases/latest" "$tmp"
+  tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp" | head -n 1)"
+  rm -f "$tmp"
+  if [[ -z "$tag" ]]; then
+    echo "Could not detect latest GitHub release tag for $slug." >&2
+    exit 1
+  fi
+  if ! is_release_tag "$tag"; then
+    echo "Latest GitHub release tag does not match vX.X.X: $tag" >&2
+    exit 1
+  fi
+  printf '%s' "$tag"
+}
+
+resolve_release_version() {
+  if [[ -n "$RESOLVED_RELEASE_VERSION" ]]; then
+    return
+  fi
+  if [[ "$RELEASE_VERSION_REQUESTED" == "latest" || -z "$RELEASE_VERSION_REQUESTED" ]]; then
+    RESOLVED_RELEASE_VERSION="$(latest_github_release_tag)"
+  else
+    RESOLVED_RELEASE_VERSION="$RELEASE_VERSION_REQUESTED"
+  fi
+  if ! is_release_tag "$RESOLVED_RELEASE_VERSION"; then
+    echo "Release version must match vX.X.X: $RESOLVED_RELEASE_VERSION" >&2
+    exit 1
+  fi
+}
+
+installed_release_version() {
+  if [[ -f "$INSTALL_DIR/.postizer-version" ]]; then
+    tr -d '\r\n' < "$INSTALL_DIR/.postizer-version"
+  fi
+}
+
+release_asset_name() {
+  resolve_release_version
+  printf 'postizer-%s-%s.tar.gz' "$RESOLVED_RELEASE_VERSION" "$(release_platform)"
+}
+
+verify_release_checksum() {
+  local sums_file="$1"
+  local asset_name="$2"
+  local asset_path="$3"
+  local checksum actual
+  checksum="$(awk -v asset="$asset_name" '$2 == asset || $2 == "*" asset { print $1; exit }' "$sums_file")"
+  if [[ -z "$checksum" ]]; then
+    echo "SHA256SUMS does not contain $asset_name." >&2
+    exit 1
+  fi
+  actual="$(sha256sum "$asset_path" | awk '{print $1}')"
+  if [[ "$checksum" != "$actual" ]]; then
+    echo "Checksum mismatch for $asset_name." >&2
+    exit 1
+  fi
+}
+
+download_release_asset() {
+  resolve_release_version
+  local current slug asset asset_url sums_url tmp archive sums extract_dir child_count child
+  current="$(installed_release_version)"
+  if [[ "$AUTO_UPDATE_RUN" -eq 1 && "$current" == "$RESOLVED_RELEASE_VERSION" && -x "$INSTALL_DIR/$APP_NAME" ]]; then
+    echo "Already running release $RESOLVED_RELEASE_VERSION."
+    exit 0
+  fi
+
+  slug="$(github_repo_slug)"
+  asset="$(release_asset_name)"
+  asset_url="https://github.com/$slug/releases/download/$RESOLVED_RELEASE_VERSION/$asset"
+  sums_url="https://github.com/$slug/releases/download/$RESOLVED_RELEASE_VERSION/SHA256SUMS"
+  tmp="$(mktemp -d)"
+  archive="$tmp/$asset"
+  sums="$tmp/SHA256SUMS"
+  extract_dir="$tmp/extract"
+
+  echo "Downloading Postizer $RESOLVED_RELEASE_VERSION from $asset_url"
+  download_file "$asset_url" "$archive"
+  echo "Downloading release checksums..."
+  download_file "$sums_url" "$sums"
+  verify_release_checksum "$sums" "$asset" "$archive"
+
+  mkdir -p "$extract_dir"
+  tar -xzf "$archive" -C "$extract_dir"
+  if [[ ! -x "$extract_dir/$APP_NAME" ]]; then
+    child_count="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+    if [[ "$child_count" == "1" ]]; then
+      child="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+      extract_dir="$child"
+    fi
+  fi
+
+  if [[ ! -x "$extract_dir/$APP_NAME" || ! -d "$extract_dir/web" || ! -d "$extract_dir/internal/bundles" ]]; then
+    echo "Release asset is missing postizer, web/, or internal/bundles/." >&2
+    exit 1
+  fi
+  printf '%s\n' "$RESOLVED_RELEASE_VERSION" > "$extract_dir/.postizer-version"
+  RELEASE_EXTRACT_DIR="$extract_dir"
 }
 
 go_download_arch() {
@@ -814,6 +976,15 @@ ensure_service_identity() {
 }
 
 build_or_select_binary() {
+  if [[ "$INSTALL_FROM_RELEASE" -eq 1 ]]; then
+    BINARY_SOURCE="$RELEASE_EXTRACT_DIR/$APP_NAME"
+    if [[ ! -x "$BINARY_SOURCE" ]]; then
+      echo "Release binary not found or not executable: $BINARY_SOURCE" >&2
+      exit 1
+    fi
+    return
+  fi
+
   if [[ "$BUILD_BINARY" -eq 1 ]]; then
     local build_dir build_version ldflags
     build_dir="$(mktemp -d)"
@@ -861,17 +1032,29 @@ EOF
 }
 
 install_files() {
+  local runtime_source="$SOURCE_DIR"
+  if [[ "$INSTALL_FROM_RELEASE" -eq 1 ]]; then
+    runtime_source="$RELEASE_EXTRACT_DIR"
+    BINARY_SOURCE="$runtime_source/$APP_NAME"
+  fi
+
   install -d -m 0755 "$INSTALL_DIR"
   install -m 0755 "$BINARY_SOURCE" "$INSTALL_DIR/$APP_NAME"
   install -d -m 0755 "$(dirname "$BIN_LINK")"
   ln -sfn "$INSTALL_DIR/$APP_NAME" "$BIN_LINK"
 
-  install_runtime_dir "$SOURCE_DIR/web" "$INSTALL_DIR/web"
+  install_runtime_dir "$runtime_source/web" "$INSTALL_DIR/web"
   install -d -m 0755 "$INSTALL_DIR/internal"
-  install_runtime_dir "$SOURCE_DIR/internal/bundles" "$INSTALL_DIR/internal/bundles"
+  install_runtime_dir "$runtime_source/internal/bundles" "$INSTALL_DIR/internal/bundles"
+  if [[ -d "$runtime_source/scripts" ]]; then
+    install_runtime_dir "$runtime_source/scripts" "$INSTALL_DIR/scripts"
+  fi
+  if [[ -f "$runtime_source/.postizer-version" ]]; then
+    install -m 0644 "$runtime_source/.postizer-version" "$INSTALL_DIR/.postizer-version"
+  fi
 
-  if [[ ! -d "$INSTALL_DIR/content" && -d "$SOURCE_DIR/content" ]]; then
-    cp -a "$SOURCE_DIR/content" "$INSTALL_DIR/content"
+  if [[ ! -d "$INSTALL_DIR/content" && -d "$runtime_source/content" ]]; then
+    cp -a "$runtime_source/content" "$INSTALL_DIR/content"
   fi
   mkdir -p "$INSTALL_DIR/content/posts" "$INSTALL_DIR/content/pages" "$INSTALL_DIR/content/tags"
   mkdir -p "$INSTALL_DIR/media"
@@ -879,6 +1062,13 @@ install_files() {
   chown root:"$SERVICE_GROUP" "$INSTALL_DIR"
   chmod 0750 "$INSTALL_DIR"
   chown -R root:root "$INSTALL_DIR/$APP_NAME" "$INSTALL_DIR/web" "$INSTALL_DIR/internal"
+  if [[ -d "$INSTALL_DIR/scripts" ]]; then
+    chown -R root:root "$INSTALL_DIR/scripts"
+    chmod -R u=rwX,go=rX "$INSTALL_DIR/scripts"
+  fi
+  if [[ -f "$INSTALL_DIR/.postizer-version" ]]; then
+    chown root:root "$INSTALL_DIR/.postizer-version"
+  fi
   chmod 0755 "$INSTALL_DIR/$APP_NAME"
   chmod -R u=rwX,go=rX "$INSTALL_DIR/web" "$INSTALL_DIR/internal"
   chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR/content" "$INSTALL_DIR/media"
@@ -919,15 +1109,15 @@ write_update_timer_files() {
   local updater_path="/usr/local/bin/$SERVICE_NAME-auto-update"
   local update_service_path="/etc/systemd/system/$UPDATE_SERVICE_NAME.service"
   local update_timer_path="/etc/systemd/system/$UPDATE_TIMER_NAME.timer"
-  local script_path="$SOURCE_DIR/scripts/install-linux-service.sh"
+  local script_path="$INSTALL_DIR/scripts/install-linux-service.sh"
 
   cat >"$updater_path" <<EOF
 #!/usr/bin/env bash
 set -Eeuo pipefail
 exec bash $(printf '%q' "$script_path") \\
   --auto-update-run \\
-  --source-dir $(printf '%q' "$SOURCE_DIR") \\
   --repo-url $(printf '%q' "$REPO_URL") \\
+  --release-version $(printf '%q' "$RELEASE_VERSION_REQUESTED") \\
   --install-dir $(printf '%q' "$INSTALL_DIR") \\
   --service-name $(printf '%q' "$SERVICE_NAME") \\
   --update-service-name $(printf '%q' "$UPDATE_SERVICE_NAME") \\
@@ -937,7 +1127,6 @@ exec bash $(printf '%q' "$script_path") \\
   --addr $(printf '%q' "$LISTEN_ADDR") \\
   --bin-link $(printf '%q' "$BIN_LINK") \\
   --env-file $(printf '%q' "$ENV_FILE") \\
-  --go-cache-dir $(printf '%q' "$GO_CACHE_ROOT") \\
   --update-interval $(printf '%q' "$UPDATE_TIMER_INTERVAL")
 EOF
   chmod 0755 "$updater_path"
@@ -950,7 +1139,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=$SOURCE_DIR
+WorkingDirectory=$INSTALL_DIR
 ExecStart=$updater_path
 EOF
 
@@ -972,7 +1161,7 @@ EOF
 
 if [[ "${EUID}" -ne 0 ]]; then
   validate_paths
-  if [[ -w "$SOURCE_DIR" && ( -e "$SOURCE_DIR/.git" || -f "$SOURCE_DIR/go.mod" ) ]]; then
+  if [[ "$INSTALL_FROM_RELEASE" -ne 1 && -w "$SOURCE_DIR" && ( -e "$SOURCE_DIR/.git" || -f "$SOURCE_DIR/go.mod" ) ]]; then
     if [[ "$AUTO_UPDATE_RUN" -eq 1 ]]; then
       update_source_tree_to_latest_release_tag
     else
@@ -994,18 +1183,22 @@ if [[ "$AUTO_UPDATE_RUN" -eq 1 ]] && ! auto_update_enabled; then
   echo "Automatic updates are disabled in $INSTALL_DIR/content/settings.json"
   exit 0
 fi
-if [[ "$AUTO_UPDATE_RUN" -eq 1 ]]; then
-  update_source_tree_to_latest_release_tag
+if [[ "$INSTALL_FROM_RELEASE" -eq 1 ]]; then
+  download_release_asset
 else
-  update_source_tree
+  if [[ "$AUTO_UPDATE_RUN" -eq 1 ]]; then
+    update_source_tree_to_latest_release_tag
+  else
+    update_source_tree
+  fi
+  if [[ "$AUTO_UPDATE_RUN" -eq 1 && "$GIT_UPDATED" -ne 1 ]]; then
+    echo "No newer release tag found."
+    exit 0
+  fi
+  load_go_requirement
+  prepare_go_build_environment
+  install_go_toolchain
 fi
-if [[ "$AUTO_UPDATE_RUN" -eq 1 && "$GIT_UPDATED" -ne 1 ]]; then
-  echo "No newer release tag found."
-  exit 0
-fi
-load_go_requirement
-prepare_go_build_environment
-install_go_toolchain
 need_command systemctl
 need_command cp
 need_command getent

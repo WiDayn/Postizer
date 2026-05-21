@@ -5,5 +5,7 @@
 /stop.sh
 /attach.sh
 /dist
+/.env
+/.env.local
 /*.log
 /*.exe

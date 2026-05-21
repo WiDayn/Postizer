@@ -16,6 +16,59 @@ Open:
 - Admin editor: <http://localhost:8080/admin>
 - Media library: <http://localhost:8080/admin/media>
 
+## Docker
+
+Build and run with Docker Compose:
+
+```bash
+cp .env.example .env
+# Edit .env and set a strong POSTIZER_ADMIN_PASSWORD and POSTIZER_SESSION_SECRET.
+docker compose up -d --build
+```
+
+Open <http://localhost:8080/>. Compose stores runtime data in named volumes:
+
+- `postizer-runtime`: the WordPress-style writable application runtime copied from the image on first start.
+- `postizer-content`: posts, pages, settings, session secret, and admin credentials.
+- `postizer-media`: uploaded media files and the media index.
+
+The Docker image seeds `/app/runtime/current` from `/usr/src/postizer` when the runtime volume is empty, then starts Postizer from that writable runtime path. This lets future in-app updates replace the runtime files without depending on the Docker image tag.
+When Admin -> Settings -> Auto Update is enabled, the Docker image checks `POSTIZER_REPO_URL` for the newest GitHub Release with a `vX.X.X` tag, downloads the matching `postizer-vX.X.X-linux-<arch>.tar.gz`, verifies `SHA256SUMS`, switches `/app/runtime/current`, and exits so Docker can restart into the new build.
+
+For a direct Docker run:
+
+```bash
+docker build -t postizer:latest .
+docker run -d --name postizer \
+  -p 8080:8080 \
+  -v postizer-runtime:/app/runtime \
+  -v postizer-content:/app/content \
+  -v postizer-media:/app/media \
+  -e POSTIZER_ADMIN_USER=admin \
+  -e POSTIZER_ADMIN_PASSWORD='change-this-password' \
+  -e POSTIZER_SESSION_SECRET='change-this-long-random-secret' \
+  -e POSTIZER_REPO_URL='https://github.com/WiDayn/Postizer.git' \
+  -e POSTIZER_RELEASE_VERSION='latest' \
+  postizer:latest
+```
+
+To publish the Docker image automatically, create these GitHub repository secrets:
+
+- `DOCKERHUB_USERNAME`: your Docker Hub username or organization.
+- `DOCKERHUB_TOKEN`: a Docker Hub access token with write access.
+
+Then push a version tag:
+
+```bash
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+The release workflow publishes GitHub Release assets and pushes:
+
+- `DOCKERHUB_USERNAME/postizer:v0.1.2`
+- `DOCKERHUB_USERNAME/postizer:latest`
+
 ## Linux Service Install
 
 On a Linux host with systemd:
@@ -25,16 +78,14 @@ curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/instal
   --service-name postizer \
   --port 8080 \
   --install-dir /opt/postizer \
-  --source-dir /usr/local/src/postizer \
   --env-file /etc/postizer/postizer.env \
   --bin-link /usr/local/bin/postizer \
-  --go-cache-dir /var/cache/postizer/go \
   --update-service-name postizer-update \
   --update-timer-name postizer-update \
   --update-interval 15min
 ```
 
-The installer clones `https://github.com/WiDayn/Postizer.git` into `/usr/local/src/postizer` when needed, runs `git pull --ff-only` for an existing Git checkout during manual installs, installs missing base dependencies where possible, downloads the Go version required by `go.mod` when needed, builds Postizer, installs the runtime into `/opt/postizer`, writes `/etc/postizer/postizer.env`, registers `postizer.service`, enables it, starts it, and registers `postizer-update.timer`. If `POSTIZER_ADMIN_PASSWORD` is not set, the installer generates an initial admin password and prints it once. Automatic updates are off by default and can be enabled in Admin -> Settings -> Auto Update; the timer only upgrades when a newer release tag matching `vX.X.X` is available, so ordinary commits are ignored.
+The installer downloads the latest GitHub Release asset matching the host architecture, verifies `SHA256SUMS`, installs the runtime into `/opt/postizer`, writes `/etc/postizer/postizer.env`, registers `postizer.service`, enables it, starts it, and registers `postizer-update.timer`. If `POSTIZER_ADMIN_PASSWORD` is not set, the installer generates an initial admin password and prints it once. Automatic updates are off by default and can be enabled in Admin -> Settings -> Auto Update; the timer only upgrades when a newer GitHub Release tag matching `vX.X.X` is available, so ordinary commits are ignored.
 
 If you are already inside a cloned repository, you can also run:
 
@@ -48,22 +99,22 @@ Common options:
 curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo env POSTIZER_ADMIN_PASSWORD='change-this-password' bash
 curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash -s -- --addr 127.0.0.1:8080 --no-start
 curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash -s -- --service-name postizer-blog2 --port 8081
+curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash -s -- --release-version v1.2.3
 bash scripts/install-linux-service.sh --binary ./postizer
 bash scripts/install-linux-service.sh --skip-deps
-bash scripts/install-linux-service.sh --source-dir /srv/postizer-src
-bash scripts/install-linux-service.sh --no-git-pull
+bash scripts/install-linux-service.sh --build-from-source --source-dir /srv/postizer-src
 bash scripts/install-linux-service.sh --no-update-timer
 ```
 
-For multiple instances on one host, use a unique `--service-name` and port. Unless overridden, the installer derives isolated paths from the service name, such as `/opt/postizer-blog2`, `/etc/postizer-blog2/postizer-blog2.env`, `/usr/local/bin/postizer-blog2`, `/var/cache/postizer-blog2/go`, and `postizer-blog2-update.timer`. You can override the pieces individually with `--install-dir`, `--source-dir`, `--bin-link`, `--env-dir`, `--env-file`, `--go-cache-dir`, `--update-service-name`, and `--update-timer-name`.
+For multiple instances on one host, use a unique `--service-name` and port. Unless overridden, the installer derives isolated paths from the service name, such as `/opt/postizer-blog2`, `/etc/postizer-blog2/postizer-blog2.env`, `/usr/local/bin/postizer-blog2`, and `postizer-blog2-update.timer`. You can override the pieces individually with `--install-dir`, `--bin-link`, `--env-dir`, `--env-file`, `--update-service-name`, and `--update-timer-name`.
 
 Installer options:
 
 | Option | Description |
 | --- | --- |
 | `--install-dir PATH` | Runtime directory. Defaults to `/opt/<service-name>`. |
-| `--source-dir PATH` | Source checkout directory. Defaults to `/usr/local/src/<service-name>`. |
-| `--repo-url URL` | Git repository to clone. Defaults to `https://github.com/WiDayn/Postizer.git`. |
+| `--release-version VERSION` | GitHub Release version to install. Defaults to `latest`. |
+| `--repo-url URL` | GitHub repository used for release assets. Defaults to `https://github.com/WiDayn/Postizer.git`. |
 | `--service-name NAME` | systemd service name. Defaults to `postizer`. |
 | `--update-service-name NAME` | systemd oneshot update service name. Defaults to `<service-name>-update`. |
 | `--update-timer-name NAME`, `--timer-name NAME` | systemd update timer name. Defaults to `<update-service-name>`. |
@@ -75,11 +126,13 @@ Installer options:
 | `--bin-link PATH` | Symlink path for the installed binary. Defaults to `/usr/local/bin/<service-name>`. |
 | `--env-dir PATH` | Environment file directory. Defaults to `/etc/<service-name>`. |
 | `--env-file PATH` | Environment file path. Defaults to `<env-dir>/<service-name>.env`. |
-| `--go-cache-dir PATH` | Go build/module cache root. Defaults to `/var/cache/<service-name>/go`. |
 | `--binary PATH` | Install an existing binary instead of building from source. |
 | `--no-build` | Use `./postizer` from the source directory. |
-| `--no-git-pull`, `--skip-git-pull` | Do not update an existing Git checkout before building. |
-| `--skip-deps` | Do not install missing OS packages or Go automatically. |
+| `--build-from-source` | Build from a Git checkout instead of using a release asset. |
+| `--source-dir PATH` | Source checkout directory, only used with `--build-from-source`. |
+| `--go-cache-dir PATH` | Go build/module cache root, only used with `--build-from-source`. |
+| `--no-git-pull`, `--skip-git-pull` | Do not update an existing Git checkout before building from source. |
+| `--skip-deps` | Do not install missing OS packages automatically. |
 | `--no-update-timer` | Do not register the automatic update timer. |
 | `--no-enable` | Do not enable the service at boot. |
 | `--no-start` | Do not start or restart the service after installation. |
