@@ -681,13 +681,15 @@ write_env_file() {
   local admin_password="${POSTIZER_ADMIN_PASSWORD:-$(random_secret 18)}"
   local session_secret="${POSTIZER_SESSION_SECRET:-$(random_secret 48)}"
 
-  umask 077
-  cat >"$ENV_FILE" <<EOF
+  (
+    umask 077
+    cat >"$ENV_FILE" <<EOF
 POSTIZER_ADDR=$(env_quote "$LISTEN_ADDR")
 POSTIZER_ADMIN_USER=$(env_quote "$admin_user")
 POSTIZER_ADMIN_PASSWORD=$(env_quote "$admin_password")
 POSTIZER_SESSION_SECRET=$(env_quote "$session_secret")
 EOF
+  )
   chmod 600 "$ENV_FILE"
 
   echo
@@ -699,13 +701,13 @@ EOF
 }
 
 install_files() {
-  mkdir -p "$INSTALL_DIR"
+  install -d -m 0755 "$INSTALL_DIR"
   install -m 0755 "$BINARY_SOURCE" "$INSTALL_DIR/$APP_NAME"
-  mkdir -p "$(dirname "$BIN_LINK")"
+  install -d -m 0755 "$(dirname "$BIN_LINK")"
   ln -sfn "$INSTALL_DIR/$APP_NAME" "$BIN_LINK"
 
   install_runtime_dir "$SOURCE_DIR/web" "$INSTALL_DIR/web"
-  mkdir -p "$INSTALL_DIR/internal"
+  install -d -m 0755 "$INSTALL_DIR/internal"
   install_runtime_dir "$SOURCE_DIR/internal/bundles" "$INSTALL_DIR/internal/bundles"
 
   if [[ ! -d "$INSTALL_DIR/content" && -d "$SOURCE_DIR/content" ]]; then
@@ -714,7 +716,11 @@ install_files() {
   mkdir -p "$INSTALL_DIR/content/posts" "$INSTALL_DIR/content/pages" "$INSTALL_DIR/content/tags"
   mkdir -p "$INSTALL_DIR/media"
 
+  chown root:"$SERVICE_GROUP" "$INSTALL_DIR"
+  chmod 0750 "$INSTALL_DIR"
   chown -R root:root "$INSTALL_DIR/$APP_NAME" "$INSTALL_DIR/web" "$INSTALL_DIR/internal"
+  chmod 0755 "$INSTALL_DIR/$APP_NAME"
+  chmod -R u=rwX,go=rX "$INSTALL_DIR/web" "$INSTALL_DIR/internal"
   chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR/content" "$INSTALL_DIR/media"
 }
 
