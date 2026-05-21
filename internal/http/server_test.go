@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -183,6 +184,22 @@ func mediaTypeFilterByID(filters []MediaTypeFilter, id string) MediaTypeFilter {
 		}
 	}
 	return MediaTypeFilter{}
+}
+
+func requireTestGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+}
+
+func runTestGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+	}
 }
 
 func containsLog(logs []string, pattern string) bool {
@@ -596,6 +613,207 @@ func TestUpdateHomePageSettingsSavesPageSize(t *testing.T) {
 	}
 	if got, want := settings.HomePage.PageSize, 7; got != want {
 		t.Fatalf("home page size = %d, want %d", got, want)
+	}
+}
+
+func TestUpdateAdminAccountSettingsSavesHashedCredentials(t *testing.T) {
+	contentRoot := t.TempDir()
+	s := &Server{
+		contentRoot: contentRoot,
+		auth: authConfig{
+			user:   "admin",
+			pass:   "old-password",
+			secret: []byte("test-session-secret-that-is-long-enough"),
+		},
+	}
+	request := httptest.NewRequest("POST", "/admin/api/settings/admin-account", bytes.NewBufferString(`{
+  "username": "editor",
+  "current_password": "old-password",
+  "new_password": "new-password",
+  "confirm_password": "new-password"
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateAdminAccountSettings(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("updateAdminAccountSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	credentials, ok, err := loadStoredAdminCredentials(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("stored admin credentials were not written")
+	}
+	if got, want := credentials.Username, "editor"; got != want {
+		t.Fatalf("username = %q, want %q", got, want)
+	}
+	if credentials.PasswordHash == "" || strings.Contains(credentials.PasswordHash, "new-password") {
+		t.Fatalf("password should be stored as a hash, got %q", credentials.PasswordHash)
+	}
+	if !verifyAdminPasswordHash(credentials.PasswordHash, "new-password") {
+		t.Fatal("stored password hash did not verify new password")
+	}
+	if verifyAdminPasswordHash(credentials.PasswordHash, "old-password") {
+		t.Fatal("stored password hash should not verify old password")
+	}
+	auth := s.authSnapshot()
+	if got, want := auth.user, "editor"; got != want {
+		t.Fatalf("runtime auth username = %q, want %q", got, want)
+	}
+	if !auth.verifyPassword("new-password") {
+		t.Fatal("runtime auth should accept new password")
+	}
+}
+
+func TestUpdateAdminAccountSettingsRejectsWrongCurrentPassword(t *testing.T) {
+	contentRoot := t.TempDir()
+	s := &Server{
+		contentRoot: contentRoot,
+		auth: authConfig{
+			user:   "admin",
+			pass:   "old-password",
+			secret: []byte("test-session-secret-that-is-long-enough"),
+		},
+	}
+	request := httptest.NewRequest("POST", "/admin/api/settings/admin-account", bytes.NewBufferString(`{
+  "username": "editor",
+  "current_password": "wrong-password",
+  "new_password": "new-password",
+  "confirm_password": "new-password"
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateAdminAccountSettings(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("updateAdminAccountSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if _, ok, err := loadStoredAdminCredentials(contentRoot); err != nil || ok {
+		t.Fatalf("credentials should not be stored, ok = %v err = %v", ok, err)
+	}
+}
+
+func TestNewAuthConfigLoadsStoredAdminCredentials(t *testing.T) {
+	contentRoot := t.TempDir()
+	passwordHash, err := hashAdminPassword("stored-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveStoredAdminCredentials(contentRoot, storedAdminCredentials{
+		Username:     "stored-admin",
+		PasswordHash: passwordHash,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	auth := newAuthConfig(contentRoot)
+
+	if got, want := auth.user, "stored-admin"; got != want {
+		t.Fatalf("auth user = %q, want %q", got, want)
+	}
+	if !auth.verifyPassword("stored-password") {
+		t.Fatal("auth should verify stored password")
+	}
+	if auth.verifyPassword("postizer") {
+		t.Fatal("auth should not fall back to default password when stored credentials exist")
+	}
+}
+
+func TestCurrentAppVersionUsesBuildValueAndEnvOverride(t *testing.T) {
+	previous := AppVersion
+	AppVersion = "v1.2.3"
+	t.Cleanup(func() { AppVersion = previous })
+
+	t.Setenv("POSTIZER_VERSION", "")
+	if got, want := currentAppVersion(), "v1.2.3"; got != want {
+		t.Fatalf("current app version = %q, want %q", got, want)
+	}
+
+	t.Setenv("POSTIZER_VERSION", "v9.9.9")
+	if got, want := currentAppVersion(), "v9.9.9"; got != want {
+		t.Fatalf("current app version with env override = %q, want %q", got, want)
+	}
+}
+
+func TestAdminUpdateSettingsRendersCurrentVersion(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	previous := AppVersion
+	AppVersion = "v1.2.3"
+	defer func() { AppVersion = previous }()
+
+	templates, err := loadTemplates(appearance.Pack{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		store:     &site.Store{Settings: site.Settings{}},
+		templates: templates,
+	}
+	request := httptest.NewRequest("GET", "/admin/settings/updates", nil)
+	response := httptest.NewRecorder()
+
+	s.adminUpdateSettings(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("adminUpdateSettings status = %d, body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "v1.2.3") {
+		t.Fatalf("update settings page should include current version:\n%s", body)
+	}
+}
+
+func TestGitDirectoryChangelogGroupsReleaseCommits(t *testing.T) {
+	requireTestGit(t)
+	repo := t.TempDir()
+	runTestGit(t, repo, "init")
+	runTestGit(t, repo, "config", "user.email", "test@example.com")
+	runTestGit(t, repo, "config", "user.name", "Postizer Test")
+
+	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("first\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "notes.txt")
+	runTestGit(t, repo, "commit", "-m", "initial release")
+	runTestGit(t, repo, "tag", "v0.1.0")
+
+	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("first\nsecond\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, repo, "add", "notes.txt")
+	runTestGit(t, repo, "commit", "-m", "add backend changelog")
+	runTestGit(t, repo, "tag", "v0.2.0")
+
+	releases := gitDirectoryChangelog(repo)
+
+	if len(releases) < 2 {
+		t.Fatalf("releases = %#v, want at least 2", releases)
+	}
+	if got, want := releases[0].Version, "v0.2.0"; got != want {
+		t.Fatalf("latest release = %q, want %q", got, want)
+	}
+	if !releases[0].Current {
+		t.Fatal("latest release should be marked current")
+	}
+	if len(releases[0].Items) != 1 || releases[0].Items[0].Summary != "add backend changelog" {
+		t.Fatalf("latest release items = %#v, want second commit only", releases[0].Items)
+	}
+	if got, want := releases[1].Version, "v0.1.0"; got != want {
+		t.Fatalf("previous release = %q, want %q", got, want)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -45,6 +47,7 @@ type Server struct {
 	pluginJobs         map[string]*importJob
 	auth               authConfig
 	mu                 sync.RWMutex
+	authMu             sync.RWMutex
 	commentMu          sync.RWMutex
 	pluginUploadMu     sync.Mutex
 	pluginJobMu        sync.RWMutex
@@ -84,6 +87,9 @@ type ViewData struct {
 	Error         string
 	Remember      bool
 	IsAdmin       bool
+	AdminUsername string
+	AppVersion    string
+	Changelog     []ChangelogRelease
 	EditorKind    string
 	EditorSlug    string
 	Pagination    Pagination
@@ -124,21 +130,49 @@ type MediaTypeFilter struct {
 	Active   bool
 }
 
+type ChangelogRelease struct {
+	Version string
+	Date    string
+	Current bool
+	Items   []ChangelogItem
+}
+
+type ChangelogItem struct {
+	Hash    string
+	Date    string
+	Summary string
+}
+
 type authConfig struct {
-	user   string
-	pass   string
-	secret []byte
+	user         string
+	pass         string
+	passwordHash string
+	secret       []byte
+}
+
+type storedAdminCredentials struct {
+	Username     string `json:"username"`
+	PasswordHash string `json:"password_hash"`
 }
 
 const (
 	sessionCookieName        = "postizer_session"
 	sessionDuration          = 8 * time.Hour
 	rememberSessionDuration  = 30 * 24 * time.Hour
+	adminCredentialsFile     = ".admin_credentials.json"
+	adminPasswordHashScheme  = "pbkdf2-sha256"
+	adminPasswordHashRounds  = 120000
+	adminPasswordHashSaltLen = 16
+	adminPasswordHashKeyLen  = 32
+	maxChangelogReleases     = 6
+	maxChangelogItems        = 20
 	adminListPageSize        = 20
 	maxPluginActionFileBytes = 32 << 20
 	maxPluginMediaBytes      = 64 << 20
 	pluginSettingsUIOutlet   = "admin.plugin"
 )
+
+var AppVersion = "dev"
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
 	s := &Server{
@@ -218,6 +252,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/settings/auto-update", s.requireAdmin(http.HandlerFunc(s.updateAutoUpdateSettings)))
 	mux.Handle("POST /admin/api/settings/comments", s.requireAdmin(http.HandlerFunc(s.updateCommentSettings)))
 	mux.Handle("POST /admin/api/settings/home-page", s.requireAdmin(http.HandlerFunc(s.updateHomePageSettings)))
+	mux.Handle("POST /admin/api/settings/admin-account", s.requireAdmin(http.HandlerFunc(s.updateAdminAccountSettings)))
 	mux.Handle("POST /admin/api/settings/time-zone", s.requireAdmin(http.HandlerFunc(s.updateTimeZoneSettings)))
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/menus", s.requireAdmin(http.HandlerFunc(s.updateMenus)))
@@ -508,14 +543,14 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 	user := r.FormValue("username")
 	pass := r.FormValue("password")
 	remember := r.FormValue("remember") == "on"
-	if subtle.ConstantTimeCompare([]byte(user), []byte(s.auth.user)) != 1 ||
-		subtle.ConstantTimeCompare([]byte(pass), []byte(s.auth.pass)) != 1 {
+	auth := s.authSnapshot()
+	if subtle.ConstantTimeCompare([]byte(user), []byte(auth.user)) != 1 || !auth.verifyPassword(pass) {
 		store := s.currentStore()
 		w.WriteHeader(http.StatusUnauthorized)
 		s.render(w, "login.html", ViewData{Title: "Admin Login", TitleKey: "title.admin.login", Store: store, Error: "Invalid username or password", Remember: remember})
 		return
 	}
-	http.SetCookie(w, s.sessionCookie(user, remember))
+	http.SetCookie(w, s.sessionCookie(auth.user, remember))
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }
 
@@ -864,7 +899,7 @@ func (s *Server) adminThemeSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminSettings(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin_settings.html", ViewData{Title: "Settings", TitleKey: "title.admin.settings", Store: store, ActiveAdmin: "settings"})
+	s.render(w, "admin_settings.html", ViewData{Title: "Settings", TitleKey: "title.admin.settings", Store: store, ActiveAdmin: "settings", AdminUsername: s.authSnapshot().user})
 }
 
 func (s *Server) adminPermalinks(w http.ResponseWriter, r *http.Request) {
@@ -874,7 +909,14 @@ func (s *Server) adminPermalinks(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin_updates.html", ViewData{Title: "Auto Update", TitleKey: "title.admin.updates", Store: store, ActiveAdmin: "updates"})
+	s.render(w, "admin_updates.html", ViewData{
+		Title:       "Auto Update",
+		TitleKey:    "title.admin.updates",
+		Store:       store,
+		ActiveAdmin: "updates",
+		AppVersion:  currentAppVersion(),
+		Changelog:   currentAppChangelog(),
+	})
 }
 
 func (s *Server) replyToComment(w http.ResponseWriter, r *http.Request) {
@@ -1336,6 +1378,75 @@ func (s *Server) updateHomePageSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, s.currentStore().Settings.HomePage)
+}
+
+func (s *Server) updateAdminAccountSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload struct {
+		Username        string `json:"username"`
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+		ConfirmPassword string `json:"confirm_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	username := strings.TrimSpace(payload.Username)
+	if username == "" {
+		http.Error(w, "username is required", http.StatusBadRequest)
+		return
+	}
+	if strings.ContainsAny(username, "\r\n\t|") {
+		http.Error(w, "username contains unsupported characters", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(payload.CurrentPassword) == "" {
+		http.Error(w, "current password is required", http.StatusBadRequest)
+		return
+	}
+
+	auth := s.authSnapshot()
+	if !auth.verifyPassword(payload.CurrentPassword) {
+		http.Error(w, "current password is incorrect", http.StatusUnauthorized)
+		return
+	}
+
+	password := payload.CurrentPassword
+	if payload.NewPassword != "" || payload.ConfirmPassword != "" {
+		if len([]rune(payload.NewPassword)) < 8 {
+			http.Error(w, "new password must be at least 8 characters", http.StatusBadRequest)
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(payload.NewPassword), []byte(payload.ConfirmPassword)) != 1 {
+			http.Error(w, "new passwords do not match", http.StatusBadRequest)
+			return
+		}
+		password = payload.NewPassword
+	}
+
+	hash, err := hashAdminPassword(password)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	credentials := storedAdminCredentials{
+		Username:     username,
+		PasswordHash: hash,
+	}
+	if err := saveStoredAdminCredentials(s.contentRoot, credentials); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	nextAuth := auth
+	nextAuth.user = username
+	nextAuth.pass = ""
+	nextAuth.passwordHash = hash
+	s.setAuth(nextAuth)
+	http.SetCookie(w, s.sessionCookie(username, false))
+	writeJSON(w, map[string]string{"username": username})
 }
 
 func (s *Server) updateTimeZoneSettings(w http.ResponseWriter, r *http.Request) {
@@ -2815,11 +2926,19 @@ func newAuthConfig(contentRoot string) authConfig {
 	if len(secret) == 0 {
 		secret = localSessionSecret(filepath.Join(contentRoot, ".session_secret"))
 	}
-	return authConfig{
+	auth := authConfig{
 		user:   env("POSTIZER_ADMIN_USER", "admin"),
 		pass:   env("POSTIZER_ADMIN_PASSWORD", "postizer"),
 		secret: secret,
 	}
+	if credentials, ok, err := loadStoredAdminCredentials(contentRoot); err != nil {
+		log.Printf("load admin credentials: %v", err)
+	} else if ok {
+		auth.user = credentials.Username
+		auth.pass = ""
+		auth.passwordHash = credentials.PasswordHash
+	}
+	return auth
 }
 
 func localSessionSecret(path string) []byte {
@@ -2851,6 +2970,257 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func currentAppVersion() string {
+	version := strings.TrimSpace(os.Getenv("POSTIZER_VERSION"))
+	if version != "" {
+		return version
+	}
+	version = strings.TrimSpace(AppVersion)
+	if version != "" && version != "dev" {
+		return version
+	}
+	if gitVersion := discoverAppVersionFromGit(); gitVersion != "" {
+		return gitVersion
+	}
+	if version != "" {
+		return version
+	}
+	return "dev"
+}
+
+func sourceDirectoryCandidates() []string {
+	candidates := make([]string, 0, 3)
+	if sourceDir := strings.TrimSpace(os.Getenv("POSTIZER_SOURCE_DIR")); sourceDir != "" {
+		candidates = append(candidates, sourceDir)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, cwd)
+	}
+	candidates = append(candidates, "/usr/local/src/postizer")
+
+	dirs := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		dir := filepath.Clean(candidate)
+		if dir == "." || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+func discoverAppVersionFromGit() string {
+	for _, dir := range sourceDirectoryCandidates() {
+		if version := gitDirectoryVersion(dir); version != "" {
+			return version
+		}
+	}
+	return ""
+}
+
+func gitDirectoryVersion(dir string) string {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return ""
+	}
+	exactTag := gitOutput(dir, "describe", "--tags", "--exact-match", "--match", "v[0-9]*.[0-9]*.[0-9]*", "HEAD")
+	dirty := gitOutput(dir, "status", "--porcelain") != ""
+	if exactTag != "" && !dirty {
+		return exactTag
+	}
+	shortCommit := gitOutput(dir, "rev-parse", "--short", "HEAD")
+	if shortCommit == "" {
+		return ""
+	}
+	if dirty {
+		return "dev-" + shortCommit + "-dirty"
+	}
+	return "dev-" + shortCommit
+}
+
+func currentAppChangelog() []ChangelogRelease {
+	for _, dir := range sourceDirectoryCandidates() {
+		if releases := gitDirectoryChangelog(dir); len(releases) > 0 {
+			return releases
+		}
+	}
+	return nil
+}
+
+func gitDirectoryChangelog(dir string) []ChangelogRelease {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return nil
+	}
+	tags := releaseTagsForChangelog(dir)
+	if len(tags) == 0 {
+		return nil
+	}
+	currentCommit := gitOutput(dir, "rev-parse", "HEAD")
+	releases := make([]ChangelogRelease, 0, min(len(tags), maxChangelogReleases))
+	for index, tag := range tags {
+		if len(releases) >= maxChangelogReleases {
+			break
+		}
+		tagCommit := gitOutput(dir, "rev-list", "-n", "1", tag)
+		if tagCommit == "" {
+			continue
+		}
+		previousTag := ""
+		if index+1 < len(tags) {
+			previousTag = tags[index+1]
+		}
+		release := ChangelogRelease{
+			Version: tag,
+			Date:    gitOutput(dir, "log", "-1", "--format=%cs", tag),
+			Current: currentCommit != "" && currentCommit == tagCommit,
+			Items:   gitChangelogItems(dir, tag, previousTag),
+		}
+		releases = append(releases, release)
+	}
+	return releases
+}
+
+func releaseTagsForChangelog(dir string) []string {
+	raw := gitOutput(dir, "tag", "--merged", "HEAD", "--list", "v[0-9]*.[0-9]*.[0-9]*", "--sort=-v:refname")
+	if raw == "" {
+		raw = gitOutput(dir, "tag", "--list", "v[0-9]*.[0-9]*.[0-9]*", "--sort=-v:refname")
+	}
+	tags := make([]string, 0, maxChangelogReleases+1)
+	for _, line := range strings.Split(raw, "\n") {
+		tag := strings.TrimSpace(line)
+		if !isReleaseTag(tag) {
+			continue
+		}
+		tags = append(tags, tag)
+		if len(tags) >= maxChangelogReleases+1 {
+			break
+		}
+	}
+	return tags
+}
+
+func isReleaseTag(tag string) bool {
+	if !strings.HasPrefix(tag, "v") {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(tag, "v"), ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func gitChangelogItems(dir, tag, previousTag string) []ChangelogItem {
+	revision := tag
+	if previousTag != "" {
+		revision = previousTag + ".." + tag
+	}
+	raw := gitOutput(dir, "log", "--max-count="+strconv.Itoa(maxChangelogItems), "--format=%h%x1f%cs%x1f%s", revision)
+	if raw == "" {
+		return nil
+	}
+	items := make([]ChangelogItem, 0)
+	for _, line := range strings.Split(raw, "\n") {
+		parts := strings.SplitN(line, "\x1f", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		items = append(items, ChangelogItem{
+			Hash:    strings.TrimSpace(parts[0]),
+			Date:    strings.TrimSpace(parts[1]),
+			Summary: strings.TrimSpace(parts[2]),
+		})
+	}
+	return items
+}
+
+func gitOutput(dir string, args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func adminCredentialsPath(contentRoot string) string {
+	return filepath.Join(contentRoot, adminCredentialsFile)
+}
+
+func loadStoredAdminCredentials(contentRoot string) (storedAdminCredentials, bool, error) {
+	body, err := os.ReadFile(adminCredentialsPath(contentRoot))
+	if errors.Is(err, os.ErrNotExist) {
+		return storedAdminCredentials{}, false, nil
+	}
+	if err != nil {
+		return storedAdminCredentials{}, false, err
+	}
+	var credentials storedAdminCredentials
+	if err := json.Unmarshal(body, &credentials); err != nil {
+		return storedAdminCredentials{}, false, err
+	}
+	credentials.Username = strings.TrimSpace(credentials.Username)
+	credentials.PasswordHash = strings.TrimSpace(credentials.PasswordHash)
+	if credentials.Username == "" || credentials.PasswordHash == "" {
+		return storedAdminCredentials{}, false, fmt.Errorf("stored admin credentials are incomplete")
+	}
+	if !validAdminPasswordHash(credentials.PasswordHash) {
+		return storedAdminCredentials{}, false, fmt.Errorf("stored admin password hash is invalid")
+	}
+	return credentials, true, nil
+}
+
+func saveStoredAdminCredentials(contentRoot string, credentials storedAdminCredentials) error {
+	if err := os.MkdirAll(contentRoot, 0755); err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(credentials, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := adminCredentialsPath(contentRoot)
+	if err := os.WriteFile(path, append(body, '\n'), 0600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0600)
+}
+
+func (s *Server) authSnapshot() authConfig {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	auth := s.auth
+	if auth.secret != nil {
+		auth.secret = append([]byte(nil), auth.secret...)
+	}
+	return auth
+}
+
+func (s *Server) setAuth(auth authConfig) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.auth = auth
+}
+
+func (auth authConfig) verifyPassword(password string) bool {
+	if auth.passwordHash != "" {
+		return verifyAdminPasswordHash(auth.passwordHash, password)
+	}
+	return subtle.ConstantTimeCompare([]byte(password), []byte(auth.pass)) == 1
 }
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
@@ -2898,6 +3268,7 @@ func (s *Server) mirrorAdminSessionCookie(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) sessionCookie(user string, remember bool) *http.Cookie {
+	auth := s.authSnapshot()
 	duration := sessionDuration
 	if remember {
 		duration = rememberSessionDuration
@@ -2906,7 +3277,7 @@ func (s *Server) sessionCookie(user string, remember bool) *http.Cookie {
 	payload := user + "|" + strconv.FormatInt(expires.Unix(), 10)
 	cookie := &http.Cookie{
 		Name:     sessionCookieName,
-		Value:    signPayload(payload, s.auth.secret),
+		Value:    signPayload(payload, auth.secret),
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -2919,12 +3290,13 @@ func (s *Server) sessionCookie(user string, remember bool) *http.Cookie {
 }
 
 func (s *Server) verifySession(value string) bool {
-	payload, ok := verifySignedPayload(value, s.auth.secret)
+	auth := s.authSnapshot()
+	payload, ok := verifySignedPayload(value, auth.secret)
 	if !ok {
 		return false
 	}
 	user, expRaw, ok := strings.Cut(payload, "|")
-	if !ok || subtle.ConstantTimeCompare([]byte(user), []byte(s.auth.user)) != 1 {
+	if !ok || subtle.ConstantTimeCompare([]byte(user), []byte(auth.user)) != 1 {
 		return false
 	}
 	exp, err := strconv.ParseInt(expRaw, 10, 64)
@@ -2958,6 +3330,82 @@ func verifySignedPayload(value string, secret []byte) (string, bool) {
 		return "", false
 	}
 	return string(payload), true
+}
+
+func hashAdminPassword(password string) (string, error) {
+	salt := make([]byte, adminPasswordHashSaltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	key := pbkdf2SHA256Key([]byte(password), salt, adminPasswordHashRounds, adminPasswordHashKeyLen)
+	return strings.Join([]string{
+		adminPasswordHashScheme,
+		strconv.Itoa(adminPasswordHashRounds),
+		base64.RawURLEncoding.EncodeToString(salt),
+		base64.RawURLEncoding.EncodeToString(key),
+	}, "$"), nil
+}
+
+func validAdminPasswordHash(encoded string) bool {
+	_, _, _, ok := parseAdminPasswordHash(encoded)
+	return ok
+}
+
+func verifyAdminPasswordHash(encoded, password string) bool {
+	rounds, salt, expected, ok := parseAdminPasswordHash(encoded)
+	if !ok {
+		return false
+	}
+	key := pbkdf2SHA256Key([]byte(password), salt, rounds, len(expected))
+	return subtle.ConstantTimeCompare(key, expected) == 1
+}
+
+func parseAdminPasswordHash(encoded string) (int, []byte, []byte, bool) {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 4 || parts[0] != adminPasswordHashScheme {
+		return 0, nil, nil, false
+	}
+	rounds, err := strconv.Atoi(parts[1])
+	if err != nil || rounds < 10000 {
+		return 0, nil, nil, false
+	}
+	salt, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(salt) < 8 {
+		return 0, nil, nil, false
+	}
+	key, err := base64.RawURLEncoding.DecodeString(parts[3])
+	if err != nil || len(key) < 16 {
+		return 0, nil, nil, false
+	}
+	return rounds, salt, key, true
+}
+
+func pbkdf2SHA256Key(password, salt []byte, rounds, keyLen int) []byte {
+	if rounds <= 0 || keyLen <= 0 {
+		return nil
+	}
+	hashLen := sha256.Size
+	blockCount := (keyLen + hashLen - 1) / hashLen
+	derived := make([]byte, 0, blockCount*hashLen)
+	var counter [4]byte
+	for block := 1; block <= blockCount; block++ {
+		binary.BigEndian.PutUint32(counter[:], uint32(block))
+		mac := hmac.New(sha256.New, password)
+		mac.Write(salt)
+		mac.Write(counter[:])
+		u := mac.Sum(nil)
+		t := append([]byte(nil), u...)
+		for i := 1; i < rounds; i++ {
+			mac = hmac.New(sha256.New, password)
+			mac.Write(u)
+			u = mac.Sum(nil)
+			for j := range t {
+				t[j] ^= u[j]
+			}
+		}
+		derived = append(derived, t...)
+	}
+	return derived[:keyLen]
 }
 
 func timing(next http.Handler) http.Handler {

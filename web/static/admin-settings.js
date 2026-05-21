@@ -20,6 +20,12 @@ const siteTitleSettingsForm = document.querySelector("#siteTitleSettingsForm");
 const siteTitleStatus = document.querySelector("#siteTitleStatus");
 const siteTitleMain = document.querySelector("#siteTitleMain");
 const siteTitleSubtitle = document.querySelector("#siteTitleSubtitle");
+const adminAccountSettingsForm = document.querySelector("#adminAccountSettingsForm");
+const adminAccountStatus = document.querySelector("#adminAccountStatus");
+const adminAccountUsername = document.querySelector("#adminAccountUsername");
+const adminAccountCurrentPassword = document.querySelector("#adminAccountCurrentPassword");
+const adminAccountNewPassword = document.querySelector("#adminAccountNewPassword");
+const adminAccountConfirmPassword = document.querySelector("#adminAccountConfirmPassword");
 const permalinkSettingsForm = document.querySelector("#permalinkSettingsForm");
 const permalinkStatus = document.querySelector("#permalinkStatus");
 const permalinkPostPattern = document.querySelector("#permalinkPostPattern");
@@ -83,6 +89,10 @@ function setHomeImageStatus(message) {
 
 function setSiteTitleStatus(message) {
   if (siteTitleStatus) siteTitleStatus.textContent = message;
+}
+
+function setAdminAccountStatus(message) {
+  if (adminAccountStatus) adminAccountStatus.textContent = message;
 }
 
 function setPermalinkStatus(message) {
@@ -848,6 +858,52 @@ if (siteTitleSettingsForm && siteTitleMain && siteTitleSubtitle) {
     if (typeof result.main === "string") siteTitleMain.value = result.main;
     if (typeof result.subtitle === "string") siteTitleSubtitle.value = result.subtitle;
     setSiteTitleStatus(tr("settings.status.saved", "Saved"));
+  });
+}
+
+if (adminAccountSettingsForm && adminAccountUsername && adminAccountCurrentPassword && adminAccountNewPassword && adminAccountConfirmPassword) {
+  adminAccountSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = String(adminAccountUsername.value || "").trim();
+    const currentPassword = String(adminAccountCurrentPassword.value || "");
+    const newPassword = String(adminAccountNewPassword.value || "");
+    const confirmPassword = String(adminAccountConfirmPassword.value || "");
+    if (!username) {
+      setAdminAccountStatus(tr("settings.admin_account.error_username", "Username is required"));
+      adminAccountUsername.focus();
+      return;
+    }
+    if (!currentPassword) {
+      setAdminAccountStatus(tr("settings.admin_account.error_current_password", "Current password is required"));
+      adminAccountCurrentPassword.focus();
+      return;
+    }
+    if ((newPassword || confirmPassword) && newPassword !== confirmPassword) {
+      setAdminAccountStatus(tr("settings.admin_account.error_password_match", "New passwords do not match"));
+      adminAccountConfirmPassword.focus();
+      return;
+    }
+    setAdminAccountStatus(tr("settings.status.saving", "Saving"));
+    const response = await fetch(apiURL("/admin/api/settings/admin-account"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username,
+        current_password: currentPassword,
+        new_password: newPassword,
+        confirm_password: confirmPassword
+      })
+    });
+    if (!response.ok) {
+      setAdminAccountStatus((await response.text()).trim());
+      return;
+    }
+    const result = await response.json();
+    if (typeof result.username === "string") adminAccountUsername.value = result.username;
+    adminAccountCurrentPassword.value = "";
+    adminAccountNewPassword.value = "";
+    adminAccountConfirmPassword.value = "";
+    setAdminAccountStatus(tr("settings.status.saved", "Saved"));
   });
 }
 

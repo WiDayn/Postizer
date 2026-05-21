@@ -338,6 +338,27 @@ current_release_tag() {
   printf '%s' "$current"
 }
 
+source_build_version() {
+  local exact_tag short_commit dirty_suffix
+  if [[ -e "$SOURCE_DIR/.git" ]] && optional_command_exists git && run_source_git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    exact_tag="$(run_source_git describe --tags --exact-match --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)"
+    if [[ -n "$exact_tag" ]] && is_release_tag "$exact_tag"; then
+      printf '%s' "$exact_tag"
+      return
+    fi
+    short_commit="$(run_source_git rev-parse --short HEAD 2>/dev/null || true)"
+    if [[ -n "$short_commit" ]]; then
+      dirty_suffix=""
+      if [[ -n "$(run_source_git status --porcelain 2>/dev/null || true)" ]]; then
+        dirty_suffix="-dirty"
+      fi
+      printf 'dev-%s%s' "$short_commit" "$dirty_suffix"
+      return
+    fi
+  fi
+  printf 'dev'
+}
+
 update_source_tree_to_latest_release_tag() {
   if [[ "$GIT_PULL" -ne 1 || "${POSTIZER_GIT_PULL_DONE:-0}" -eq 1 ]]; then
     if ! source_tree_available; then
@@ -657,10 +678,12 @@ ensure_service_identity() {
 
 build_or_select_binary() {
   if [[ "$BUILD_BINARY" -eq 1 ]]; then
-    local build_dir
+    local build_dir build_version ldflags
     build_dir="$(mktemp -d)"
+    build_version="$(source_build_version)"
+    ldflags="-s -w -X postizer/internal/http.AppVersion=$build_version"
     trap "rm -rf '$build_dir'" EXIT
-    (cd "$SOURCE_DIR" && "$GO_CMD" build -trimpath -ldflags="-s -w" -o "$build_dir/$APP_NAME" ./cmd/postizer)
+    (cd "$SOURCE_DIR" && "$GO_CMD" build -trimpath -ldflags="$ldflags" -o "$build_dir/$APP_NAME" ./cmd/postizer)
     BINARY_SOURCE="$build_dir/$APP_NAME"
   fi
 
