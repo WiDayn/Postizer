@@ -18,6 +18,7 @@ BIN_LINK="${POSTIZER_BIN_LINK:-/usr/local/bin/postizer}"
 ENV_DIR="${POSTIZER_ENV_DIR:-/etc/postizer}"
 ENV_FILE="${POSTIZER_ENV_FILE:-$ENV_DIR/postizer.env}"
 LISTEN_ADDR="${POSTIZER_ADDR:-:8080}"
+GO_CACHE_ROOT="${POSTIZER_GO_CACHE_ROOT:-}"
 INSTALL_DIR_EXPLICIT=0
 SOURCE_DIR_EXPLICIT=0
 UPDATE_SERVICE_NAME_EXPLICIT=0
@@ -25,6 +26,7 @@ UPDATE_TIMER_NAME_EXPLICIT=0
 BIN_LINK_EXPLICIT=0
 ENV_DIR_EXPLICIT=0
 ENV_FILE_EXPLICIT=0
+GO_CACHE_ROOT_EXPLICIT=0
 START_SERVICE=1
 ENABLE_SERVICE=1
 BUILD_BINARY=1
@@ -59,6 +61,7 @@ REQUIRED_GO_VERSION="${POSTIZER_GO_VERSION:-}"
 [[ -n "${POSTIZER_BIN_LINK:-}" ]] && BIN_LINK_EXPLICIT=1
 [[ -n "${POSTIZER_ENV_DIR:-}" ]] && ENV_DIR_EXPLICIT=1
 [[ -n "${POSTIZER_ENV_FILE:-}" ]] && ENV_FILE_EXPLICIT=1
+[[ -n "${POSTIZER_GO_CACHE_ROOT:-}" ]] && GO_CACHE_ROOT_EXPLICIT=1
 
 usage() {
   cat <<EOF
@@ -83,6 +86,7 @@ Options:
   --bin-link PATH       Symlink path for the installed binary (default: /usr/local/bin/<service>)
   --env-dir PATH        Environment file directory (default: /etc/<service>)
   --env-file PATH       Environment file path (default: <env-dir>/<service>.env)
+  --go-cache-dir PATH   Go build/module cache root (default: /var/cache/<service>/go)
   --binary PATH         Install an existing binary instead of building
   --no-build            Use ./postizer from the repository root
   --no-git-pull         Do not update an existing Git checkout before building
@@ -197,6 +201,12 @@ while [[ $# -gt 0 ]]; do
       ENV_FILE_EXPLICIT=1
       shift 2
       ;;
+    --go-cache-dir)
+      require_arg "$1" "${2:-}"
+      GO_CACHE_ROOT="$2"
+      GO_CACHE_ROOT_EXPLICIT=1
+      shift 2
+      ;;
     --binary)
       require_arg "$1" "${2:-}"
       BINARY_SOURCE="$2"
@@ -263,6 +273,9 @@ if [[ "$ENV_DIR_EXPLICIT" -eq 0 ]]; then
 fi
 if [[ "$ENV_FILE_EXPLICIT" -eq 0 ]]; then
   ENV_FILE="$ENV_DIR/$SERVICE_NAME.env"
+fi
+if [[ "$GO_CACHE_ROOT_EXPLICIT" -eq 0 ]]; then
+  GO_CACHE_ROOT="/var/cache/$SERVICE_NAME/go"
 fi
 if [[ "$UPDATE_SERVICE_NAME_EXPLICIT" -eq 0 ]]; then
   UPDATE_SERVICE_NAME="$SERVICE_NAME-update"
@@ -576,6 +589,10 @@ validate_paths() {
     echo "Refusing unsafe binary link: $BIN_LINK" >&2
     exit 1
   fi
+  if [[ "$BUILD_BINARY" -eq 1 && ( -z "$GO_CACHE_ROOT" || "$GO_CACHE_ROOT" == "/" ) ]]; then
+    echo "Refusing unsafe Go cache directory: $GO_CACHE_ROOT" >&2
+    exit 1
+  fi
 }
 
 validate_unit_name() {
@@ -749,6 +766,17 @@ install_go_toolchain() {
   fi
 }
 
+prepare_go_build_environment() {
+  if [[ "$BUILD_BINARY" -ne 1 ]]; then
+    return
+  fi
+  export GOPATH="${GOPATH:-$GO_CACHE_ROOT/gopath}"
+  export GOMODCACHE="${GOMODCACHE:-$GO_CACHE_ROOT/pkg/mod}"
+  export GOCACHE="${GOCACHE:-$GO_CACHE_ROOT/build}"
+  export HOME="${HOME:-/root}"
+  mkdir -p "$GOPATH" "$GOMODCACHE" "$GOCACHE"
+}
+
 random_secret() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex "${1:-32}" | tr -d '\n'
@@ -909,6 +937,7 @@ exec bash $(printf '%q' "$script_path") \\
   --addr $(printf '%q' "$LISTEN_ADDR") \\
   --bin-link $(printf '%q' "$BIN_LINK") \\
   --env-file $(printf '%q' "$ENV_FILE") \\
+  --go-cache-dir $(printf '%q' "$GO_CACHE_ROOT") \\
   --update-interval $(printf '%q' "$UPDATE_TIMER_INTERVAL")
 EOF
   chmod 0755 "$updater_path"
@@ -975,6 +1004,7 @@ if [[ "$AUTO_UPDATE_RUN" -eq 1 && "$GIT_UPDATED" -ne 1 ]]; then
   exit 0
 fi
 load_go_requirement
+prepare_go_build_environment
 install_go_toolchain
 need_command systemctl
 need_command cp

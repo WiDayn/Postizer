@@ -45,7 +45,7 @@ bash scripts/install-linux-service.sh --no-git-pull
 bash scripts/install-linux-service.sh --no-update-timer
 ```
 
-For multiple instances on one host, use a unique `--service-name` and port. Unless overridden, the installer derives isolated paths from the service name, such as `/opt/postizer-blog2`, `/etc/postizer-blog2/postizer-blog2.env`, `/usr/local/bin/postizer-blog2`, and `postizer-blog2-update.timer`. You can override the pieces individually with `--install-dir`, `--source-dir`, `--bin-link`, `--env-dir`, `--env-file`, `--update-service-name`, and `--update-timer-name`.
+For multiple instances on one host, use a unique `--service-name` and port. Unless overridden, the installer derives isolated paths from the service name, such as `/opt/postizer-blog2`, `/etc/postizer-blog2/postizer-blog2.env`, `/usr/local/bin/postizer-blog2`, `/var/cache/postizer-blog2/go`, and `postizer-blog2-update.timer`. You can override the pieces individually with `--install-dir`, `--source-dir`, `--bin-link`, `--env-dir`, `--env-file`, `--go-cache-dir`, `--update-service-name`, and `--update-timer-name`.
 
 Service commands:
 
