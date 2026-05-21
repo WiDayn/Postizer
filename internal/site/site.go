@@ -1486,12 +1486,12 @@ func renderMarkdown(md goldmark.Markdown, source []byte) (template.HTML, error) 
 	var out bytes.Buffer
 	preparedFigures, figureHTML := prepareFigureReferences(source)
 	prepared, equationAnchors := prepareEquationReferences(preparedFigures)
-	protected := protectMathDelimiters(prepared)
+	protected, mathHTML := protectMathSegments(prepared)
 	if err := md.Convert(protected, &out); err != nil {
 		return "", err
 	}
 	html := out.String()
-	for token, value := range mathTokens {
+	for token, value := range mathHTML {
 		html = strings.ReplaceAll(html, token, value)
 	}
 	for token, value := range figureHTML {
@@ -2043,20 +2043,118 @@ func closesMarkdownFence(trimmed, marker string) bool {
 	return true
 }
 
-var mathTokens = map[string]string{
-	"POSTIZER_MATH_INLINE_OPEN":  `\(`,
-	"POSTIZER_MATH_INLINE_CLOSE": `\)`,
-	"POSTIZER_MATH_BLOCK_OPEN":   `\[`,
-	"POSTIZER_MATH_BLOCK_CLOSE":  `\]`,
+func protectMathSegments(source []byte) ([]byte, map[string]string) {
+	text := string(source)
+	replacements := map[string]string{}
+	var out strings.Builder
+	var chunk strings.Builder
+	inFence := false
+	fenceMarker := ""
+
+	flushChunk := func() {
+		if chunk.Len() == 0 {
+			return
+		}
+		out.WriteString(protectMathInText(chunk.String(), replacements))
+		chunk.Reset()
+	}
+
+	for _, line := range strings.SplitAfter(text, "\n") {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\n"))
+		if marker := markdownFenceMarker(trimmed); marker != "" {
+			flushChunk()
+			out.WriteString(line)
+			if inFence {
+				if closesMarkdownFence(trimmed, fenceMarker) {
+					inFence = false
+					fenceMarker = ""
+				}
+			} else {
+				inFence = true
+				fenceMarker = marker
+			}
+			continue
+		}
+		if inFence {
+			out.WriteString(line)
+			continue
+		}
+		chunk.WriteString(line)
+	}
+	flushChunk()
+
+	return []byte(out.String()), replacements
 }
 
-func protectMathDelimiters(source []byte) []byte {
-	text := string(source)
-	text = strings.ReplaceAll(text, `\(`, "POSTIZER_MATH_INLINE_OPEN")
-	text = strings.ReplaceAll(text, `\)`, "POSTIZER_MATH_INLINE_CLOSE")
-	text = strings.ReplaceAll(text, `\[`, "POSTIZER_MATH_BLOCK_OPEN")
-	text = strings.ReplaceAll(text, `\]`, "POSTIZER_MATH_BLOCK_CLOSE")
-	return []byte(text)
+func protectMathInText(text string, replacements map[string]string) string {
+	var out strings.Builder
+	for i := 0; i < len(text); {
+		switch {
+		case strings.HasPrefix(text[i:], "$$") && !isEscapedAt(text, i):
+			if end := findMathEnd(text, i+2, "$$"); end != -1 {
+				out.WriteString(addMathReplacement(text[i:end+2], replacements))
+				i = end + 2
+				continue
+			}
+		case strings.HasPrefix(text[i:], `\[`):
+			if end := findMathEnd(text, i+2, `\]`); end != -1 {
+				out.WriteString(addMathReplacement(text[i:end+2], replacements))
+				i = end + 2
+				continue
+			}
+		case strings.HasPrefix(text[i:], `\(`):
+			if end := findMathEnd(text, i+2, `\)`); end != -1 {
+				out.WriteString(addMathReplacement(text[i:end+2], replacements))
+				i = end + 2
+				continue
+			}
+		case text[i] == '$' && !isEscapedAt(text, i):
+			if end := findInlineDollarEnd(text, i+1); end != -1 {
+				out.WriteString(addMathReplacement(text[i:end+1], replacements))
+				i = end + 1
+				continue
+			}
+		}
+		out.WriteByte(text[i])
+		i++
+	}
+	return out.String()
+}
+
+func addMathReplacement(raw string, replacements map[string]string) string {
+	token := fmt.Sprintf("POSTIZER_MATH_%06d", len(replacements))
+	replacements[token] = stdhtml.EscapeString(raw)
+	return token
+}
+
+func findMathEnd(text string, start int, delimiter string) int {
+	for i := start; i <= len(text)-len(delimiter); i++ {
+		if strings.HasPrefix(text[i:], delimiter) && !isEscapedAt(text, i) {
+			return i
+		}
+	}
+	return -1
+}
+
+func findInlineDollarEnd(text string, start int) int {
+	for i := start; i < len(text); i++ {
+		if text[i] != '$' || isEscapedAt(text, i) {
+			continue
+		}
+		if strings.HasPrefix(text[i:], "$$") {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func isEscapedAt(text string, index int) bool {
+	backslashes := 0
+	for i := index - 1; i >= 0 && text[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 func RenderMarkdown(source string) (template.HTML, error) {

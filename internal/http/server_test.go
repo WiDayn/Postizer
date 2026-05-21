@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -745,6 +746,78 @@ func TestRenderPublicPermalinkUsesCustomPermalink(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), "Custom Route") {
 		t.Fatalf("response should include post title, got %s", response.Body.String())
+	}
+}
+
+func TestPostEditButtonOnlyVisibleForAdmin(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	templates, err := loadTemplates(appearance.Pack{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := &site.Post{Title: "Editable Post", Slug: "editable-post", URL: "/posts/editable-post"}
+	store := &site.Store{Settings: site.Settings{}, Posts: []*site.Post{post}, PostsBySlug: map[string]*site.Post{post.Slug: post}}
+	s := &Server{store: store, templates: templates, contentRoot: contentRoot, auth: newAuthConfig(contentRoot)}
+
+	anonRequest := httptest.NewRequest("GET", "/posts/editable-post", nil)
+	anonResponse := httptest.NewRecorder()
+	s.renderPost(anonResponse, anonRequest, post, store)
+	if strings.Contains(anonResponse.Body.String(), "/admin/posts/editable-post/edit") {
+		t.Fatalf("anonymous post page should not include edit link:\n%s", anonResponse.Body.String())
+	}
+
+	adminRequest := httptest.NewRequest("GET", "/posts/editable-post", nil)
+	adminRequest.AddCookie(s.sessionCookie(s.auth.user, false))
+	adminResponse := httptest.NewRecorder()
+	s.renderPost(adminResponse, adminRequest, post, store)
+	if !strings.Contains(adminResponse.Body.String(), "/admin/posts/editable-post/edit") {
+		t.Fatalf("admin post page should include edit link:\n%s", adminResponse.Body.String())
+	}
+}
+
+func TestSessionCookieUsesSiteWidePath(t *testing.T) {
+	s := &Server{auth: newAuthConfig(t.TempDir())}
+	cookie := s.sessionCookie(s.auth.user, false)
+	if got, want := cookie.Path, "/"; got != want {
+		t.Fatalf("session cookie path = %q, want %q", got, want)
+	}
+}
+
+func TestRequireAdminMirrorsLegacyAdminCookieToSiteRoot(t *testing.T) {
+	s := &Server{auth: newAuthConfig(t.TempDir())}
+	cookie := s.sessionCookie(s.auth.user, false)
+	cookie.Path = "/admin"
+	request := httptest.NewRequest("GET", "/admin", nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler := s.requireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	handler.ServeHTTP(response, request)
+
+	if got, want := response.Code, http.StatusNoContent; got != want {
+		t.Fatalf("admin response status = %d, want %d", got, want)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("admin response should mirror a site-wide session cookie")
+	}
+	if got, want := cookies[0].Path, "/"; got != want {
+		t.Fatalf("mirrored cookie path = %q, want %q", got, want)
 	}
 }
 

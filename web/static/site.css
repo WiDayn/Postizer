@@ -2638,6 +2638,23 @@
     border-bottom: 3px double var(--rule);
   }
 
+  .article-header__top {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: .35rem;
+  }
+
+  .article-header__top .kicker {
+    margin: 0;
+  }
+
+  .post-edit-button {
+    flex: 0 0 auto;
+  }
+
   .front-page {
     display: grid;
     gap: 1rem;

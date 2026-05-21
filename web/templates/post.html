@@ -2,7 +2,10 @@
 {{template "chromeStart" .}}
 <article class="article">
   <header class="article-header">
-    <p class="kicker">{{msg . "post.kicker"}}</p>
+    <div class="article-header__top">
+      <p class="kicker">{{msg . "post.kicker"}}</p>
+      {{if .IsAdmin}}<a class="ui-button ui-button--ghost post-edit-button" href="/admin/posts/{{.Post.Slug}}/edit">{{msg . "common.edit" "Edit"}}</a>{{end}}
+    </div>
     <h1>{{.Post.Title}}</h1>
     {{$postDate := date .Post.Date}}
     {{$updated := date .Post.Updated}}

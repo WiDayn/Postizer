@@ -567,6 +567,29 @@ func TestRenderMarkdownPreservesKatexDelimiters(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdownProtectsDollarMathFromMarkdown(t *testing.T) {
+	html, err := RenderMarkdown(`1. **Patch Embedding**: 将输入 $\mathbf{X}$ 分割为大小为 $P \times P \times P$ 的小块。
+每个 patch 的形状为： $$\mathbf{X}_{\text{patch}} \in \mathbb{R}^{C \times P \times P \times P}$$
+展开后，形状为： $$\mathbf{X}_{\text{flat}} \in \mathbb{R}^{C \cdot P^3}$$`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(html)
+	for _, expected := range []string{
+		`$\mathbf{X}$`,
+		`$P \times P \times P$`,
+		`$$\mathbf{X}_{\text{patch}} \in \mathbb{R}^{C \times P \times P \times P}$$`,
+		`$$\mathbf{X}_{\text{flat}} \in \mathbb{R}^{C \cdot P^3}$$`,
+	} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("rendered HTML did not contain %q:\n%s", expected, rendered)
+		}
+	}
+	if strings.Contains(rendered, `<em>`) {
+		t.Fatalf("math underscores were parsed as markdown emphasis:\n%s", rendered)
+	}
+}
+
 func TestRenderMarkdownNumbersLabelledDisplayEquations(t *testing.T) {
 	html, err := RenderMarkdown(`Reference before equation: \eqref{eq:energy}.
 

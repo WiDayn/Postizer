@@ -83,6 +83,7 @@ type ViewData struct {
 	ActiveAdmin   string
 	Error         string
 	Remember      bool
+	IsAdmin       bool
 	EditorKind    string
 	EditorSlug    string
 	Pagination    Pagination
@@ -381,15 +382,15 @@ func (s *Server) post(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderPost(w, post, store)
+	s.renderPost(w, r, post, store)
 }
 
-func (s *Server) renderPost(w http.ResponseWriter, post *site.Post, store *site.Store) {
+func (s *Server) renderPost(w http.ResponseWriter, r *http.Request, post *site.Post, store *site.Store) {
 	comments, err := s.commentsForPost(post.Slug)
 	if err != nil {
 		log.Printf("load comments for %s: %v", post.Slug, err)
 	}
-	s.render(w, "post.html", ViewData{Title: post.Title, Store: store, Post: post, Tags: store.Tags, Comments: comments})
+	s.render(w, "post.html", ViewData{Title: post.Title, Store: store, Post: post, Tags: store.Tags, Comments: comments, IsAdmin: s.isAdmin(r)})
 }
 
 func (s *Server) commentsForPost(slug string) ([]site.Comment, error) {
@@ -434,7 +435,7 @@ func (s *Server) tag(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderPublicPermalink(w http.ResponseWriter, r *http.Request) bool {
 	store := s.currentStore()
 	if post := store.PostByPermalink(r.URL.Path); post != nil {
-		s.renderPost(w, post, store)
+		s.renderPost(w, r, post, store)
 		return true
 	}
 	if page := store.PageByPermalink(r.URL.Path); page != nil {
@@ -491,6 +492,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if s.isAdmin(r) {
+		s.mirrorAdminSessionCookie(w, r)
 		http.Redirect(w, r, "/admin", http.StatusSeeOther)
 		return
 	}
@@ -518,15 +520,17 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/admin",
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	for _, path := range []string{"/", "/admin"} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookieName,
+			Value:    "",
+			Path:     path,
+			Expires:  time.Unix(0, 0),
+			MaxAge:   -1,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
 	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 }
 
@@ -2852,6 +2856,7 @@ func env(key, fallback string) string {
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.isAdmin(r) {
+			s.mirrorAdminSessionCookie(w, r)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -2868,11 +2873,28 @@ func (s *Server) isAdmin(r *http.Request) bool {
 	if token != "" && (r.Header.Get("Authorization") == "Bearer "+token || r.URL.Query().Get("token") == token) {
 		return true
 	}
-	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil {
-		return false
+	for _, cookie := range r.Cookies() {
+		if cookie.Name == sessionCookieName && s.verifySession(cookie.Value) {
+			return true
+		}
 	}
-	return s.verifySession(cookie.Value)
+	return false
+}
+
+func (s *Server) mirrorAdminSessionCookie(w http.ResponseWriter, r *http.Request) {
+	for _, cookie := range r.Cookies() {
+		if cookie.Name != sessionCookieName || !s.verifySession(cookie.Value) {
+			continue
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookieName,
+			Value:    cookie.Value,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+		return
+	}
 }
 
 func (s *Server) sessionCookie(user string, remember bool) *http.Cookie {
@@ -2885,7 +2907,7 @@ func (s *Server) sessionCookie(user string, remember bool) *http.Cookie {
 	cookie := &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    signPayload(payload, s.auth.secret),
-		Path:     "/admin",
+		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	}
