@@ -172,9 +172,11 @@ Posts and pages use YAML-like front matter followed by Markdown.
 
 ## Plugins
 
-Postizer supports static resource plugins and gRPC process plugins. Static plugins can contain only translations, templates, or styles and do not need an executable. gRPC plugins declare a `runtime.kind` of `grpc` in their manifest; Postizer starts the plugin as a separate process and calls its `PluginService` over gRPC. Plugin admin UI is declared through manifest `ui_entries` pointing at static JSON files, so settings pages can render without starting the plugin process. Process plugins can import the public `pkg/pluginrpc` SDK and call the host `HostService` for generic operations such as job progress, media saves, post/page saves, and runtime reloads.
+Postizer supports static resource plugins and gRPC process plugins. Static plugins can contain only translations, templates, or styles and do not need an executable. gRPC plugins declare a `runtime.kind` of `grpc` in their manifest; Postizer starts the plugin as a separate process and calls its `PluginService` over gRPC. Plugin admin UI is declared through manifest `ui_entries` pointing at static JSON files, so settings pages can render without starting the plugin process. Process plugins can import the public `pkg/pluginrpc` SDK and call the host `HostService` for generic operations such as job progress, media saves, post/page saves, content exports, and runtime reloads.
 
-The WordPress importer is kept as an external example bundle under `examples/bundles/wordpress-importer`, not as part of the main application. Package that bundle and install it through `/admin/plugins`; installed user plugins live under `content/bundles`.
+The WordPress importer and content exporter are kept as external example bundles under `examples/bundles`, not as part of the main application. Package a bundle and install it through `/admin/plugins`; installed user plugins live under `content/bundles`. The content exporter example creates a ZIP containing `content/posts`, `content/pages`, `media/index.json`, and all files under `media/public`.
+
+Plugin manifests can declare compatibility requirements with `requires.postizer` and `requires.host_services`. Postizer checks those declarations during resource-pack installation and returns compatibility warnings for unsupported versions or RPC methods while still allowing the pack to be installed.
 
 ## Media
 

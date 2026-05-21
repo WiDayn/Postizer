@@ -412,6 +412,7 @@
   "settings.status.cleared": "已清除",
   "settings.status.applying": "应用中",
   "settings.status.installed": "已安装",
+  "settings.status.installed_with_warnings": "已安装，但存在兼容性提醒",
   "settings.status.deleting": "删除中",
   "settings.status.deleted": "已删除",
   "settings.upload_pack.empty": "请选择 .zip 资源包",

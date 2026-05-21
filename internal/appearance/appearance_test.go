@@ -635,6 +635,127 @@ func TestInstallPackZIPInstallsBundleWithThemesAndPlugins(t *testing.T) {
 	}
 }
 
+func TestInstallPackZIPWithCompatibilityWarnsButInstalls(t *testing.T) {
+	root := t.TempDir()
+	userRoot := filepath.Join(root, "user")
+	body := buildPackZip(t, map[string]func(io.Writer){
+		"manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, `{
+  "id": "future-exporter",
+  "type": "bundle",
+  "name": "Future Exporter",
+  "version": "1.0.0",
+  "description": "Bundle with future requirements",
+  "requires": {"postizer": "v9.0.0"}
+}`)
+		},
+		"plugins/exporter/manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, `{
+  "id": "exporter-plugin",
+  "type": "plugin",
+  "name": "Exporter Plugin",
+  "version": "1.0.0",
+  "description": "Future exporter",
+  "runtime": {
+    "kind": "grpc",
+    "command": "${go}"
+  },
+  "services": [
+    {
+      "name": "postizer.plugin.v1.PluginService",
+      "methods": ["Handshake", "InvokeAction", "Shutdown"]
+    }
+  ],
+  "requires": {
+    "postizer": "v9.0.0",
+    "host_services": [
+      {
+        "name": "postizer.plugin.v1.HostService",
+        "methods": ["CreateContentExport"]
+      }
+    ]
+  }
+}`)
+		},
+	})
+
+	installed, err := InstallPackZIPWithCompatibility(bytes.NewReader(body), int64(len(body)), userRoot, HostCompatibility{
+		PostizerVersion: "v1.3.0",
+		PluginServices: []PluginService{
+			{Name: "postizer.plugin.v1.PluginService", Methods: []string{"Handshake", "InvokeAction", "Shutdown"}},
+		},
+		HostServices: []PluginService{
+			{Name: "postizer.plugin.v1.HostService", Methods: []string{"CreateJob"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(userRoot, DirBundles, "future-exporter")); err != nil {
+		t.Fatalf("bundle should still be installed despite warnings: %v", err)
+	}
+	if len(installed.Warnings) == 0 {
+		t.Fatal("expected compatibility warnings")
+	}
+	if !warningsContain(installed.Warnings, "requires Postizer v9.0.0") {
+		t.Fatalf("warnings should mention required version: %#v", installed.Warnings)
+	}
+	if !warningsContain(installed.Warnings, "CreateContentExport") {
+		t.Fatalf("warnings should mention unsupported host method: %#v", installed.Warnings)
+	}
+}
+
+func TestInstallPackZIPWithCompatibilityWarnsWhenGRPCRequirementsMissing(t *testing.T) {
+	root := t.TempDir()
+	userRoot := filepath.Join(root, "user")
+	body := buildPackZip(t, map[string]func(io.Writer){
+		"manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, `{
+  "id": "undeclared-runtime",
+  "type": "bundle",
+  "name": "Undeclared Runtime",
+  "version": "1.0.0",
+  "description": "Bundle with undeclared runtime requirements"
+}`)
+		},
+		"plugins/runner/manifest.json": func(w io.Writer) {
+			_, _ = io.WriteString(w, `{
+  "id": "runner-plugin",
+  "type": "plugin",
+  "name": "Runner Plugin",
+  "version": "1.0.0",
+  "description": "Runtime plugin without requirements",
+  "runtime": {
+    "kind": "grpc",
+    "command": "${go}"
+  },
+  "services": [
+    {
+      "name": "postizer.plugin.v1.PluginService",
+      "methods": ["Handshake", "InvokeAction", "Shutdown"]
+    }
+  ]
+}`)
+		},
+	})
+
+	installed, err := InstallPackZIPWithCompatibility(bytes.NewReader(body), int64(len(body)), userRoot, HostCompatibility{
+		PostizerVersion: "v1.3.0",
+		PluginServices: []PluginService{
+			{Name: "postizer.plugin.v1.PluginService", Methods: []string{"Handshake", "InvokeAction", "Shutdown"}},
+		},
+		HostServices: []PluginService{
+			{Name: "postizer.plugin.v1.HostService", Methods: []string{"CreateJob"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !warningsContain(installed.Warnings, "does not declare requires") {
+		t.Fatalf("warnings should mention missing requirements declaration: %#v", installed.Warnings)
+	}
+}
+
 func TestInstallPackZIPRejectsUnsupportedPluginRuntimePlatform(t *testing.T) {
 	root := t.TempDir()
 	userRoot := filepath.Join(root, "user")
@@ -1288,6 +1409,15 @@ func buildPackZip(t *testing.T, files map[string]func(io.Writer)) []byte {
 func containsString(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func warningsContain(warnings []string, pattern string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, pattern) {
 			return true
 		}
 	}

@@ -169,6 +169,21 @@ type ReloadRuntimeResponse struct {
 	OK bool `json:"ok"`
 }
 
+type CreateContentExportRequest struct {
+	PluginID string `json:"plugin_id"`
+}
+
+type CreateContentExportResponse struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	DownloadURL string `json:"download_url"`
+	Bytes       int64  `json:"bytes"`
+	Posts       int    `json:"posts"`
+	Pages       int    `json:"pages"`
+	MediaItems  int    `json:"media_items"`
+	MediaFiles  int    `json:"media_files"`
+}
+
 type ShutdownRequest struct {
 	PluginID string `json:"plugin_id"`
 }
@@ -196,6 +211,7 @@ type HostServiceServer interface {
 	SavePost(context.Context, *ContentDraft) (*SaveContentResponse, error)
 	SavePage(context.Context, *ContentDraft) (*SaveContentResponse, error)
 	ReloadRuntime(context.Context, *ReloadRuntimeRequest) (*ReloadRuntimeResponse, error)
+	CreateContentExport(context.Context, *CreateContentExportRequest) (*CreateContentExportResponse, error)
 }
 
 type HostServiceClient interface {
@@ -205,6 +221,7 @@ type HostServiceClient interface {
 	SavePost(context.Context, *ContentDraft, ...grpc.CallOption) (*SaveContentResponse, error)
 	SavePage(context.Context, *ContentDraft, ...grpc.CallOption) (*SaveContentResponse, error)
 	ReloadRuntime(context.Context, *ReloadRuntimeRequest, ...grpc.CallOption) (*ReloadRuntimeResponse, error)
+	CreateContentExport(context.Context, *CreateContentExportRequest, ...grpc.CallOption) (*CreateContentExportResponse, error)
 }
 
 type pluginServiceClient struct {
@@ -304,6 +321,15 @@ func (c *hostServiceClient) ReloadRuntime(ctx context.Context, in *ReloadRuntime
 	return out, nil
 }
 
+func (c *hostServiceClient) CreateContentExport(ctx context.Context, in *CreateContentExportRequest, opts ...grpc.CallOption) (*CreateContentExportResponse, error) {
+	out := new(CreateContentExportResponse)
+	err := c.cc.Invoke(ctx, "/"+HostServiceName+"/CreateContentExport", in, out, append(defaultCallOptions(), opts...)...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func RegisterPluginServiceServer(s grpc.ServiceRegistrar, srv PluginServiceServer) {
 	s.RegisterService(&grpc.ServiceDesc{
 		ServiceName: ServiceName,
@@ -329,6 +355,7 @@ func RegisterHostServiceServer(s grpc.ServiceRegistrar, srv HostServiceServer) {
 			{MethodName: "SavePost", Handler: hostSavePostHandler},
 			{MethodName: "SavePage", Handler: hostSavePageHandler},
 			{MethodName: "ReloadRuntime", Handler: hostReloadRuntimeHandler},
+			{MethodName: "CreateContentExport", Handler: hostCreateContentExportHandler},
 		},
 		Streams:  []grpc.StreamDesc{},
 		Metadata: "pkg/pluginrpc/proto/plugin.proto",
@@ -470,6 +497,21 @@ func hostReloadRuntimeHandler(srv any, ctx context.Context, dec func(any) error,
 	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + HostServiceName + "/ReloadRuntime"}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return srv.(HostServiceServer).ReloadRuntime(ctx, req.(*ReloadRuntimeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func hostCreateContentExportHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	in := new(CreateContentExportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).CreateContentExport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/" + HostServiceName + "/CreateContentExport"}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return srv.(HostServiceServer).CreateContentExport(ctx, req.(*CreateContentExportRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

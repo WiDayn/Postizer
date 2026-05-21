@@ -17,6 +17,7 @@ service HostService {
   rpc SavePost(ContentDraft) returns (SaveContentResponse);
   rpc SavePage(ContentDraft) returns (SaveContentResponse);
   rpc ReloadRuntime(ReloadRuntimeRequest) returns (ReloadRuntimeResponse);
+  rpc CreateContentExport(CreateContentExportRequest) returns (CreateContentExportResponse);
 }
 
 message HandshakeRequest {
@@ -154,6 +155,21 @@ message ReloadRuntimeRequest {
 
 message ReloadRuntimeResponse {
   bool ok = 1;
+}
+
+message CreateContentExportRequest {
+  string plugin_id = 1;
+}
+
+message CreateContentExportResponse {
+  string filename = 1;
+  string content_type = 2;
+  string download_url = 3;
+  int64 bytes = 4;
+  int32 posts = 5;
+  int32 pages = 6;
+  int32 media_items = 7;
+  int32 media_files = 8;
 }
 
 message ShutdownRequest {

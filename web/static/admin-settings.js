@@ -781,7 +781,13 @@ if (resourcePackUploadForm && resourcePackFile) {
       setPackSettingsStatus((await response.text()).trim());
       return;
     }
-    setPackSettingsStatus(tr("settings.status.installed", "Installed"));
+    const result = await response.json();
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+    const warningTitle = tr("settings.status.installed_with_warnings", "Installed with compatibility warnings");
+    if (warnings.length) {
+      window.alert([`${warningTitle}:`, ...warnings].join("\n\n"));
+    }
+    setPackSettingsStatus(warnings.length ? warningTitle : tr("settings.status.installed", "Installed"));
     window.location.reload();
   });
 }

@@ -47,13 +47,22 @@ type Server struct {
 	templates          *template.Template
 	pluginHost         *pluginhost.Host
 	pluginUploads      map[string]pluginrpc.ActionFile
+	pluginDownloads    map[string]pluginDownload
 	pluginJobs         map[string]*importJob
 	auth               authConfig
 	mu                 sync.RWMutex
 	authMu             sync.RWMutex
 	commentMu          sync.RWMutex
 	pluginUploadMu     sync.Mutex
+	pluginDownloadMu   sync.Mutex
 	pluginJobMu        sync.RWMutex
+}
+
+type pluginDownload struct {
+	path        string
+	filename    string
+	contentType string
+	createdAt   time.Time
 }
 
 type importJob struct {
@@ -175,7 +184,7 @@ const (
 	pluginSettingsUIOutlet   = "admin.plugin"
 )
 
-var AppVersion = "dev"
+var AppVersion = "v1.3.0"
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
 	appRoot := env("POSTIZER_APP_ROOT", ".")
@@ -190,6 +199,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 		userContentRoot:    contentRoot,
 		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
 		pluginUploads:      map[string]pluginrpc.ActionFile{},
+		pluginDownloads:    map[string]pluginDownload{},
 		pluginJobs:         map[string]*importJob{},
 		auth:               newAuthConfig(contentRoot),
 	}
@@ -269,6 +279,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/resource-packs/apply", s.requireAdmin(http.HandlerFunc(s.applyResourcePacks)))
 	mux.Handle("POST /admin/api/plugins/{id}/actions/{action}", s.requireAdmin(http.HandlerFunc(s.invokePluginAction)))
 	mux.Handle("GET /admin/api/plugin-jobs/{id}", s.requireAdmin(http.HandlerFunc(s.pluginJobStatus)))
+	mux.Handle("GET /admin/api/plugin-downloads/{id}", s.requireAdmin(http.HandlerFunc(s.pluginDownloadFile)))
 
 	return timing(securityHeaders(mux)), nil
 }
@@ -1588,7 +1599,7 @@ func (s *Server) uploadResourcePack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	installed, err := appearance.InstallPackZIP(bytes.NewReader(body), int64(len(body)), s.userContentRoot)
+	installed, err := appearance.InstallPackZIPWithCompatibility(bytes.NewReader(body), int64(len(body)), s.userContentRoot, currentHostCompatibility())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -1598,6 +1609,32 @@ func (s *Server) uploadResourcePack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, installed)
+}
+
+func currentHostCompatibility() appearance.HostCompatibility {
+	return appearance.HostCompatibility{
+		PostizerVersion: currentAppVersion(),
+		PluginServices: []appearance.PluginService{
+			{
+				Name:    pluginrpc.ServiceName,
+				Methods: []string{"Handshake", "InvokeAction", "Shutdown"},
+			},
+		},
+		HostServices: []appearance.PluginService{
+			{
+				Name: pluginrpc.HostServiceName,
+				Methods: []string{
+					"CreateJob",
+					"UpdateJob",
+					"SaveMedia",
+					"SavePost",
+					"SavePage",
+					"ReloadRuntime",
+					"CreateContentExport",
+				},
+			},
+		},
+	}
 }
 
 func (s *Server) deleteResourcePack(w http.ResponseWriter, r *http.Request) {

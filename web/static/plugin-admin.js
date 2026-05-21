@@ -112,6 +112,7 @@
   function renderSection(section) {
     const block = document.createElement("section");
     block.className = "plugin-result-section";
+    if (section.kind) block.dataset.kind = section.kind;
     if (section.title) {
       const title = document.createElement("h4");
       title.textContent = section.title;
@@ -129,12 +130,28 @@
         const dt = document.createElement("dt");
         dt.textContent = row.label;
         const dd = document.createElement("dd");
-        dd.textContent = row.value;
+        dd.appendChild(renderRowValue(row.value, section.kind));
         list.append(dt, dd);
       });
       block.appendChild(list);
     }
     return block;
+  }
+
+  function renderRowValue(value, sectionKind) {
+    const text = String(value || "");
+    if (isDownloadURL(text)) {
+      const link = document.createElement("a");
+      link.href = text;
+      link.textContent = sectionKind === "download" ? "Download archive" : text;
+      if (sectionKind === "download") link.setAttribute("download", "");
+      return link;
+    }
+    return document.createTextNode(text);
+  }
+
+  function isDownloadURL(value) {
+    return /^\/admin\/api\/plugin-downloads\/[A-Za-z0-9_-]+$/.test(value);
   }
 
   function renderJob(job) {

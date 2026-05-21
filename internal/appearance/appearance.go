@@ -128,6 +128,12 @@ type PluginRuntimePlatform struct {
 // PluginPermission is a stable capability flag requested by a plugin.
 type PluginPermission string
 
+// PluginRequirements declares the minimum host capabilities a plugin expects.
+type PluginRequirements struct {
+	Postizer     string          `json:"postizer,omitempty"`
+	HostServices []PluginService `json:"host_services,omitempty"`
+}
+
 // PluginService declares a service exposed by an external plugin runtime.
 type PluginService struct {
 	Name    string   `json:"name"`
@@ -178,26 +184,27 @@ type PluginUIField struct {
 // 3. 插件包也可以通过 `translations_dir` 提供多语言覆盖。
 // 4. 旧版 `text` 包使用 `messages_file + lang` 表示“单语言翻译包”。
 type Manifest struct {
-	ID              string             `json:"id"`
-	Type            PackType           `json:"type"`
-	Name            string             `json:"name"`
-	SortName        string             `json:"sort_name"`
-	Version         string             `json:"version"`
-	Description     string             `json:"description"`
-	SourceURL       string             `json:"source_url"`
-	Lang            string             `json:"lang"`
-	DefaultLocale   string             `json:"default_locale"`
-	Tags            []string           `json:"tags"`
-	Styles          []string           `json:"styles"`
-	TemplatesDir    string             `json:"templates_dir"`
-	TranslationsDir string             `json:"translations_dir"`
-	MessagesFile    string             `json:"messages_file"`
-	MenuLocations   []MenuLocation     `json:"menu_locations"`
-	Packs           []BundleEntry      `json:"packs"`
-	Runtime         PluginRuntime      `json:"runtime"`
-	Services        []PluginService    `json:"services"`
-	UIEntries       []UIEntry          `json:"ui_entries"`
-	Permissions     []PluginPermission `json:"permissions"`
+	ID              string              `json:"id"`
+	Type            PackType            `json:"type"`
+	Name            string              `json:"name"`
+	SortName        string              `json:"sort_name"`
+	Version         string              `json:"version"`
+	Description     string              `json:"description"`
+	SourceURL       string              `json:"source_url"`
+	Lang            string              `json:"lang"`
+	DefaultLocale   string              `json:"default_locale"`
+	Tags            []string            `json:"tags"`
+	Styles          []string            `json:"styles"`
+	TemplatesDir    string              `json:"templates_dir"`
+	TranslationsDir string              `json:"translations_dir"`
+	MessagesFile    string              `json:"messages_file"`
+	MenuLocations   []MenuLocation      `json:"menu_locations"`
+	Packs           []BundleEntry       `json:"packs"`
+	Runtime         PluginRuntime       `json:"runtime"`
+	Services        []PluginService     `json:"services"`
+	Requires        *PluginRequirements `json:"requires,omitempty"`
+	UIEntries       []UIEntry           `json:"ui_entries"`
+	Permissions     []PluginPermission  `json:"permissions"`
 }
 
 // Pack 是运行时可用的主题包、插件包或 bundle 资源合集对象。
@@ -255,6 +262,14 @@ type InstalledPack struct {
 	Name      string   `json:"name"`
 	Source    string   `json:"source"`
 	SourceURL string   `json:"source_url,omitempty"`
+	Warnings  []string `json:"warnings,omitempty"`
+}
+
+// HostCompatibility describes the Postizer capabilities available during pack installation.
+type HostCompatibility struct {
+	PostizerVersion string
+	PluginServices  []PluginService
+	HostServices    []PluginService
 }
 
 // LoadCatalog 扫描主题包与插件包，构建运行时外观目录。
@@ -366,6 +381,10 @@ func LoadCatalog(officialRoot, userRoot string, themeSelection Selection, themeL
 // bundle 内可以包含多个 theme、多个 plugin，或二者混合。
 // 旧版独立 theme/plugin/text 仍可被扫描读取，但不再作为上传安装格式。
 func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (InstalledPack, error) {
+	return InstallPackZIPWithCompatibility(readerAt, size, userRoot, HostCompatibility{})
+}
+
+func InstallPackZIPWithCompatibility(readerAt io.ReaderAt, size int64, userRoot string, compatibility HostCompatibility) (InstalledPack, error) {
 	zr, err := zip.NewReader(readerAt, size)
 	if err != nil {
 		return InstalledPack{}, fmt.Errorf("open zip: %w", err)
@@ -438,6 +457,7 @@ func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (Installe
 			return InstalledPack{}, err
 		}
 	}
+	warnings := compatibilityWarnings(stageDir, manifest, compatibility)
 
 	if err := os.MkdirAll(filepath.Dir(targetDir), 0755); err != nil {
 		return InstalledPack{}, fmt.Errorf("create user pack dir: %w", err)
@@ -455,6 +475,7 @@ func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (Installe
 		Name:      manifest.Name,
 		Source:    string(SourceUser),
 		SourceURL: strings.TrimSpace(manifest.SourceURL),
+		Warnings:  warnings,
 	}, nil
 }
 
@@ -534,6 +555,155 @@ func validateBundleInstall(bundleDir string, manifest Manifest) error {
 		seen[child.Type][child.ID] = true
 	}
 	return nil
+}
+
+func compatibilityWarnings(bundleDir string, manifest Manifest, compatibility HostCompatibility) []string {
+	if compatibility.empty() {
+		return nil
+	}
+	var warnings []string
+	warnings = append(warnings, manifestCompatibilityWarnings(manifest, compatibility)...)
+	if manifest.Type != BundlePack {
+		return dedupeWarnings(warnings)
+	}
+	children, err := scanBundleChildren(bundleDir, SourceUser, manifest, path.Join(DirBundles, manifest.ID), path.Join("/packs", string(SourceUser), DirBundles, manifest.ID), "")
+	if err != nil {
+		return append(warnings, "Compatibility check could not inspect bundled packs: "+err.Error())
+	}
+	for _, child := range children {
+		warnings = append(warnings, manifestCompatibilityWarnings(child.Manifest, compatibility)...)
+	}
+	return dedupeWarnings(warnings)
+}
+
+func manifestCompatibilityWarnings(manifest Manifest, compatibility HostCompatibility) []string {
+	var warnings []string
+	label := string(manifest.Type) + " " + manifest.ID
+	if manifest.Requires != nil {
+		warnings = append(warnings, postizerVersionWarnings(label, strings.TrimSpace(manifest.Requires.Postizer), compatibility.PostizerVersion)...)
+		warnings = append(warnings, requiredServiceWarnings(label, manifest.Requires.HostServices, compatibility.HostServices, "HostService")...)
+	} else if manifest.Runtime.Kind == RuntimeGRPC {
+		warnings = append(warnings, fmt.Sprintf("%s does not declare requires; host RPC compatibility could not be fully checked.", label))
+	}
+	if manifest.Runtime.Kind == RuntimeGRPC {
+		warnings = append(warnings, pluginServiceWarnings(label, manifest.Services, compatibility.PluginServices)...)
+	}
+	return warnings
+}
+
+func postizerVersionWarnings(label, required, current string) []string {
+	if required == "" {
+		return nil
+	}
+	current = strings.TrimSpace(current)
+	if current == "" || strings.EqualFold(current, "dev") {
+		return []string{fmt.Sprintf("%s requires Postizer %s or newer, but the current version is unknown.", label, required)}
+	}
+	compare, ok := compareReleaseVersions(current, required)
+	if !ok {
+		return []string{fmt.Sprintf("%s requires Postizer %s or newer, but the current version %q could not be compared.", label, required, current)}
+	}
+	if compare < 0 {
+		return []string{fmt.Sprintf("%s requires Postizer %s or newer; current version is %s.", label, required, current)}
+	}
+	return nil
+}
+
+func requiredServiceWarnings(label string, required, supported []PluginService, serviceKind string) []string {
+	if len(required) == 0 {
+		return nil
+	}
+	supportedMethods := serviceMethodSet(supported)
+	var warnings []string
+	for _, service := range required {
+		serviceName := strings.TrimSpace(service.Name)
+		if serviceName == "" {
+			warnings = append(warnings, fmt.Sprintf("%s declares an empty required %s name.", label, serviceKind))
+			continue
+		}
+		methods, ok := supportedMethods[serviceName]
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("%s requires unsupported %s %s.", label, serviceKind, serviceName))
+			continue
+		}
+		if len(service.Methods) == 0 {
+			warnings = append(warnings, fmt.Sprintf("%s requires %s %s but does not declare required methods.", label, serviceKind, serviceName))
+			continue
+		}
+		for _, method := range service.Methods {
+			method = strings.TrimSpace(method)
+			if method == "" {
+				warnings = append(warnings, fmt.Sprintf("%s declares an empty required method for %s %s.", label, serviceKind, serviceName))
+				continue
+			}
+			if !methods[method] {
+				warnings = append(warnings, fmt.Sprintf("%s requires unsupported %s method %s/%s.", label, serviceKind, serviceName, method))
+			}
+		}
+	}
+	return warnings
+}
+
+func pluginServiceWarnings(label string, declared, supported []PluginService) []string {
+	if len(declared) == 0 {
+		return []string{fmt.Sprintf("%s does not declare plugin service methods; PluginService compatibility could not be checked.", label)}
+	}
+	warnings := requiredServiceWarnings(label, declared, supported, "PluginService")
+	declaredMethods := serviceMethodSet(declared)
+	for serviceName, methods := range serviceMethodSet(supported) {
+		declaredForService, ok := declaredMethods[serviceName]
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("%s does not declare required PluginService %s.", label, serviceName))
+			continue
+		}
+		for method := range methods {
+			if !declaredForService[method] {
+				warnings = append(warnings, fmt.Sprintf("%s does not declare required PluginService method %s/%s.", label, serviceName, method))
+			}
+		}
+	}
+	return warnings
+}
+
+func serviceMethodSet(services []PluginService) map[string]map[string]bool {
+	set := map[string]map[string]bool{}
+	for _, service := range services {
+		name := strings.TrimSpace(service.Name)
+		if name == "" {
+			continue
+		}
+		if set[name] == nil {
+			set[name] = map[string]bool{}
+		}
+		for _, method := range service.Methods {
+			method = strings.TrimSpace(method)
+			if method != "" {
+				set[name][method] = true
+			}
+		}
+	}
+	return set
+}
+
+func dedupeWarnings(warnings []string) []string {
+	if len(warnings) == 0 {
+		return nil
+	}
+	deduped := make([]string, 0, len(warnings))
+	seen := map[string]bool{}
+	for _, warning := range warnings {
+		warning = strings.TrimSpace(warning)
+		if warning == "" || seen[warning] {
+			continue
+		}
+		seen[warning] = true
+		deduped = append(deduped, warning)
+	}
+	return deduped
+}
+
+func (compatibility HostCompatibility) empty() bool {
+	return strings.TrimSpace(compatibility.PostizerVersion) == "" && len(compatibility.PluginServices) == 0 && len(compatibility.HostServices) == 0
 }
 
 func validatePackRuntimeForCurrentPlatform(pack Pack) error {
@@ -1777,6 +1947,12 @@ func validateManifest(manifest Manifest) error {
 	if err := validateManifestSourceURL(manifest); err != nil {
 		return err
 	}
+	if err := validateServiceDeclarations("services", manifest.Services, false); err != nil {
+		return err
+	}
+	if err := validateManifestRequirements(manifest); err != nil {
+		return err
+	}
 	for index, location := range manifest.MenuLocations {
 		if !validPackID(location.ID) {
 			return fmt.Errorf("menu_locations[%d].id: invalid menu location id %q", index, location.ID)
@@ -1817,6 +1993,35 @@ func validatePluginRuntime(manifest Manifest) error {
 	default:
 		return fmt.Errorf("invalid runtime kind %q", manifest.Runtime.Kind)
 	}
+}
+
+func validateManifestRequirements(manifest Manifest) error {
+	if manifest.Requires == nil {
+		return nil
+	}
+	if requiredVersion := strings.TrimSpace(manifest.Requires.Postizer); requiredVersion != "" {
+		if _, ok := parseReleaseVersion(requiredVersion); !ok {
+			return fmt.Errorf("requires.postizer must match vX.Y.Z, got %q", requiredVersion)
+		}
+	}
+	return validateServiceDeclarations("requires.host_services", manifest.Requires.HostServices, true)
+}
+
+func validateServiceDeclarations(name string, services []PluginService, requireMethods bool) error {
+	for index, service := range services {
+		if strings.TrimSpace(service.Name) == "" {
+			return fmt.Errorf("%s[%d].name is required", name, index)
+		}
+		if requireMethods && len(service.Methods) == 0 {
+			return fmt.Errorf("%s[%d].methods is required", name, index)
+		}
+		for methodIndex, method := range service.Methods {
+			if strings.TrimSpace(method) == "" {
+				return fmt.Errorf("%s[%d].methods[%d] is required", name, index, methodIndex)
+			}
+		}
+	}
+	return nil
 }
 
 // validateManifestSourceURL 校验 bundle 的来源链接字段。
@@ -1890,6 +2095,49 @@ func validPlatformToken(value string) bool {
 		return false
 	}
 	return true
+}
+
+func compareReleaseVersions(left, right string) (int, bool) {
+	leftParts, ok := parseReleaseVersion(left)
+	if !ok {
+		return 0, false
+	}
+	rightParts, ok := parseReleaseVersion(right)
+	if !ok {
+		return 0, false
+	}
+	for index := range leftParts {
+		if leftParts[index] < rightParts[index] {
+			return -1, true
+		}
+		if leftParts[index] > rightParts[index] {
+			return 1, true
+		}
+	}
+	return 0, true
+}
+
+func parseReleaseVersion(value string) ([3]int, bool) {
+	var parts [3]int
+	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+	tokens := strings.Split(value, ".")
+	if len(tokens) != len(parts) {
+		return parts, false
+	}
+	for index, token := range tokens {
+		if token == "" {
+			return parts, false
+		}
+		n := 0
+		for _, r := range token {
+			if r < '0' || r > '9' {
+				return parts, false
+			}
+			n = n*10 + int(r-'0')
+		}
+		parts[index] = n
+	}
+	return parts, true
 }
 
 func validateManifestPaths(manifest Manifest) error {

@@ -1,15 +1,15 @@
 {
-  "id": "wordpress-importer",
+  "id": "content-exporter",
   "type": "plugin",
-  "name": "WordPress Importer",
+  "name": "Content Exporter",
   "version": "1.0.0",
-  "description": "Import posts, pages, and media from a WordPress WXR XML export.",
+  "description": "Export all posts, pages, and media into a downloadable ZIP archive.",
   "runtime": {
     "kind": "grpc",
     "command": "${go}",
     "args": [
       "run",
-      "./cmd/postizer-wordpress-importer"
+      "./cmd/postizer-content-exporter"
     ]
   },
   "services": [
@@ -23,31 +23,25 @@
     }
   ],
   "requires": {
-    "postizer": "v1.0.0",
+    "postizer": "v1.3.0",
     "host_services": [
       {
         "name": "postizer.plugin.v1.HostService",
         "methods": [
-          "CreateJob",
-          "UpdateJob",
-          "SaveMedia",
-          "SavePost",
-          "SavePage",
-          "ReloadRuntime"
+          "CreateContentExport"
         ]
       }
     ]
   },
   "ui_entries": [
     {
-      "id": "import",
+      "id": "export",
       "outlet": "admin.plugin",
-      "path": "ui/import.json"
+      "path": "ui/export.json"
     }
   ],
   "permissions": [
-    "content.write",
-    "media.write",
-    "network.fetch"
+    "content.read",
+    "media.read"
   ]
 }

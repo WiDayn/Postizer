@@ -87,6 +87,11 @@ func (s *Store) PublicDir() string {
 	return s.publicDir
 }
 
+// Root returns the media store root, including public files and metadata.
+func (s *Store) Root() string {
+	return s.root
+}
+
 // Items 返回按创建时间倒序排列的媒体列表副本。
 func (s *Store) Items() []Item {
 	s.mu.RLock()

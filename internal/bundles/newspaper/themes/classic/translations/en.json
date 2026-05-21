@@ -403,6 +403,7 @@
   "settings.status.cleared": "Cleared",
   "settings.status.applying": "Applying",
   "settings.status.installed": "Installed",
+  "settings.status.installed_with_warnings": "Installed with compatibility warnings",
   "settings.status.deleting": "Deleting",
   "settings.status.deleted": "Deleted",
   "settings.upload_pack.empty": "Choose a .zip package",
