@@ -2,8 +2,10 @@ package http
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"html/template"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -37,6 +39,56 @@ func TestLoadTemplatesParsesAdminTemplates(t *testing.T) {
 
 	if _, err := loadTemplates(appearance.Pack{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestViewNeedsMathOnlyForMathContentAndEditor(t *testing.T) {
+	if viewNeedsMath("home.html", ViewData{Posts: []*site.Post{{Source: "plain text"}}}) {
+		t.Fatal("plain home content should not need math assets")
+	}
+	if !viewNeedsMath("post.html", ViewData{Post: &site.Post{Source: `Inline math: \(x^2\).`}}) {
+		t.Fatal("post with math should need math assets")
+	}
+	if !viewNeedsMath("admin.html", ViewData{EditorKind: "post"}) {
+		t.Fatal("editor should need math assets for preview rendering")
+	}
+}
+
+func TestGzipStaticCompressesTextAssets(t *testing.T) {
+	body := strings.Repeat("body{color:#111}", 20)
+	handler := gzipStatic(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "999")
+		_, _ = w.Write([]byte(body))
+	}))
+
+	request := httptest.NewRequest(http.MethodGet, "/static/site.css?v=110", nil)
+	request.Header.Set("Accept-Encoding", "br, gzip")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if got, want := response.Header().Get("Content-Encoding"), "gzip"; got != want {
+		t.Fatalf("content encoding = %q, want %q", got, want)
+	}
+	if got := response.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("content length = %q, want empty for compressed response", got)
+	}
+	if got := response.Header().Get("Vary"); !strings.Contains(got, "Accept-Encoding") {
+		t.Fatalf("vary = %q, want Accept-Encoding", got)
+	}
+
+	reader, err := gzip.NewReader(response.Body)
+	if err != nil {
+		t.Fatalf("open gzip body: %v", err)
+	}
+	decompressed, err := io.ReadAll(reader)
+	if closeErr := reader.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatalf("read gzip body: %v", err)
+	}
+	if got := string(decompressed); got != body {
+		t.Fatalf("decompressed body = %q, want %q", got, body)
 	}
 }
 

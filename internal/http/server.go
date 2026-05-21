@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -104,6 +105,7 @@ type ViewData struct {
 	ErrorKey      string
 	Remember      bool
 	IsAdmin       bool
+	NeedsMath     bool
 	AdminUsername string
 	LoginNotice   LoginNotice
 	AppVersion    string
@@ -245,10 +247,10 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", cache(http.StripPrefix("/static/", http.FileServer(http.Dir(s.staticRoot)))))
-	mux.Handle("GET /media/", cache(http.StripPrefix("/media/", http.FileServer(http.Dir(mediaStore.PublicDir())))))
-	mux.Handle("GET /packs/official/bundles/", cache(http.StripPrefix("/packs/official/bundles/", http.FileServer(http.Dir(s.builtinBundlesRoot)))))
-	mux.Handle("GET /packs/user/bundles/", cache(http.StripPrefix("/packs/user/bundles/", http.FileServer(http.Dir(s.userBundlesRoot)))))
+	mux.Handle("GET /static/", staticAssets(http.StripPrefix("/static/", http.FileServer(http.Dir(s.staticRoot)))))
+	mux.Handle("GET /media/", staticAssets(http.StripPrefix("/media/", http.FileServer(http.Dir(mediaStore.PublicDir())))))
+	mux.Handle("GET /packs/official/bundles/", staticAssets(http.StripPrefix("/packs/official/bundles/", http.FileServer(http.Dir(s.builtinBundlesRoot)))))
+	mux.Handle("GET /packs/user/bundles/", staticAssets(http.StripPrefix("/packs/user/bundles/", http.FileServer(http.Dir(s.userBundlesRoot)))))
 	mux.HandleFunc("GET /", s.home)
 	mux.HandleFunc("GET /archive", s.archive)
 	mux.HandleFunc("GET /posts/{slug}", s.post)
@@ -2808,12 +2810,67 @@ func (s *Server) render(w http.ResponseWriter, name string, data ViewData) {
 	if data.Appearance == nil {
 		data.Appearance = s.currentAppearance()
 	}
+	if !data.NeedsMath {
+		data.NeedsMath = viewNeedsMath(name, data)
+	}
 	if data.ActiveAdmin != "" {
 		data.LoginNotice = s.loginNotice()
 	}
 	if err := s.currentTemplates().ExecuteTemplate(w, name, data); err != nil {
 		log.Printf("template %s: %v", name, err)
 	}
+}
+
+func viewNeedsMath(templateName string, data ViewData) bool {
+	if data.EditorKind != "" {
+		return true
+	}
+	if data.Post != nil && contentNeedsMath(data.Post.Source) {
+		return true
+	}
+	if data.Page != nil && contentNeedsMath(data.Page.Source) {
+		return true
+	}
+	if templateName == "home.html" {
+		for _, post := range data.Posts {
+			if post != nil && contentNeedsMath(post.Source) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func contentNeedsMath(source string) bool {
+	if source == "" {
+		return false
+	}
+	if strings.Contains(source, `\(`) ||
+		strings.Contains(source, `\[`) ||
+		strings.Contains(source, `\begin{equation}`) ||
+		strings.Contains(source, `\begin{align}`) ||
+		strings.Contains(source, "$$") {
+		return true
+	}
+	return containsUnescapedDollar(source)
+}
+
+func containsUnescapedDollar(source string) bool {
+	escaped := false
+	for _, char := range source {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if char == '\\' {
+			escaped = true
+			continue
+		}
+		if char == '$' {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) currentStore() *site.Store {
@@ -3703,9 +3760,117 @@ func timing(next http.Handler) http.Handler {
 	})
 }
 
+func staticAssets(next http.Handler) http.Handler {
+	return cache(gzipStatic(next))
+}
+
 func cache(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		next.ServeHTTP(w, r)
 	})
+}
+
+func gzipStatic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !shouldGzipStatic(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		addVary(w.Header(), "Accept-Encoding")
+		writer := &gzipResponseWriter{ResponseWriter: w}
+		defer writer.Close()
+		next.ServeHTTP(writer, r)
+	})
+}
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	writer      *gzip.Writer
+	status      int
+	wroteHeader bool
+}
+
+func (w *gzipResponseWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	w.status = status
+	if shouldGzipStatus(status) {
+		w.Header().Del("Content-Length")
+		w.Header().Set("Content-Encoding", "gzip")
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *gzipResponseWriter) Write(body []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if !shouldGzipStatus(w.status) {
+		return w.ResponseWriter.Write(body)
+	}
+	if w.writer == nil {
+		w.writer = gzip.NewWriter(w.ResponseWriter)
+	}
+	return w.writer.Write(body)
+}
+
+func (w *gzipResponseWriter) Flush() {
+	if w.writer != nil {
+		_ = w.writer.Flush()
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *gzipResponseWriter) Close() error {
+	if w.writer == nil {
+		return nil
+	}
+	return w.writer.Close()
+}
+
+func shouldGzipStatus(status int) bool {
+	return status >= http.StatusOK && status != http.StatusNoContent && status != http.StatusNotModified
+}
+
+func shouldGzipStatic(r *http.Request) bool {
+	if r.Method == http.MethodHead || r.Header.Get("Range") != "" || !acceptsGzip(r.Header.Get("Accept-Encoding")) {
+		return false
+	}
+	return compressibleStaticPath(r.URL.Path)
+}
+
+func acceptsGzip(value string) bool {
+	for _, part := range strings.Split(value, ",") {
+		token := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		if token == "gzip" {
+			return true
+		}
+	}
+	return false
+}
+
+func compressibleStaticPath(requestPath string) bool {
+	switch strings.ToLower(filepath.Ext(requestPath)) {
+	case ".css", ".js", ".mjs", ".json", ".map", ".svg", ".txt", ".html", ".htm", ".xml", ".webmanifest", ".wasm":
+		return true
+	default:
+		return false
+	}
+}
+
+func addVary(header http.Header, value string) {
+	for _, existing := range header.Values("Vary") {
+		for _, part := range strings.Split(existing, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), value) {
+				return
+			}
+		}
+	}
+	header.Add("Vary", value)
 }

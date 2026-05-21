@@ -9,9 +9,11 @@
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
+  {{if .NeedsMath}}
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+  {{end}}
   <script id="postizerMessages" type="application/json">{{if .Appearance}}{{toScriptJSON .Appearance.Messages}}{{else}}{}{{end}}</script>
   <script defer src="/static/site.js?v=6"></script>
 </head>
