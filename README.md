@@ -37,12 +37,15 @@ Common options:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo env POSTIZER_ADMIN_PASSWORD='change-this-password' bash
 curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash -s -- --addr 127.0.0.1:8080 --no-start
+curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash -s -- --service-name postizer-blog2 --port 8081
 bash scripts/install-linux-service.sh --binary ./postizer
 bash scripts/install-linux-service.sh --skip-deps
 bash scripts/install-linux-service.sh --source-dir /srv/postizer-src
 bash scripts/install-linux-service.sh --no-git-pull
 bash scripts/install-linux-service.sh --no-update-timer
 ```
+
+For multiple instances on one host, use a unique `--service-name` and port. Unless overridden, the installer derives isolated paths from the service name, such as `/opt/postizer-blog2`, `/etc/postizer-blog2/postizer-blog2.env`, `/usr/local/bin/postizer-blog2`, and `postizer-blog2-update.timer`. You can override the pieces individually with `--install-dir`, `--source-dir`, `--bin-link`, `--env-dir`, `--env-file`, `--update-service-name`, and `--update-timer-name`.
 
 Service commands:
 

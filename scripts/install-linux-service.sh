@@ -10,12 +10,21 @@ SERVICE_GROUP="${POSTIZER_SERVICE_GROUP:-$SERVICE_USER}"
 INSTALL_DIR="${POSTIZER_INSTALL_DIR:-/opt/postizer}"
 DEFAULT_SOURCE_DIR="${POSTIZER_SOURCE_DIR:-/usr/local/src/postizer}"
 UPDATE_SERVICE_NAME_ENV="${POSTIZER_UPDATE_SERVICE_NAME:-}"
+UPDATE_TIMER_NAME_ENV="${POSTIZER_UPDATE_TIMER_NAME:-}"
 UPDATE_SERVICE_NAME="${UPDATE_SERVICE_NAME_ENV:-$SERVICE_NAME-update}"
+UPDATE_TIMER_NAME="${UPDATE_TIMER_NAME_ENV:-$UPDATE_SERVICE_NAME}"
 UPDATE_TIMER_INTERVAL="${POSTIZER_UPDATE_INTERVAL:-15min}"
 BIN_LINK="${POSTIZER_BIN_LINK:-/usr/local/bin/postizer}"
 ENV_DIR="${POSTIZER_ENV_DIR:-/etc/postizer}"
 ENV_FILE="${POSTIZER_ENV_FILE:-$ENV_DIR/postizer.env}"
 LISTEN_ADDR="${POSTIZER_ADDR:-:8080}"
+INSTALL_DIR_EXPLICIT=0
+SOURCE_DIR_EXPLICIT=0
+UPDATE_SERVICE_NAME_EXPLICIT=0
+UPDATE_TIMER_NAME_EXPLICIT=0
+BIN_LINK_EXPLICIT=0
+ENV_DIR_EXPLICIT=0
+ENV_FILE_EXPLICIT=0
 START_SERVICE=1
 ENABLE_SERVICE=1
 BUILD_BINARY=1
@@ -43,6 +52,14 @@ BINARY_SOURCE="${POSTIZER_BINARY:-}"
 GO_CMD="${POSTIZER_GO:-go}"
 REQUIRED_GO_VERSION="${POSTIZER_GO_VERSION:-}"
 
+[[ -n "${POSTIZER_INSTALL_DIR:-}" ]] && INSTALL_DIR_EXPLICIT=1
+[[ -n "${POSTIZER_SOURCE_DIR:-}" ]] && SOURCE_DIR_EXPLICIT=1
+[[ -n "${POSTIZER_UPDATE_SERVICE_NAME:-}" ]] && UPDATE_SERVICE_NAME_EXPLICIT=1
+[[ -n "${POSTIZER_UPDATE_TIMER_NAME:-}" ]] && UPDATE_TIMER_NAME_EXPLICIT=1
+[[ -n "${POSTIZER_BIN_LINK:-}" ]] && BIN_LINK_EXPLICIT=1
+[[ -n "${POSTIZER_ENV_DIR:-}" ]] && ENV_DIR_EXPLICIT=1
+[[ -n "${POSTIZER_ENV_FILE:-}" ]] && ENV_FILE_EXPLICIT=1
+
 usage() {
   cat <<EOF
 Usage: $0 [options]
@@ -55,9 +72,17 @@ Options:
   --repo-url URL        Git repository to clone (default: $REPO_URL)
   --update-interval N   Auto-update systemd timer interval (default: $UPDATE_TIMER_INTERVAL)
   --service-name NAME   systemd service name (default: $SERVICE_NAME)
+  --update-service-name NAME
+                        systemd oneshot update service name (default: <service>-update)
+  --update-timer-name NAME, --timer-name NAME
+                        systemd update timer name (default: <update-service>)
   --user NAME           Service user (default: $SERVICE_USER)
   --group NAME          Service group (default: same as user)
   --addr ADDR           POSTIZER_ADDR value (default: $LISTEN_ADDR)
+  --port PORT           Listen on :PORT (shorthand for --addr :PORT)
+  --bin-link PATH       Symlink path for the installed binary (default: /usr/local/bin/<service>)
+  --env-dir PATH        Environment file directory (default: /etc/<service>)
+  --env-file PATH       Environment file path (default: <env-dir>/<service>.env)
   --binary PATH         Install an existing binary instead of building
   --no-build            Use ./postizer from the repository root
   --no-git-pull         Do not update an existing Git checkout before building
@@ -84,16 +109,27 @@ require_arg() {
   fi
 }
 
+listen_addr_from_port() {
+  local port="$1"
+  if [[ ! "$port" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
+    echo "invalid port: $port" >&2
+    exit 2
+  fi
+  printf ':%s' "$port"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --install-dir)
       require_arg "$1" "${2:-}"
       INSTALL_DIR="$2"
+      INSTALL_DIR_EXPLICIT=1
       shift 2
       ;;
     --source-dir)
       require_arg "$1" "${2:-}"
       SOURCE_DIR="$2"
+      SOURCE_DIR_EXPLICIT=1
       shift 2
       ;;
     --repo-url)
@@ -111,6 +147,18 @@ while [[ $# -gt 0 ]]; do
       SERVICE_NAME="$2"
       shift 2
       ;;
+    --update-service-name)
+      require_arg "$1" "${2:-}"
+      UPDATE_SERVICE_NAME="$2"
+      UPDATE_SERVICE_NAME_EXPLICIT=1
+      shift 2
+      ;;
+    --update-timer-name|--timer-name)
+      require_arg "$1" "${2:-}"
+      UPDATE_TIMER_NAME="$2"
+      UPDATE_TIMER_NAME_EXPLICIT=1
+      shift 2
+      ;;
     --user)
       require_arg "$1" "${2:-}"
       SERVICE_USER="$2"
@@ -124,6 +172,29 @@ while [[ $# -gt 0 ]]; do
     --addr)
       require_arg "$1" "${2:-}"
       LISTEN_ADDR="$2"
+      shift 2
+      ;;
+    --port)
+      require_arg "$1" "${2:-}"
+      LISTEN_ADDR="$(listen_addr_from_port "$2")"
+      shift 2
+      ;;
+    --bin-link)
+      require_arg "$1" "${2:-}"
+      BIN_LINK="$2"
+      BIN_LINK_EXPLICIT=1
+      shift 2
+      ;;
+    --env-dir)
+      require_arg "$1" "${2:-}"
+      ENV_DIR="$2"
+      ENV_DIR_EXPLICIT=1
+      shift 2
+      ;;
+    --env-file)
+      require_arg "$1" "${2:-}"
+      ENV_FILE="$2"
+      ENV_FILE_EXPLICIT=1
       shift 2
       ;;
     --binary)
@@ -174,8 +245,30 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$UPDATE_SERVICE_NAME_ENV" ]]; then
+SERVICE_NAME="${SERVICE_NAME%.service}"
+UPDATE_SERVICE_NAME="${UPDATE_SERVICE_NAME%.service}"
+UPDATE_TIMER_NAME="${UPDATE_TIMER_NAME%.timer}"
+
+if [[ "$INSTALL_DIR_EXPLICIT" -eq 0 ]]; then
+  INSTALL_DIR="/opt/$SERVICE_NAME"
+fi
+if [[ "$SOURCE_DIR_EXPLICIT" -eq 0 && "$SOURCE_DIR" == "$DEFAULT_SOURCE_DIR" ]]; then
+  SOURCE_DIR="/usr/local/src/$SERVICE_NAME"
+fi
+if [[ "$BIN_LINK_EXPLICIT" -eq 0 ]]; then
+  BIN_LINK="/usr/local/bin/$SERVICE_NAME"
+fi
+if [[ "$ENV_DIR_EXPLICIT" -eq 0 ]]; then
+  ENV_DIR="/etc/$SERVICE_NAME"
+fi
+if [[ "$ENV_FILE_EXPLICIT" -eq 0 ]]; then
+  ENV_FILE="$ENV_DIR/$SERVICE_NAME.env"
+fi
+if [[ "$UPDATE_SERVICE_NAME_EXPLICIT" -eq 0 ]]; then
   UPDATE_SERVICE_NAME="$SERVICE_NAME-update"
+fi
+if [[ "$UPDATE_TIMER_NAME_EXPLICIT" -eq 0 ]]; then
+  UPDATE_TIMER_NAME="$UPDATE_SERVICE_NAME"
 fi
 
 if [[ "$NO_BUILD_BINARY" -eq 1 && -z "$BINARY_SOURCE" ]]; then
@@ -468,12 +561,28 @@ auto_update_enabled() {
 }
 
 validate_paths() {
+  validate_unit_name "service" "$SERVICE_NAME"
+  validate_unit_name "update service" "$UPDATE_SERVICE_NAME"
+  validate_unit_name "update timer" "$UPDATE_TIMER_NAME"
   if [[ -z "$INSTALL_DIR" || "$INSTALL_DIR" == "/" ]]; then
     echo "Refusing unsafe install directory: $INSTALL_DIR" >&2
     exit 1
   fi
-  if [[ -z "$ENV_DIR" || "$ENV_DIR" == "/" ]]; then
-    echo "Refusing unsafe environment directory: $ENV_DIR" >&2
+  if [[ -z "$ENV_FILE" || "$ENV_FILE" == "/" ]]; then
+    echo "Refusing unsafe environment file: $ENV_FILE" >&2
+    exit 1
+  fi
+  if [[ -z "$BIN_LINK" || "$BIN_LINK" == "/" ]]; then
+    echo "Refusing unsafe binary link: $BIN_LINK" >&2
+    exit 1
+  fi
+}
+
+validate_unit_name() {
+  local label="$1"
+  local value="$2"
+  if [[ -z "$value" || "$value" == *"/"* ]]; then
+    echo "Invalid $label name: $value" >&2
     exit 1
   fi
 }
@@ -694,7 +803,7 @@ build_or_select_binary() {
 }
 
 write_env_file() {
-  mkdir -p "$ENV_DIR"
+  mkdir -p "$(dirname "$ENV_FILE")"
   if [[ -f "$ENV_FILE" ]]; then
     echo "Keeping existing environment file: $ENV_FILE"
     return
@@ -781,7 +890,7 @@ write_update_timer_files() {
 
   local updater_path="/usr/local/bin/$SERVICE_NAME-auto-update"
   local update_service_path="/etc/systemd/system/$UPDATE_SERVICE_NAME.service"
-  local update_timer_path="/etc/systemd/system/$UPDATE_SERVICE_NAME.timer"
+  local update_timer_path="/etc/systemd/system/$UPDATE_TIMER_NAME.timer"
   local script_path="$SOURCE_DIR/scripts/install-linux-service.sh"
 
   cat >"$updater_path" <<EOF
@@ -793,9 +902,14 @@ exec bash $(printf '%q' "$script_path") \\
   --repo-url $(printf '%q' "$REPO_URL") \\
   --install-dir $(printf '%q' "$INSTALL_DIR") \\
   --service-name $(printf '%q' "$SERVICE_NAME") \\
+  --update-service-name $(printf '%q' "$UPDATE_SERVICE_NAME") \\
+  --update-timer-name $(printf '%q' "$UPDATE_TIMER_NAME") \\
   --user $(printf '%q' "$SERVICE_USER") \\
   --group $(printf '%q' "$SERVICE_GROUP") \\
-  --addr $(printf '%q' "$LISTEN_ADDR")
+  --addr $(printf '%q' "$LISTEN_ADDR") \\
+  --bin-link $(printf '%q' "$BIN_LINK") \\
+  --env-file $(printf '%q' "$ENV_FILE") \\
+  --update-interval $(printf '%q' "$UPDATE_TIMER_INTERVAL")
 EOF
   chmod 0755 "$updater_path"
 
@@ -880,20 +994,21 @@ systemctl daemon-reload
 if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
   systemctl enable "$SERVICE_NAME.service"
   if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
-    systemctl enable "$UPDATE_SERVICE_NAME.timer"
+    systemctl enable "$UPDATE_TIMER_NAME.timer"
   fi
 fi
 if [[ "$START_SERVICE" -eq 1 ]]; then
   systemctl restart "$SERVICE_NAME.service"
   if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
-    systemctl restart "$UPDATE_SERVICE_NAME.timer"
+    systemctl restart "$UPDATE_TIMER_NAME.timer"
   fi
 fi
 
 echo "Installed Postizer to $INSTALL_DIR"
 echo "Service: $SERVICE_NAME.service"
 if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
-  echo "Auto-update timer: $UPDATE_SERVICE_NAME.timer"
+  echo "Auto-update service: $UPDATE_SERVICE_NAME.service"
+  echo "Auto-update timer: $UPDATE_TIMER_NAME.timer"
 fi
 echo "Status: systemctl status $SERVICE_NAME.service"
 echo "Logs:   journalctl -u $SERVICE_NAME.service -f"
