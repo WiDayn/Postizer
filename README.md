@@ -21,7 +21,17 @@ Open:
 On a Linux host with systemd:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/install-linux-service.sh | sudo bash -s -- \
+  --service-name postizer \
+  --port 8080 \
+  --install-dir /opt/postizer \
+  --source-dir /usr/local/src/postizer \
+  --env-file /etc/postizer/postizer.env \
+  --bin-link /usr/local/bin/postizer \
+  --go-cache-dir /var/cache/postizer/go \
+  --update-service-name postizer-update \
+  --update-timer-name postizer-update \
+  --update-interval 15min
 ```
 
 The installer clones `https://github.com/WiDayn/Postizer.git` into `/usr/local/src/postizer` when needed, runs `git pull --ff-only` for an existing Git checkout during manual installs, installs missing base dependencies where possible, downloads the Go version required by `go.mod` when needed, builds Postizer, installs the runtime into `/opt/postizer`, writes `/etc/postizer/postizer.env`, registers `postizer.service`, enables it, starts it, and registers `postizer-update.timer`. If `POSTIZER_ADMIN_PASSWORD` is not set, the installer generates an initial admin password and prints it once. Automatic updates are off by default and can be enabled in Admin -> Settings -> Auto Update; the timer only upgrades when a newer release tag matching `vX.X.X` is available, so ordinary commits are ignored.
@@ -46,6 +56,33 @@ bash scripts/install-linux-service.sh --no-update-timer
 ```
 
 For multiple instances on one host, use a unique `--service-name` and port. Unless overridden, the installer derives isolated paths from the service name, such as `/opt/postizer-blog2`, `/etc/postizer-blog2/postizer-blog2.env`, `/usr/local/bin/postizer-blog2`, `/var/cache/postizer-blog2/go`, and `postizer-blog2-update.timer`. You can override the pieces individually with `--install-dir`, `--source-dir`, `--bin-link`, `--env-dir`, `--env-file`, `--go-cache-dir`, `--update-service-name`, and `--update-timer-name`.
+
+Installer options:
+
+| Option | Description |
+| --- | --- |
+| `--install-dir PATH` | Runtime directory. Defaults to `/opt/<service-name>`. |
+| `--source-dir PATH` | Source checkout directory. Defaults to `/usr/local/src/<service-name>`. |
+| `--repo-url URL` | Git repository to clone. Defaults to `https://github.com/WiDayn/Postizer.git`. |
+| `--service-name NAME` | systemd service name. Defaults to `postizer`. |
+| `--update-service-name NAME` | systemd oneshot update service name. Defaults to `<service-name>-update`. |
+| `--update-timer-name NAME`, `--timer-name NAME` | systemd update timer name. Defaults to `<update-service-name>`. |
+| `--update-interval N` | Auto-update timer interval. Defaults to `15min`. |
+| `--addr ADDR` | `POSTIZER_ADDR` listen address, for example `127.0.0.1:8080`. |
+| `--port PORT` | Listen on `:PORT`; shorthand for `--addr :PORT`. |
+| `--user NAME` | Linux service user. Defaults to `postizer`. |
+| `--group NAME` | Linux service group. Defaults to the service user. |
+| `--bin-link PATH` | Symlink path for the installed binary. Defaults to `/usr/local/bin/<service-name>`. |
+| `--env-dir PATH` | Environment file directory. Defaults to `/etc/<service-name>`. |
+| `--env-file PATH` | Environment file path. Defaults to `<env-dir>/<service-name>.env`. |
+| `--go-cache-dir PATH` | Go build/module cache root. Defaults to `/var/cache/<service-name>/go`. |
+| `--binary PATH` | Install an existing binary instead of building from source. |
+| `--no-build` | Use `./postizer` from the source directory. |
+| `--no-git-pull`, `--skip-git-pull` | Do not update an existing Git checkout before building. |
+| `--skip-deps` | Do not install missing OS packages or Go automatically. |
+| `--no-update-timer` | Do not register the automatic update timer. |
+| `--no-enable` | Do not enable the service at boot. |
+| `--no-start` | Do not start or restart the service after installation. |
 
 Service commands:
 
