@@ -11,6 +11,7 @@ const saveState = document.querySelector("#saveState");
 const wordCount = document.querySelector("#wordCount");
 const postLibrary = document.querySelector("#postLibrary");
 const postLibraryToggle = document.querySelector("#togglePostLibrary");
+const immersiveToggle = document.querySelector("#immersiveToggle");
 const deletePostButton = document.querySelector("#deletePostButton");
 const mediaStrip = document.querySelector("#mediaStrip");
 const mediaPager = document.querySelector("#mediaPager");
@@ -100,6 +101,64 @@ function restorePostLibraryState() {
     setPostLibraryCollapsed(localStorage.getItem(postsCollapsedKey) === "1");
   } catch (_) {
     setPostLibraryCollapsed(false);
+  }
+}
+
+function editorFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function setImmersiveMode(active) {
+  if (!root || !immersiveToggle) return;
+  root.dataset.immersive = active ? "true" : "false";
+  document.body.classList.toggle("has-immersive-editor", active);
+  immersiveToggle.setAttribute("aria-pressed", String(active));
+  immersiveToggle.classList.toggle("is-active", active);
+  const label = active ? tr("editor.immersive.exit", "Exit immersive editing") : tr("editor.immersive.enter", "Enter immersive editing");
+  const shortLabel = active ? tr("editor.immersive.exit_short", "Exit") : tr("editor.immersive.enter_short", "Focus");
+  immersiveToggle.title = label;
+  immersiveToggle.setAttribute("aria-label", label);
+  const text = immersiveToggle.querySelector(".editor-immersive-button__text");
+  if (text) text.textContent = shortLabel;
+  if (active && root.dataset.mode !== "edit") schedulePreview(true);
+  if (active && editor) editor.focus();
+}
+
+async function requestImmersiveFullscreen() {
+  if (!root) return;
+  const request = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (!request) return;
+  try {
+    await Promise.resolve(request.call(root));
+  } catch (_) {
+    // CSS immersive mode still expands the editor when browser fullscreen is unavailable.
+  }
+}
+
+async function exitImmersiveFullscreen() {
+  if (!editorFullscreenElement()) return;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!exit) return;
+  try {
+    await Promise.resolve(exit.call(document));
+  } catch (_) {
+    // The visual editor state has already been restored.
+  }
+}
+
+async function toggleImmersiveMode() {
+  const active = root && root.dataset.immersive === "true";
+  setImmersiveMode(!active);
+  if (active) {
+    await exitImmersiveFullscreen();
+  } else {
+    await requestImmersiveFullscreen();
+  }
+}
+
+function handleFullscreenChange() {
+  if (root && root.dataset.immersive === "true" && !editorFullscreenElement()) {
+    setImmersiveMode(false);
   }
 }
 
@@ -699,6 +758,20 @@ if (postLibraryToggle) {
   restorePostLibraryState();
   postLibraryToggle.addEventListener("click", () => {
     setPostLibraryCollapsed(root.dataset.library !== "collapsed");
+  });
+}
+
+if (immersiveToggle) {
+  setImmersiveMode(false);
+  immersiveToggle.addEventListener("click", () => {
+    toggleImmersiveMode().catch(() => setImmersiveMode(false));
+  });
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && root && root.dataset.immersive === "true" && !editorFullscreenElement()) {
+      setImmersiveMode(false);
+    }
   });
 }
 

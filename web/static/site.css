@@ -3622,6 +3622,30 @@
     --editor-library-width: 2.35rem;
   }
 
+  body.has-immersive-editor {
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .editor-shell[data-immersive="true"] {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    padding: .65rem;
+    gap: .45rem;
+    background: var(--surface);
+  }
+
+  .editor-shell:fullscreen,
+  .editor-shell:-webkit-full-screen {
+    width: 100vw;
+    height: 100vh;
+    background: var(--surface);
+  }
+
   .editor-topbar {
     display: flex;
     justify-content: space-between;
@@ -3645,6 +3669,20 @@
     font-family: var(--font-ui);
   }
 
+  .editor-shell[data-immersive="true"] .editor-topbar {
+    justify-content: flex-end;
+    align-items: center;
+    padding-bottom: .45rem;
+  }
+
+  .editor-shell[data-immersive="true"] .editor-topbar > div:first-child {
+    display: none;
+  }
+
+  .editor-shell[data-immersive="true"] .editor-actions {
+    flex: 1 1 auto;
+  }
+
   .editor-workbench {
     display: grid;
     grid-template-columns: var(--editor-library-width) minmax(0, 1fr) 15rem;
@@ -3654,10 +3692,19 @@
     background: var(--surface);
   }
 
+  .editor-shell[data-immersive="true"] .editor-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .editor-library,
   .editor-sidebar {
     min-width: 0;
     background: var(--surface-muted);
+  }
+
+  .editor-shell[data-immersive="true"] .editor-library,
+  .editor-shell[data-immersive="true"] .editor-sidebar {
+    display: none;
   }
 
   .editor-library {
@@ -3740,6 +3787,10 @@
     line-height: 1.05;
   }
 
+  .editor-shell[data-immersive="true"] .title-field {
+    font-size: 1.8rem;
+  }
+
   .permalink-row {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -3750,6 +3801,10 @@
     color: var(--muted);
     font-family: var(--font-ui);
     font-size: .78rem;
+  }
+
+  .editor-shell[data-immersive="true"] .permalink-row {
+    padding-block: .25rem;
   }
 
   .permalink-row code {
@@ -3769,6 +3824,37 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     min-height: 0;
+  }
+
+  .editor-immersive-button {
+    min-width: 5.2rem;
+  }
+
+  .editor-immersive-button__icon {
+    flex: 0 0 auto;
+    width: .9rem;
+    height: .9rem;
+    background:
+      linear-gradient(currentColor, currentColor) 0 0 / .42rem 1px no-repeat,
+      linear-gradient(currentColor, currentColor) 0 0 / 1px .42rem no-repeat,
+      linear-gradient(currentColor, currentColor) 100% 0 / .42rem 1px no-repeat,
+      linear-gradient(currentColor, currentColor) 100% 0 / 1px .42rem no-repeat,
+      linear-gradient(currentColor, currentColor) 0 100% / .42rem 1px no-repeat,
+      linear-gradient(currentColor, currentColor) 0 100% / 1px .42rem no-repeat,
+      linear-gradient(currentColor, currentColor) 100% 100% / .42rem 1px no-repeat,
+      linear-gradient(currentColor, currentColor) 100% 100% / 1px .42rem no-repeat;
+  }
+
+  .editor-immersive-button.is-active .editor-immersive-button__icon {
+    background:
+      linear-gradient(currentColor, currentColor) 0 .42rem / .42rem 1px no-repeat,
+      linear-gradient(currentColor, currentColor) .42rem 0 / 1px .42rem no-repeat,
+      linear-gradient(currentColor, currentColor) 100% .42rem / .42rem 1px no-repeat,
+      linear-gradient(currentColor, currentColor) calc(100% - .42rem) 0 / 1px .42rem no-repeat,
+      linear-gradient(currentColor, currentColor) 0 calc(100% - .42rem) / .42rem 1px no-repeat,
+      linear-gradient(currentColor, currentColor) .42rem 100% / 1px .42rem no-repeat,
+      linear-gradient(currentColor, currentColor) 100% calc(100% - .42rem) / .42rem 1px no-repeat,
+      linear-gradient(currentColor, currentColor) calc(100% - .42rem) 100% / 1px .42rem no-repeat;
   }
 
   .markdown-editor,

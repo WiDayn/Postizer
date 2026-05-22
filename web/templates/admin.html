@@ -76,6 +76,11 @@
         <button type="button" class="ui-button" data-mode-button="edit">{{msg . "editor.mode.edit"}}</button>
         <button type="button" class="ui-button is-active" data-mode-button="split">{{msg . "editor.mode.split"}}</button>
         <button type="button" class="ui-button" data-mode-button="preview">{{msg . "editor.mode.preview"}}</button>
+        <span class="ui-separator"></span>
+        <button type="button" id="immersiveToggle" class="ui-button editor-immersive-button" aria-pressed="false" aria-label="{{msg . "editor.immersive.enter" "Enter immersive editing"}}" title="{{msg . "editor.immersive.enter" "Enter immersive editing"}}">
+          <span class="editor-immersive-button__icon" aria-hidden="true"></span>
+          <span class="editor-immersive-button__text">{{msg . "editor.immersive.enter_short" "Focus"}}</span>
+        </button>
       </div>
 
       <div class="editor-stage">
@@ -154,6 +159,6 @@
     </aside>
   </div>
 </section>
-<script defer src="/static/admin.js?v=20"></script>
+<script defer src="/static/admin.js?v=21"></script>
 {{template "adminEnd" .}}
 {{end}}
