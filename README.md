@@ -35,6 +35,13 @@ Open <http://localhost:8080/>. Compose stores runtime data in named volumes:
 The Docker image seeds `/app/runtime/current` from `/usr/src/postizer` when the runtime volume is empty, then starts Postizer from that writable runtime path. This lets future in-app updates replace the runtime files without depending on the Docker image tag.
 When Admin -> Settings -> Auto Update is enabled, the Docker image checks `POSTIZER_REPO_URL` for the newest GitHub Release with a `vX.X.X` tag, downloads the matching `postizer-vX.X.X-linux-<arch>.tar.gz`, verifies `SHA256SUMS`, switches `/app/runtime/current`, and exits so Docker can restart into the new build.
 
+## Resource Marketplace
+
+Admin -> Resource Marketplace is backed by `marketplace/packs/index.json`.
+The default source is the official GitHub raw index with the packaged local index as a fallback. Set `POSTIZER_RESOURCE_MARKETPLACE_URL` to point at another trusted index.
+
+Marketplace entries install `.zip` bundle assets from GitHub Releases. Entries list the themes and plugins they contain, and use `theme` / `plugin` tags for the built-in admin filters. Postizer verifies the indexed SHA-256 digest, checks that the downloaded bundle ID matches the index entry, and requires the bundle `source_url` to match the listed GitHub repository.
+
 For a direct Docker run:
 
 ```bash

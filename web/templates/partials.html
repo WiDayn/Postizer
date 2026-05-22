@@ -55,6 +55,7 @@
       <a class="{{if eq .ActiveAdmin "media"}}is-active{{end}}" href="/admin/media">{{msg . "nav.media"}}</a>
       <a class="{{if eq .ActiveAdmin "menus"}}is-active{{end}}" href="/admin/menus">{{msg . "nav.menus" "Custom Menus"}}</a>
       <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
+      <a class="{{if eq .ActiveAdmin "resource-marketplace"}}is-active{{end}}" href="/admin/resource-marketplace">{{msg . "nav.resource_marketplace" "Resource Marketplace"}}</a>
       <a class="{{if eq .ActiveAdmin "theme-settings"}}is-active{{end}}" href="/admin/theme-settings">{{msg . "nav.theme_settings" "Theme Settings"}}</a>
       <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
       <a class="{{if or (eq .ActiveAdmin "settings") (eq .ActiveAdmin "permalinks") (eq .ActiveAdmin "updates")}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>

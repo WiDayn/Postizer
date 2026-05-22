@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"postizer/internal/appearance"
+	"postizer/internal/marketplace"
 	"postizer/internal/media"
 	"postizer/internal/pluginhost"
 	"postizer/internal/site"
@@ -51,6 +52,7 @@ type Server struct {
 	pluginUploads      map[string]pluginrpc.ActionFile
 	pluginDownloads    map[string]pluginDownload
 	pluginJobs         map[string]*importJob
+	marketplaceClient  *http.Client
 	loginAttempts      map[string]loginAttemptState
 	auth               authConfig
 	mu                 sync.RWMutex
@@ -225,6 +227,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 		pluginUploads:      map[string]pluginrpc.ActionFile{},
 		pluginDownloads:    map[string]pluginDownload{},
 		pluginJobs:         map[string]*importJob{},
+		marketplaceClient:  &http.Client{Timeout: 45 * time.Second},
 		loginAttempts:      map[string]loginAttemptState{},
 		auth:               newAuthConfig(contentRoot),
 	}
@@ -238,6 +241,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /media/", staticAssets(http.StripPrefix("/media/", http.FileServer(http.Dir(mediaStore.PublicDir())))))
 	mux.Handle("GET /packs/official/bundles/", staticAssets(http.StripPrefix("/packs/official/bundles/", http.FileServer(http.Dir(s.builtinBundlesRoot)))))
 	mux.Handle("GET /packs/user/bundles/", staticAssets(http.StripPrefix("/packs/user/bundles/", http.FileServer(http.Dir(s.userBundlesRoot)))))
+	mux.Handle("GET /marketplace/previews/", staticAssets(http.StripPrefix("/marketplace/previews/", http.FileServer(http.Dir(filepath.Join(s.appRoot, "marketplace", "previews"))))))
 	mux.HandleFunc("GET /", s.home)
 	mux.HandleFunc("GET /archive", s.archive)
 	mux.HandleFunc("GET /posts/{slug}", s.post)
@@ -266,6 +270,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/comments/{id}/reply", s.requireAdmin(http.HandlerFunc(s.replyToComment)))
 	mux.Handle("GET /admin/media", s.requireAdmin(http.HandlerFunc(s.adminMedia)))
 	mux.Handle("GET /admin/appearance", s.requireAdmin(http.HandlerFunc(s.adminAppearance)))
+	mux.Handle("GET /admin/resource-marketplace", s.requireAdmin(http.HandlerFunc(s.adminResourceMarketplace)))
 	mux.Handle("GET /admin/plugins", s.requireAdmin(http.HandlerFunc(s.adminPlugins)))
 	mux.Handle("GET /admin/plugins/{id}", s.requireAdmin(http.HandlerFunc(s.adminPluginSettings)))
 	mux.Handle("GET /admin/menus", s.requireAdmin(http.HandlerFunc(s.adminMenus)))
@@ -299,6 +304,8 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/settings/media-processing", s.requireAdmin(http.HandlerFunc(s.updateMediaProcessingSettings)))
 	mux.Handle("POST /admin/api/menus", s.requireAdmin(http.HandlerFunc(s.updateMenus)))
 	mux.Handle("POST /admin/api/theme-settings", s.requireAdmin(http.HandlerFunc(s.updateThemeSettings)))
+	mux.Handle("GET /admin/api/resource-marketplace", s.requireAdmin(http.HandlerFunc(s.resourceMarketplace)))
+	mux.Handle("POST /admin/api/resource-marketplace/install", s.requireAdmin(http.HandlerFunc(s.installResourceMarketplaceItem)))
 	mux.Handle("POST /admin/api/resource-packs", s.requireAdmin(http.HandlerFunc(s.uploadResourcePack)))
 	mux.Handle("DELETE /admin/api/resource-packs/{type}/{id}", s.requireAdmin(http.HandlerFunc(s.deleteResourcePack)))
 	mux.Handle("POST /admin/api/resource-packs/apply", s.requireAdmin(http.HandlerFunc(s.applyResourcePacks)))
@@ -767,6 +774,11 @@ func (s *Server) adminMedia(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminAppearance(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	s.render(w, "admin_appearance.html", ViewData{Title: "Theme Packs", TitleKey: "title.admin.appearance", Store: store, ActiveAdmin: "appearance"})
+}
+
+func (s *Server) adminResourceMarketplace(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.render(w, "admin_resource_marketplace.html", ViewData{Title: "Resource Marketplace", TitleKey: "title.admin.resource_marketplace", Store: store, ActiveAdmin: "resource-marketplace"})
 }
 
 func (s *Server) adminPlugins(w http.ResponseWriter, r *http.Request) {
@@ -1637,6 +1649,222 @@ func (s *Server) mediaProcessingOptions() media.ProcessingOptions {
 		WebPQuality:   settings.WebPQuality,
 		KeepOriginal:  settings.KeepOriginal,
 	}
+}
+
+type resourceMarketplaceResponse struct {
+	Source string                    `json:"source"`
+	Items  []resourceMarketplaceItem `json:"items"`
+}
+
+type resourceMarketplaceItem struct {
+	ID               string                   `json:"id"`
+	Name             string                   `json:"name"`
+	Summary          string                   `json:"summary"`
+	Description      string                   `json:"description"`
+	Repo             string                   `json:"repo"`
+	Preview          string                   `json:"preview"`
+	Tags             []string                 `json:"tags"`
+	Themes           []marketplace.PackMember `json:"themes"`
+	Plugins          []marketplace.PackMember `json:"plugins"`
+	Release          marketplace.Release      `json:"release"`
+	MinPostizer      string                   `json:"min_postizer"`
+	Installed        bool                     `json:"installed"`
+	InstalledVersion string                   `json:"installed_version,omitempty"`
+	Active           bool                     `json:"active"`
+	UpdateAvailable  bool                     `json:"update_available"`
+}
+
+func (s *Server) resourceMarketplace(w http.ResponseWriter, r *http.Request) {
+	index, source, err := s.loadResourceMarketplaceIndex(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, s.resourceMarketplaceResponse(index, source))
+}
+
+func (s *Server) installResourceMarketplaceItem(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(payload.ID)
+	if id == "" {
+		http.Error(w, "resource marketplace id is required", http.StatusBadRequest)
+		return
+	}
+
+	index, _, err := s.loadResourceMarketplaceIndex(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	item, ok := marketplace.FindPack(index, id)
+	if !ok {
+		http.Error(w, "resource marketplace item not found", http.StatusNotFound)
+		return
+	}
+	if err := ensureResourceMarketplaceCompatible(item); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	body, assetURL, err := marketplace.DownloadReleaseAsset(r.Context(), s.marketplaceClient, item)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if err := marketplace.VerifyReleaseAsset(item, body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateMarketplaceBundle(body, item); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	installed, err := appearance.InstallPackZIPWithCompatibility(bytes.NewReader(body), int64(len(body)), s.userContentRoot, currentHostCompatibility())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.reloadRuntime(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"installed": installed,
+		"asset_url": assetURL,
+	})
+}
+
+func (s *Server) loadResourceMarketplaceIndex(ctx context.Context) (marketplace.Index, string, error) {
+	var failures []string
+	for _, source := range s.resourceMarketplaceSources() {
+		index, err := marketplace.LoadIndex(ctx, source, s.marketplaceClient)
+		if err == nil {
+			return index, source, nil
+		}
+		failures = append(failures, source+": "+err.Error())
+	}
+	if len(failures) == 0 {
+		return marketplace.Index{}, "", errors.New("resource marketplace source is not configured")
+	}
+	return marketplace.Index{}, "", errors.New("load resource marketplace: " + strings.Join(failures, "; "))
+}
+
+func (s *Server) resourceMarketplaceSources() []string {
+	if configured := strings.TrimSpace(os.Getenv("POSTIZER_RESOURCE_MARKETPLACE_URL")); configured != "" {
+		return []string{configured}
+	}
+	if configured := strings.TrimSpace(os.Getenv("POSTIZER_THEME_MARKETPLACE_URL")); configured != "" {
+		return []string{configured}
+	}
+
+	candidates := []string{marketplace.DefaultPackIndexURL}
+	for _, candidate := range []string{
+		filepath.Join(s.appRoot, "marketplace", "packs", "index.json"),
+		filepath.Join("marketplace", "packs", "index.json"),
+	} {
+		candidate = filepath.Clean(candidate)
+		if candidate == "." {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			candidates = append(candidates, candidate)
+		}
+	}
+	return dedupeStrings(candidates)
+}
+
+func (s *Server) resourceMarketplaceResponse(index marketplace.Index, source string) resourceMarketplaceResponse {
+	catalog := s.currentAppearance()
+	items := make([]resourceMarketplaceItem, 0, len(index.Items))
+	for _, item := range index.Items {
+		installed, installedVersion, active, updateAvailable := resourceMarketplaceInstallState(item, catalog)
+		items = append(items, resourceMarketplaceItem{
+			ID:               item.ID,
+			Name:             item.Name,
+			Summary:          item.Summary,
+			Description:      item.Description,
+			Repo:             item.Repo,
+			Preview:          marketplace.ResolvePreviewURL(source, item.Preview),
+			Tags:             item.Tags,
+			Themes:           item.Themes,
+			Plugins:          item.Plugins,
+			Release:          item.Release,
+			MinPostizer:      item.MinPostizer,
+			Installed:        installed,
+			InstalledVersion: installedVersion,
+			Active:           active,
+			UpdateAvailable:  updateAvailable,
+		})
+	}
+	return resourceMarketplaceResponse{Source: source, Items: items}
+}
+
+func resourceMarketplaceInstallState(item marketplace.PackItem, catalog *appearance.Catalog) (bool, string, bool, bool) {
+	if catalog == nil {
+		return false, "", false, false
+	}
+	for _, bundle := range catalog.Bundles {
+		if bundle.ID != item.ID || bundle.Source != appearance.SourceUser {
+			continue
+		}
+		active := catalog.ActiveTheme.BundleID == bundle.ID
+		updateAvailable := false
+		if compare, ok := marketplace.CompareVersions(item.Release.Tag, bundle.Version); ok && compare > 0 {
+			updateAvailable = true
+		}
+		return true, bundle.Version, active, updateAvailable
+	}
+	return false, "", false, false
+}
+
+func ensureResourceMarketplaceCompatible(item marketplace.PackItem) error {
+	minPostizer := strings.TrimSpace(item.MinPostizer)
+	if minPostizer == "" {
+		return nil
+	}
+	if compare, ok := marketplace.CompareVersions(currentAppVersion(), minPostizer); ok && compare < 0 {
+		return fmt.Errorf("resource pack %q requires Postizer %s or newer; current version is %s", item.ID, minPostizer, currentAppVersion())
+	}
+	return nil
+}
+
+func validateMarketplaceBundle(body []byte, item marketplace.PackItem) error {
+	manifest, err := appearance.ReadPackZIPManifest(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		return err
+	}
+	if manifest.Type != appearance.BundlePack {
+		return fmt.Errorf("resource marketplace asset must be a %q bundle, got %q", appearance.BundlePack, manifest.Type)
+	}
+	if manifest.ID != item.ID {
+		return fmt.Errorf("resource marketplace asset id %q does not match index id %q", manifest.ID, item.ID)
+	}
+	if !marketplace.SameGitHubRepo(manifest.SourceURL, item.Repo) {
+		return errors.New("resource marketplace asset source_url must match the indexed GitHub repository")
+	}
+	return nil
+}
+
+func dedupeStrings(values []string) []string {
+	seen := map[string]bool{}
+	deduped := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		deduped = append(deduped, value)
+	}
+	return deduped
 }
 
 func (s *Server) uploadResourcePack(w http.ResponseWriter, r *http.Request) {

@@ -35,6 +35,7 @@ build_asset() {
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w -X postizer/internal/http.AppVersion=$VERSION" -o "$binary" ./cmd/postizer
   cp -a web "$stage/web"
   cp -a internal/bundles "$stage/internal/bundles"
+  cp -a marketplace "$stage/marketplace"
   mkdir -p "$stage/scripts"
   cp scripts/install-linux-service.sh "$stage/scripts/install-linux-service.sh"
   printf '%s\n' "$VERSION" > "$stage/.postizer-version"

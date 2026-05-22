@@ -1,6 +1,7 @@
 package http
 
 import (
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"postizer/internal/appearance"
+	"postizer/internal/marketplace"
 	"postizer/internal/media"
 	"postizer/internal/site"
 	"postizer/pkg/pluginrpc"
@@ -1445,4 +1447,80 @@ func TestSettingsAfterDeletingInactivePackDoesNotChangeSettings(t *testing.T) {
 	if !reflect.DeepEqual(next, settings) {
 		t.Fatalf("settings changed unexpectedly: %#v", next)
 	}
+}
+
+func TestValidateMarketplaceBundleRequiresMatchingIDAndRepo(t *testing.T) {
+	body := marketplaceBundleZip(t, "paper", "https://github.com/example/paper")
+	item := marketplace.PackItem{
+		ID:   "paper",
+		Repo: "https://github.com/example/paper",
+	}
+	if err := validateMarketplaceBundle(body, item); err != nil {
+		t.Fatal(err)
+	}
+
+	item.ID = "other"
+	if err := validateMarketplaceBundle(body, item); err == nil {
+		t.Fatal("validateMarketplaceBundle should reject mismatched IDs")
+	}
+
+	item.ID = "paper"
+	item.Repo = "https://github.com/example/other"
+	if err := validateMarketplaceBundle(body, item); err == nil {
+		t.Fatal("validateMarketplaceBundle should reject mismatched repositories")
+	}
+}
+
+func TestResourceMarketplaceInstallStateDetectsUpdates(t *testing.T) {
+	item := marketplace.PackItem{
+		ID: "paper",
+		Release: marketplace.Release{
+			Tag: "v1.2.0",
+		},
+	}
+	catalog := &appearance.Catalog{
+		Bundles: []appearance.Pack{
+			{
+				Manifest: appearance.Manifest{
+					ID:      "paper",
+					Type:    appearance.BundlePack,
+					Version: "1.0.0",
+				},
+				Source: appearance.SourceUser,
+			},
+		},
+		ActiveTheme: appearance.Pack{BundleID: "paper"},
+	}
+
+	installed, version, active, updateAvailable := resourceMarketplaceInstallState(item, catalog)
+	if !installed || !active || !updateAvailable {
+		t.Fatalf("state = installed %v active %v update %v, want all true", installed, active, updateAvailable)
+	}
+	if got, want := version, "1.0.0"; got != want {
+		t.Fatalf("installed version = %q, want %q", got, want)
+	}
+}
+
+func marketplaceBundleZip(t *testing.T, id, repo string) []byte {
+	t.Helper()
+	var body bytes.Buffer
+	zw := zip.NewWriter(&body)
+	file, err := zw.Create("manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.Write([]byte(`{
+  "id": "` + id + `",
+  "type": "bundle",
+  "name": "Paper",
+  "version": "1.0.0",
+  "source_url": "` + repo + `"
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body.Bytes()
 }

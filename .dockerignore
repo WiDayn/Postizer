@@ -4,6 +4,7 @@
 content
 media
 dist
+marketplace/repositories
 
 *.log
 *.exe

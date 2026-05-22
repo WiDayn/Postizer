@@ -5,6 +5,7 @@
 /stop.sh
 /attach.sh
 /dist
+/marketplace/repositories/
 /.env
 /.env.local
 /*.log

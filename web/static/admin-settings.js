@@ -6,6 +6,10 @@ const restoreDefaultPacksButtons = Array.from(document.querySelectorAll(".restor
 const resourcePackUploadForm = document.querySelector("#resourcePackUploadForm");
 const resourcePackFile = document.querySelector("#resourcePackFile");
 const localResourcePackList = document.querySelector("#localResourcePackList");
+const resourceMarketplaceList = document.querySelector("#resourceMarketplaceList");
+const resourceMarketplaceStatus = document.querySelector("#resourceMarketplaceStatus");
+const resourceMarketplaceRefresh = document.querySelector("#resourceMarketplaceRefresh");
+const resourceMarketplaceFilterButtons = Array.from(document.querySelectorAll("[data-resource-marketplace-filter]"));
 const themeLocaleGrid = document.querySelector("#themeLocaleGrid");
 const pluginPackGrid = document.querySelector("#pluginPackGrid");
 const pluginQueueList = document.querySelector("#pluginQueueList");
@@ -81,6 +85,10 @@ function setPackSettingsStatus(message) {
   packSettingsStatuses.forEach((node) => {
     node.textContent = message || "";
   });
+}
+
+function setResourceMarketplaceStatus(message) {
+  if (resourceMarketplaceStatus) resourceMarketplaceStatus.textContent = message || "";
 }
 
 function setHomeImageStatus(message) {
@@ -225,6 +233,205 @@ async function submitAppearancePayload(payload) {
   setPackSettingsStatus(tr("settings.status.saved", "Saved"));
   window.location.reload();
   return true;
+}
+
+function marketplaceButtonLabel(item) {
+  if (item && item.update_available) return tr("settings.resource_marketplace.update", "Update");
+  if (item && item.installed) return tr("settings.resource_marketplace.reinstall", "Reinstall");
+  return tr("settings.resource_marketplace.install", "Install");
+}
+
+function marketplaceTagLabel(tag) {
+  if (tag === "theme") return tr("settings.resource_marketplace.tag.theme", "Theme");
+  if (tag === "plugin") return tr("settings.resource_marketplace.tag.plugin", "Plugin");
+  return tag;
+}
+
+function appendMarketplaceBadge(container, text) {
+  if (!text) return;
+  const badge = document.createElement("span");
+  badge.className = "marketplace-badge";
+  badge.textContent = text;
+  container.appendChild(badge);
+}
+
+function appendMarketplaceMemberList(container, title, members) {
+  if (!Array.isArray(members) || !members.length) return;
+  const group = document.createElement("div");
+  group.className = "marketplace-card__member-group";
+  const heading = document.createElement("h4");
+  heading.textContent = title;
+  group.appendChild(heading);
+  const list = document.createElement("ul");
+  members.forEach((member) => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = member.name || member.id || "";
+    item.appendChild(name);
+    if (member.version) {
+      const version = document.createElement("small");
+      version.textContent = `v${member.version}`;
+      item.appendChild(version);
+    }
+    list.appendChild(item);
+  });
+  group.appendChild(list);
+  container.appendChild(group);
+}
+
+let resourceMarketplaceItems = [];
+let resourceMarketplaceFilter = "all";
+
+function filteredResourceMarketplaceItems() {
+  if (resourceMarketplaceFilter === "all") return resourceMarketplaceItems.slice();
+  return resourceMarketplaceItems.filter((item) => {
+    const tags = Array.isArray(item.tags) ? item.tags : [];
+    return tags.includes(resourceMarketplaceFilter);
+  });
+}
+
+function renderResourceMarketplace() {
+  if (!resourceMarketplaceList) return;
+  resourceMarketplaceList.innerHTML = "";
+  const items = filteredResourceMarketplaceItems();
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "marketplace-empty";
+    empty.textContent = resourceMarketplaceItems.length
+      ? tr("settings.resource_marketplace.filter_empty", "No resource packs match this filter.")
+      : tr("settings.resource_marketplace.empty", "No resource packs are listed yet.");
+    resourceMarketplaceList.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "marketplace-card";
+    card.dataset.resourceMarketplaceId = item.id || "";
+
+    const preview = document.createElement("div");
+    preview.className = "marketplace-card__preview";
+    if (item.preview) {
+      const image = document.createElement("img");
+      image.src = item.preview;
+      image.alt = "";
+      image.loading = "lazy";
+      image.addEventListener("error", () => {
+        preview.classList.add("is-missing");
+        image.remove();
+      });
+      preview.appendChild(image);
+    } else {
+      preview.classList.add("is-missing");
+    }
+    card.appendChild(preview);
+
+    const body = document.createElement("div");
+    body.className = "marketplace-card__body";
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "marketplace-card__title-row";
+    const title = document.createElement("h3");
+    title.textContent = item.name || item.id || "";
+    titleRow.appendChild(title);
+    if (item.release && item.release.tag) {
+      const version = document.createElement("span");
+      version.className = "pack-version-badge";
+      version.textContent = item.release.tag;
+      titleRow.appendChild(version);
+    }
+    body.appendChild(titleRow);
+
+    const summary = document.createElement("p");
+    summary.className = "marketplace-card__summary";
+    summary.textContent = item.summary || item.description || "";
+    body.appendChild(summary);
+
+    const badges = document.createElement("div");
+    badges.className = "marketplace-card__badges";
+    if (item.active) appendMarketplaceBadge(badges, tr("settings.resource_marketplace.active", "Active"));
+    if (item.installed) {
+      appendMarketplaceBadge(badges, item.installed_version
+        ? formatMessage("settings.resource_marketplace.installed_version", "Installed {version}", { version: item.installed_version })
+        : tr("settings.resource_marketplace.installed", "Installed"));
+    }
+    (Array.isArray(item.tags) ? item.tags : []).forEach((tag) => appendMarketplaceBadge(badges, marketplaceTagLabel(tag)));
+    body.appendChild(badges);
+
+    const members = document.createElement("div");
+    members.className = "marketplace-card__members";
+    appendMarketplaceMemberList(members, tr("settings.resource_marketplace.themes", "Themes"), item.themes || []);
+    appendMarketplaceMemberList(members, tr("settings.resource_marketplace.plugins", "Plugins"), item.plugins || []);
+    if (members.childNodes.length) body.appendChild(members);
+
+    const actions = document.createElement("div");
+    actions.className = "marketplace-card__actions";
+    const repo = document.createElement("a");
+    repo.className = "marketplace-card__repo";
+    repo.href = item.repo || "#";
+    repo.target = "_blank";
+    repo.rel = "noreferrer";
+    repo.textContent = tr("settings.resource_marketplace.view_repo", "Repository");
+    actions.appendChild(repo);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ui-button ui-button--primary";
+    button.dataset.resourceMarketplaceInstall = item.id || "";
+    button.textContent = marketplaceButtonLabel(item);
+    actions.appendChild(button);
+    body.appendChild(actions);
+
+    card.appendChild(body);
+    resourceMarketplaceList.appendChild(card);
+  });
+}
+
+function syncResourceMarketplaceFilterButtons() {
+  resourceMarketplaceFilterButtons.forEach((button) => {
+    button.classList.toggle("is-active", (button.dataset.resourceMarketplaceFilter || "all") === resourceMarketplaceFilter);
+  });
+}
+
+async function loadResourceMarketplace() {
+  if (!resourceMarketplaceList) return;
+  setResourceMarketplaceStatus(tr("settings.resource_marketplace.loading", "Loading resource packs"));
+  const response = await fetch(apiURL("/admin/api/resource-marketplace"));
+  if (!response.ok) {
+    setResourceMarketplaceStatus((await response.text()).trim());
+    resourceMarketplaceItems = [];
+    renderResourceMarketplace();
+    return;
+  }
+  const result = await response.json();
+  resourceMarketplaceItems = Array.isArray(result.items) ? result.items : [];
+  renderResourceMarketplace();
+  setResourceMarketplaceStatus(tr("settings.status.ready", "Ready"));
+}
+
+async function installResourceMarketplaceItem(id, button) {
+  if (!id) return;
+  if (button) button.disabled = true;
+  setResourceMarketplaceStatus(tr("settings.resource_marketplace.installing", "Installing"));
+  const response = await fetch(apiURL("/admin/api/resource-marketplace/install"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id })
+  });
+  if (!response.ok) {
+    if (button) button.disabled = false;
+    setResourceMarketplaceStatus((await response.text()).trim());
+    return;
+  }
+  const result = await response.json();
+  const installed = result.installed || {};
+  const warnings = Array.isArray(installed.warnings) ? installed.warnings.filter(Boolean) : [];
+  const warningTitle = tr("settings.status.installed_with_warnings", "Installed with compatibility warnings");
+  if (warnings.length) {
+    window.alert([`${warningTitle}:`, ...warnings].join("\n\n"));
+  }
+  setResourceMarketplaceStatus(warnings.length ? warningTitle : tr("settings.resource_marketplace.installed", "Installed"));
+  window.location.reload();
 }
 
 function syncSelectableCards(selector, selectedClass = "is-selected") {
@@ -672,6 +879,30 @@ if (pluginTransferAddButton) {
 
 if (pluginTransferRemoveButton) {
   pluginTransferRemoveButton.addEventListener("click", () => removePlugin(selectedQueuePluginID));
+}
+
+if (resourceMarketplaceList) {
+  resourceMarketplaceList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-resource-marketplace-install]");
+    if (!button) return;
+    installResourceMarketplaceItem(button.dataset.resourceMarketplaceInstall || "", button);
+  });
+  loadResourceMarketplace();
+}
+
+if (resourceMarketplaceFilterButtons.length) {
+  resourceMarketplaceFilterButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      resourceMarketplaceFilter = button.dataset.resourceMarketplaceFilter || "all";
+      syncResourceMarketplaceFilterButtons();
+      renderResourceMarketplace();
+    });
+  });
+  syncResourceMarketplaceFilterButtons();
+}
+
+if (resourceMarketplaceRefresh) {
+  resourceMarketplaceRefresh.addEventListener("click", () => loadResourceMarketplace());
 }
 
 if (applyPacksButtons.length) {

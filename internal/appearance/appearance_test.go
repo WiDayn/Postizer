@@ -263,11 +263,11 @@ func TestLoadCatalogSortsLocalesWithFixedPriority(t *testing.T) {
 	}
 }
 
-func TestLoadCatalogIncludesOfficialNewspaperClassicInk(t *testing.T) {
+func TestLoadCatalogFallsBackWhenSelectedThemeIsMissing(t *testing.T) {
 	catalog, err := LoadCatalog(
 		filepath.Join("..", "..", "internal", "bundles"),
 		t.TempDir(),
-		Selection{Enabled: true, PackID: "newspaper-classic-ink"},
+		Selection{Enabled: true, PackID: "missing-theme"},
 		"zh-CN",
 		nil,
 	)
@@ -275,16 +275,13 @@ func TestLoadCatalogIncludesOfficialNewspaperClassicInk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, want := catalog.ActiveTheme.ID, "newspaper-classic-ink"; got != want {
+	if got, want := catalog.ActiveTheme.ID, DefaultThemePackID; got != want {
 		t.Fatalf("active theme = %q, want %q", got, want)
-	}
-	if got, want := catalog.ActiveTheme.Name, "Newspaper Classic Ink"; got != want {
-		t.Fatalf("active theme name = %q, want %q", got, want)
 	}
 	if len(catalog.ThemeStyles) != 1 {
 		t.Fatalf("theme styles = %d, want 1", len(catalog.ThemeStyles))
 	}
-	wantStyleURL := "/packs/official/bundles/newspaper/themes/ink/ink.css?v=" + catalog.ActiveTheme.Version
+	wantStyleURL := "/packs/official/bundles/newspaper/themes/classic/newspaper-classic.css?v=" + catalog.ActiveTheme.Version
 	if got, want := catalog.ThemeStyles[0], wantStyleURL; got != want {
 		t.Fatalf("theme style URL = %q, want %q", got, want)
 	}
@@ -423,7 +420,7 @@ func TestLoadCatalogScansBundleThemesPluginsAndPrefersBundledDuplicate(t *testin
   "name": "Paper Bundle",
   "version": "2.0.0",
   "description": "Bundle with two themes and one plugin",
-  "packs": [{"path": "themes/classic"}, {"path": "themes/ink"}, {"path": "plugins/copy"}],
+  "packs": [{"path": "themes/classic"}, {"path": "themes/mono"}, {"path": "plugins/copy"}],
   "tags": ["official"]
 }`)
 	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirThemes, "classic", "manifest.json"), `{
@@ -439,19 +436,19 @@ func TestLoadCatalogScansBundleThemesPluginsAndPrefersBundledDuplicate(t *testin
 	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirThemes, "classic", "translations", "en.json"), `{
   "site.edition_line": "Bundled"
 }`)
-	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirThemes, "ink", "manifest.json"), `{
-  "id": "paper-ink",
+	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirThemes, "mono", "manifest.json"), `{
+  "id": "paper-mono",
   "type": "theme",
-  "name": "Paper Ink",
+  "name": "Paper Mono",
   "version": "2.0.0",
-  "description": "Bundled ink theme",
+  "description": "Bundled monochrome theme",
   "default_locale": "en",
   "translations_dir": "translations",
-  "styles": ["ink.css"],
+  "styles": ["mono.css"],
   "tags": ["official"]
 }`)
-	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirThemes, "ink", "translations", "en.json"), `{}`)
-	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirThemes, "ink", "ink.css"), `html { color-scheme: dark; }`)
+	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirThemes, "mono", "translations", "en.json"), `{}`)
+	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirThemes, "mono", "mono.css"), `html { color-scheme: dark; }`)
 	writePackFile(t, filepath.Join(root, "official", DirBundles, "paper", DirPlugins, "copy", "manifest.json"), `{
   "id": "paper-copy",
   "type": "plugin",

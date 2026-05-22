@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "updated_at": "2026-05-22T00:00:00Z",
+  "items": [
+    {
+      "id": "content-exporter",
+      "name": "Content Exporter",
+      "summary": "Export posts, pages, and media as a downloadable ZIP archive.",
+      "description": "Adds an admin plugin action that packages Postizer content, page files, media metadata, and media files into a single ZIP export.",
+      "repo": "https://github.com/widayn/postizer-content-exporter",
+      "preview": "",
+      "tags": [
+        "plugin",
+        "exporter"
+      ],
+      "themes": [],
+      "plugins": [
+        {
+          "id": "content-exporter",
+          "name": "Content Exporter",
+          "version": "1.0.0",
+          "description": "Export all posts, pages, and media into a downloadable ZIP archive."
+        }
+      ],
+      "release": {
+        "tag": "v1.0.0",
+        "asset": "content-exporter-v1.0.0.zip",
+        "sha256": "93e144e471e9ae5d2892a8cfccc758214894b9ea17e89816ed5b31d543f461fe"
+      },
+      "min_postizer": "1.3.0"
+    }
+  ]
+}

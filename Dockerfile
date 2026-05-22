@@ -23,6 +23,7 @@ WORKDIR /app
 COPY --chown=postizer:postizer --from=build /out/postizer /usr/src/postizer/postizer
 COPY --chown=postizer:postizer --from=build /src/web /usr/src/postizer/web
 COPY --chown=postizer:postizer --from=build /src/internal/bundles /usr/src/postizer/internal/bundles
+COPY --chown=postizer:postizer --from=build /src/marketplace /usr/src/postizer/marketplace
 COPY --chown=postizer:postizer scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chown=postizer:postizer scripts/docker-self-update.sh /usr/local/bin/postizer-self-update
 RUN printf '%s\n' "$POSTIZER_VERSION" > /usr/src/postizer/.postizer-version \

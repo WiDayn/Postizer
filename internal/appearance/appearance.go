@@ -384,6 +384,27 @@ func InstallPackZIP(readerAt io.ReaderAt, size int64, userRoot string) (Installe
 	return InstallPackZIPWithCompatibility(readerAt, size, userRoot, HostCompatibility{})
 }
 
+func ReadPackZIPManifest(readerAt io.ReaderAt, size int64) (Manifest, error) {
+	zr, err := zip.NewReader(readerAt, size)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("open zip: %w", err)
+	}
+
+	manifestFile, _, err := zipManifest(zr.File)
+	if err != nil {
+		return Manifest{}, err
+	}
+
+	manifest, err := readZipManifest(manifestFile)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if err := validateManifest(manifest); err != nil {
+		return Manifest{}, err
+	}
+	return manifest, nil
+}
+
 func InstallPackZIPWithCompatibility(readerAt io.ReaderAt, size int64, userRoot string, compatibility HostCompatibility) (InstalledPack, error) {
 	zr, err := zip.NewReader(readerAt, size)
 	if err != nil {
@@ -818,8 +839,28 @@ func prunePluginRuntimeForCurrentPlatform(pack Pack) error {
 	if err := writeManifestFile(filepath.Join(pack.RootDir, "manifest.json"), manifest); err != nil {
 		return fmt.Errorf("write pruned plugin manifest %q: %w", pack.ID, err)
 	}
+	if err := ensureRuntimeCommandExecutable(pack.RootDir, selected.Command); err != nil {
+		return fmt.Errorf("plugin %q mark runtime executable: %w", pack.ID, err)
+	}
 	removeEmptyDirs(filepath.Join(pack.RootDir, "bin"))
 	return nil
+}
+
+func ensureRuntimeCommandExecutable(root, command string) error {
+	command = strings.TrimSpace(command)
+	if command == "" || command == "${go}" || !strings.ContainsAny(command, `/\`) || filepath.IsAbs(command) {
+		return nil
+	}
+	cleaned, err := cleanPackPath(command)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(root, filepath.FromSlash(cleaned))
+	info, err := os.Stat(target)
+	if errors.Is(err, fs.ErrNotExist) || err != nil || info.IsDir() {
+		return err
+	}
+	return os.Chmod(target, info.Mode()|0755)
 }
 
 func removePackCommandFile(root, command string) error {

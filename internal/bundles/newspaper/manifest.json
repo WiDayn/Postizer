@@ -3,13 +3,10 @@
   "type": "bundle",
   "name": "Newspaper",
   "version": "1.0.0",
-  "description": "Official Newspaper resource bundle containing the classic paper theme and the ink-negative variant.",
+  "description": "Official Newspaper resource bundle containing the classic paper theme.",
   "packs": [
     {
       "path": "themes/classic"
-    },
-    {
-      "path": "themes/ink"
     }
   ],
   "tags": [
