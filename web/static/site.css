@@ -3274,8 +3274,50 @@
 
   .article-body .katex-display {
     margin: .7rem 0;
-    overflow-x: auto;
-    overflow-y: hidden;
+    line-height: normal;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .article-body .katex-display > .katex {
+    display: block;
+    max-width: 100%;
+    line-height: normal;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .article-body .katex-display > .katex > .katex-html {
+    position: relative;
+    box-sizing: border-box;
+    display: block;
+    max-width: 100%;
+    line-height: normal;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .article-body .katex-display > .katex > .katex-html:has(> .tag) {
+    padding-right: 4em;
+  }
+
+  .article-body .katex-display > .katex > .katex-html > .base {
+    display: inline-block;
+    max-width: 100%;
+    line-height: normal;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  .article-body .katex-display > .katex > .katex-html > .tag {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    margin-left: 0;
+    line-height: 1;
+    text-align: right;
+    transform: translateY(-50%);
+    white-space: nowrap;
   }
 
   .article-body .article-figure {
