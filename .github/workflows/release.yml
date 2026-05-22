@@ -18,9 +18,10 @@ jobs:
         run: |
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           main_sha="$(git rev-parse refs/remotes/origin/main)"
-          if [[ "$GITHUB_SHA" != "$main_sha" ]]; then
+          tag_sha="$(git rev-parse HEAD)"
+          if [[ "$tag_sha" != "$main_sha" ]]; then
             echo "Release tags must point at origin/main HEAD." >&2
-            echo "Tag $GITHUB_REF_NAME points to $GITHUB_SHA, but origin/main is $main_sha." >&2
+            echo "Tag $GITHUB_REF_NAME points to $tag_sha, but origin/main is $main_sha." >&2
             exit 1
           fi
 
