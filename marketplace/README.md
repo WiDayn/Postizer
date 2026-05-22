@@ -34,7 +34,7 @@ Entries belong in `packs/index.json`:
     "asset": "editorial-tools-v1.0.0.zip",
     "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   },
-  "min_postizer": "1.3.0"
+  "min_postizer": "v0.1.4"
 }
 ```
 
