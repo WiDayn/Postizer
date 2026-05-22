@@ -899,6 +899,40 @@ func TestLoadSettingsDefaultsAutoUpdateDisabled(t *testing.T) {
 	}
 }
 
+func TestUpdateLogAppendAndLoadLatestFirst(t *testing.T) {
+	root := t.TempDir()
+	first := time.Date(2026, 5, 22, 8, 0, 0, 0, time.UTC)
+	second := first.Add(2 * time.Minute)
+
+	if err := AppendUpdateLogEntry(root, UpdateLogEntry{
+		Time:    first,
+		Event:   UpdateEventDetected,
+		Version: "v1.2.3",
+		Message: "Detected release v1.2.3.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendUpdateLogEntry(root, UpdateLogEntry{
+		Time:    second,
+		Event:   UpdateEventCompleted,
+		Version: "v1.2.3",
+		Message: "Completed update.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := LoadUpdateLog(root, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	if entries[0].Event != UpdateEventCompleted || entries[1].Event != UpdateEventDetected {
+		t.Fatalf("entries order = %#v, want latest first", entries)
+	}
+}
+
 func TestLoadSettingsDefaultsCommentsDisabled(t *testing.T) {
 	settings, err := LoadSettings(t.TempDir())
 	if err != nil {

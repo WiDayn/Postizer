@@ -79,26 +79,126 @@ func runSelfUpdateIfEnabled(contentRoot, command string, timeout time.Duration) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	startedAt := time.Now().UTC()
 
 	cmd := exec.CommandContext(ctx, command)
 	cmd.Env = os.Environ()
 	output, err := cmd.CombinedOutput()
-	if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
-		log.Printf("self-update output:\n%s", trimmed)
+	outputText := strings.TrimSpace(string(output))
+	entries := updateLogEntriesFromOutput(outputText)
+	for _, entry := range entries {
+		appendUpdateLog(contentRoot, entry)
+	}
+	if outputText != "" {
+		log.Printf("self-update output:\n%s", outputText)
 	}
 	if err == nil {
 		return
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 42 {
+		if !updateLogHasEvent(entries, site.UpdateEventDetected) {
+			appendUpdateLog(contentRoot, site.UpdateLogEntry{
+				Time:    startedAt,
+				Event:   site.UpdateEventDetected,
+				Version: updateVersionFromEntries(entries),
+				Message: "Detected an available update and started applying it.",
+			})
+		}
+		if !updateLogHasEvent(entries, site.UpdateEventCompleted) {
+			appendUpdateLog(contentRoot, site.UpdateLogEntry{
+				Time:    time.Now().UTC(),
+				Event:   site.UpdateEventCompleted,
+				Version: updateVersionFromEntries(entries),
+				Message: "Updated the local runtime; restarting Postizer.",
+			})
+		}
 		log.Print("self-update completed; restarting Postizer")
 		time.Sleep(2 * time.Second)
 		os.Exit(0)
+	}
+	if !updateLogHasEvent(entries, site.UpdateEventFailed) {
+		appendUpdateLog(contentRoot, site.UpdateLogEntry{
+			Time:    time.Now().UTC(),
+			Event:   site.UpdateEventFailed,
+			Version: updateVersionFromEntries(entries),
+			Message: selfUpdateFailureMessage(err, outputText),
+		})
 	}
 	if ctx.Err() != nil {
 		log.Printf("self-update timed out: %v", ctx.Err())
 		return
 	}
 	log.Printf("self-update failed: %v", err)
+}
+
+func updateLogEntriesFromOutput(output string) []site.UpdateLogEntry {
+	entries := []site.UpdateLogEntry{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "POSTIZER_UPDATE_EVENT\t") {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) < 4 {
+			continue
+		}
+		eventTime, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[1]))
+		if err != nil {
+			eventTime = time.Now().UTC()
+		}
+		event := strings.TrimSpace(parts[2])
+		if event != site.UpdateEventDetected && event != site.UpdateEventCompleted && event != site.UpdateEventFailed {
+			continue
+		}
+		entry := site.UpdateLogEntry{
+			Time:    eventTime,
+			Event:   event,
+			Version: strings.TrimSpace(parts[3]),
+		}
+		if len(parts) >= 5 {
+			entry.Message = strings.TrimSpace(parts[4])
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func appendUpdateLog(contentRoot string, entry site.UpdateLogEntry) {
+	if err := site.AppendUpdateLogEntry(contentRoot, entry); err != nil {
+		log.Printf("append update log: %v", err)
+	}
+}
+
+func updateLogHasEvent(entries []site.UpdateLogEntry, event string) bool {
+	for _, entry := range entries {
+		if entry.Event == event {
+			return true
+		}
+	}
+	return false
+}
+
+func updateVersionFromEntries(entries []site.UpdateLogEntry) string {
+	for _, entry := range entries {
+		if entry.Version != "" {
+			return entry.Version
+		}
+	}
+	return ""
+}
+
+func selfUpdateFailureMessage(err error, output string) string {
+	if output == "" {
+		return err.Error()
+	}
+	lines := strings.Split(output, "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if line != "" && !strings.HasPrefix(line, "POSTIZER_UPDATE_EVENT\t") {
+			return err.Error() + ": " + line
+		}
+	}
+	return err.Error()
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {

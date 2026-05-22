@@ -109,7 +109,7 @@ type ViewData struct {
 	AdminUsername string
 	LoginNotice   LoginNotice
 	AppVersion    string
-	Changelog     []ChangelogRelease
+	UpdateLog     []site.UpdateLogEntry
 	EditorKind    string
 	EditorSlug    string
 	Pagination    Pagination
@@ -150,24 +150,12 @@ type MediaTypeFilter struct {
 	Active   bool
 }
 
-type ChangelogRelease struct {
-	Version string
-	Date    string
-	Current bool
-	Items   []ChangelogItem
-}
-
-type ChangelogItem struct {
-	Hash    string
-	Date    string
-	Summary string
-}
-
 type LoginNotice struct {
 	Show             bool
 	HasPreviousLogin bool
 	PreviousLogin    time.Time
 	FailedAttempts   int
+	DismissKey       string
 }
 
 type authConfig struct {
@@ -210,8 +198,7 @@ const (
 	adminPasswordHashRounds  = 120000
 	adminPasswordHashSaltLen = 16
 	adminPasswordHashKeyLen  = 32
-	maxChangelogReleases     = 6
-	maxChangelogItems        = 20
+	maxUpdateLogEntries      = 50
 	adminListPageSize        = 20
 	maxPluginActionFileBytes = 32 << 20
 	maxPluginMediaBytes      = 64 << 20
@@ -1006,13 +993,17 @@ func (s *Server) adminPermalinks(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
+	updateLog, err := site.LoadUpdateLog(s.contentRoot, maxUpdateLogEntries)
+	if err != nil {
+		log.Printf("load update log: %v", err)
+	}
 	s.render(w, "admin_updates.html", ViewData{
 		Title:       "Auto Update",
 		TitleKey:    "title.admin.updates",
 		Store:       store,
 		ActiveAdmin: "updates",
 		AppVersion:  currentAppVersion(),
-		Changelog:   currentAppChangelog(),
+		UpdateLog:   updateLog,
 	})
 }
 
@@ -2813,7 +2804,7 @@ func (s *Server) render(w http.ResponseWriter, name string, data ViewData) {
 	if !data.NeedsMath {
 		data.NeedsMath = viewNeedsMath(name, data)
 	}
-	if data.ActiveAdmin != "" {
+	if data.ActiveAdmin == "dashboard" {
 		data.LoginNotice = s.loginNotice()
 	}
 	if err := s.currentTemplates().ExecuteTemplate(w, name, data); err != nil {
@@ -3222,112 +3213,6 @@ func gitDirectoryVersion(dir string) string {
 	return "dev-" + shortCommit
 }
 
-func currentAppChangelog() []ChangelogRelease {
-	for _, dir := range sourceDirectoryCandidates() {
-		if releases := gitDirectoryChangelog(dir); len(releases) > 0 {
-			return releases
-		}
-	}
-	return nil
-}
-
-func gitDirectoryChangelog(dir string) []ChangelogRelease {
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		return nil
-	}
-	tags := releaseTagsForChangelog(dir)
-	if len(tags) == 0 {
-		return nil
-	}
-	currentCommit := gitOutput(dir, "rev-parse", "HEAD")
-	releases := make([]ChangelogRelease, 0, min(len(tags), maxChangelogReleases))
-	for index, tag := range tags {
-		if len(releases) >= maxChangelogReleases {
-			break
-		}
-		tagCommit := gitOutput(dir, "rev-list", "-n", "1", tag)
-		if tagCommit == "" {
-			continue
-		}
-		previousTag := ""
-		if index+1 < len(tags) {
-			previousTag = tags[index+1]
-		}
-		release := ChangelogRelease{
-			Version: tag,
-			Date:    gitOutput(dir, "log", "-1", "--format=%cs", tag),
-			Current: currentCommit != "" && currentCommit == tagCommit,
-			Items:   gitChangelogItems(dir, tag, previousTag),
-		}
-		releases = append(releases, release)
-	}
-	return releases
-}
-
-func releaseTagsForChangelog(dir string) []string {
-	raw := gitOutput(dir, "tag", "--merged", "HEAD", "--list", "v[0-9]*.[0-9]*.[0-9]*", "--sort=-v:refname")
-	if raw == "" {
-		raw = gitOutput(dir, "tag", "--list", "v[0-9]*.[0-9]*.[0-9]*", "--sort=-v:refname")
-	}
-	tags := make([]string, 0, maxChangelogReleases+1)
-	for _, line := range strings.Split(raw, "\n") {
-		tag := strings.TrimSpace(line)
-		if !isReleaseTag(tag) {
-			continue
-		}
-		tags = append(tags, tag)
-		if len(tags) >= maxChangelogReleases+1 {
-			break
-		}
-	}
-	return tags
-}
-
-func isReleaseTag(tag string) bool {
-	if !strings.HasPrefix(tag, "v") {
-		return false
-	}
-	parts := strings.Split(strings.TrimPrefix(tag, "v"), ".")
-	if len(parts) != 3 {
-		return false
-	}
-	for _, part := range parts {
-		if part == "" {
-			return false
-		}
-		for _, r := range part {
-			if r < '0' || r > '9' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func gitChangelogItems(dir, tag, previousTag string) []ChangelogItem {
-	revision := tag
-	if previousTag != "" {
-		revision = previousTag + ".." + tag
-	}
-	raw := gitOutput(dir, "log", "--max-count="+strconv.Itoa(maxChangelogItems), "--format=%h%x1f%cs%x1f%s", revision)
-	if raw == "" {
-		return nil
-	}
-	items := make([]ChangelogItem, 0)
-	for _, line := range strings.Split(raw, "\n") {
-		parts := strings.SplitN(line, "\x1f", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		items = append(items, ChangelogItem{
-			Hash:    strings.TrimSpace(parts[0]),
-			Date:    strings.TrimSpace(parts[1]),
-			Summary: strings.TrimSpace(parts[2]),
-		})
-	}
-	return items
-}
-
 func gitOutput(dir string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -3472,6 +3357,7 @@ func (s *Server) loginNotice() LoginNotice {
 		HasPreviousLogin: !notice.PreviousLogin.IsZero(),
 		PreviousLogin:    notice.PreviousLogin,
 		FailedAttempts:   notice.FailedAttempts,
+		DismissKey:       notice.CurrentLogin.UTC().Format(time.RFC3339Nano),
 	}
 }
 

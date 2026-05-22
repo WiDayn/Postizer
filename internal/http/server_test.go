@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -238,22 +237,6 @@ func mediaTypeFilterByID(filters []MediaTypeFilter, id string) MediaTypeFilter {
 		}
 	}
 	return MediaTypeFilter{}
-}
-
-func requireTestGit(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not available")
-	}
-}
-
-func runTestGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
-	}
 }
 
 func containsLog(logs []string, pattern string) bool {
@@ -859,6 +842,9 @@ func TestLoginAuditNoticeTracksPreviousLoginFailures(t *testing.T) {
 	if got, want := notice.FailedAttempts, 2; got != want {
 		t.Fatalf("failed attempts in notice = %d, want %d", got, want)
 	}
+	if notice.DismissKey == "" {
+		t.Fatal("login notice should include a dismiss key")
+	}
 	audit, err := loadStoredLoginAudit(contentRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -868,6 +854,31 @@ func TestLoginAuditNoticeTracksPreviousLoginFailures(t *testing.T) {
 	}
 	if !audit.LastSuccessfulLogin.Equal(secondLogin) {
 		t.Fatalf("last successful login = %s, want %s", audit.LastSuccessfulLogin, secondLogin)
+	}
+}
+
+func TestRenderLoginNoticeOnlyOnDashboard(t *testing.T) {
+	contentRoot := t.TempDir()
+	s := &Server{
+		contentRoot: contentRoot,
+		store:       &site.Store{},
+		appearance:  &appearance.Catalog{},
+		templates: template.Must(template.New("").Parse(
+			`{{define "view.html"}}{{if .LoginNotice.Show}}show {{.LoginNotice.DismissKey}}{{else}}hide{{end}}{{end}}`,
+		)),
+	}
+	s.recordLoginSuccessAudit(time.Date(2026, 5, 22, 6, 0, 0, 0, time.UTC))
+
+	response := httptest.NewRecorder()
+	s.render(response, "view.html", ViewData{ActiveAdmin: "posts"})
+	if got, want := strings.TrimSpace(response.Body.String()), "hide"; got != want {
+		t.Fatalf("posts login notice render = %q, want %q", got, want)
+	}
+
+	response = httptest.NewRecorder()
+	s.render(response, "view.html", ViewData{ActiveAdmin: "dashboard"})
+	if got := strings.TrimSpace(response.Body.String()); !strings.HasPrefix(got, "show ") {
+		t.Fatalf("dashboard login notice render = %q, want visible notice", got)
 	}
 }
 
@@ -909,9 +920,19 @@ func TestAdminUpdateSettingsRendersCurrentVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	contentRoot := t.TempDir()
+	if err := site.AppendUpdateLogEntry(contentRoot, site.UpdateLogEntry{
+		Time:    time.Date(2026, 5, 22, 8, 30, 0, 0, time.UTC),
+		Event:   site.UpdateEventDetected,
+		Version: "v1.2.4",
+		Message: "Detected release v1.2.4.",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	s := &Server{
-		store:     &site.Store{Settings: site.Settings{}},
-		templates: templates,
+		store:       &site.Store{Settings: site.Settings{}},
+		templates:   templates,
+		contentRoot: contentRoot,
 	}
 	request := httptest.NewRequest("GET", "/admin/settings/updates", nil)
 	response := httptest.NewRecorder()
@@ -925,45 +946,8 @@ func TestAdminUpdateSettingsRendersCurrentVersion(t *testing.T) {
 	if !strings.Contains(body, "v1.2.3") {
 		t.Fatalf("update settings page should include current version:\n%s", body)
 	}
-}
-
-func TestGitDirectoryChangelogGroupsReleaseCommits(t *testing.T) {
-	requireTestGit(t)
-	repo := t.TempDir()
-	runTestGit(t, repo, "init")
-	runTestGit(t, repo, "config", "user.email", "test@example.com")
-	runTestGit(t, repo, "config", "user.name", "Postizer Test")
-
-	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("first\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	runTestGit(t, repo, "add", "notes.txt")
-	runTestGit(t, repo, "commit", "-m", "initial release")
-	runTestGit(t, repo, "tag", "v0.1.0")
-
-	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("first\nsecond\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	runTestGit(t, repo, "add", "notes.txt")
-	runTestGit(t, repo, "commit", "-m", "add backend changelog")
-	runTestGit(t, repo, "tag", "v0.2.0")
-
-	releases := gitDirectoryChangelog(repo)
-
-	if len(releases) < 2 {
-		t.Fatalf("releases = %#v, want at least 2", releases)
-	}
-	if got, want := releases[0].Version, "v0.2.0"; got != want {
-		t.Fatalf("latest release = %q, want %q", got, want)
-	}
-	if !releases[0].Current {
-		t.Fatal("latest release should be marked current")
-	}
-	if len(releases[0].Items) != 1 || releases[0].Items[0].Summary != "add backend changelog" {
-		t.Fatalf("latest release items = %#v, want second commit only", releases[0].Items)
-	}
-	if got, want := releases[1].Version, "v0.1.0"; got != want {
-		t.Fatalf("previous release = %q, want %q", got, want)
+	if !strings.Contains(body, "v1.2.4") || !strings.Contains(body, "Detected release v1.2.4.") {
+		t.Fatalf("update settings page should include local update log:\n%s", body)
 	}
 }
 

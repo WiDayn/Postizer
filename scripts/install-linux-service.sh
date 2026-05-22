@@ -53,6 +53,34 @@ else
   SOURCE_DIR="$DEFAULT_SOURCE_DIR"
 fi
 BINARY_SOURCE="${POSTIZER_BINARY:-}"
+UPDATE_TARGET_VERSION=""
+
+json_escape() {
+  local value="${1:-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/ }"
+  value="${value//$'\r'/ }"
+  printf '%s' "$value"
+}
+
+record_update_event() {
+  if [[ "${AUTO_UPDATE_RUN:-0}" -ne 1 ]]; then
+    return 0
+  fi
+  local event="${1:-}" version="${2:-}" message="${3:-}" log_file timestamp
+  if [[ -z "$event" ]]; then
+    return 0
+  fi
+  if [[ "$event" == "update_detected" && -n "$version" ]]; then
+    UPDATE_TARGET_VERSION="$version"
+  fi
+  log_file="$INSTALL_DIR/content/.update_log.jsonl"
+  timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  mkdir -p "$(dirname "$log_file")" 2>/dev/null || return 0
+  printf '{"time":"%s","event":"%s","version":"%s","message":"%s"}\n' \
+    "$timestamp" "$(json_escape "$event")" "$(json_escape "$version")" "$(json_escape "$message")" >> "$log_file" 2>/dev/null || true
+}
 GO_CMD="${POSTIZER_GO:-go}"
 REQUIRED_GO_VERSION="${POSTIZER_GO_VERSION:-}"
 RELEASE_EXTRACT_DIR=""
@@ -556,6 +584,7 @@ update_source_tree_to_latest_release_tag() {
     exit 1
   fi
 
+  record_update_event "update_detected" "$latest" "Detected a newer release tag in the local source checkout."
   echo "Updating source tree to release tag $latest..."
   if ! run_source_git checkout --detach "$latest"; then
     echo "git checkout $latest failed. Resolve local changes or rerun with --no-git-pull." >&2
@@ -840,6 +869,7 @@ download_release_asset() {
     exit 0
   fi
 
+  record_update_event "update_detected" "$RESOLVED_RELEASE_VERSION" "Detected a newer Postizer release asset."
   slug="$(github_repo_slug)"
   asset="$(release_asset_name)"
   asset_url="https://github.com/$slug/releases/download/$RESOLVED_RELEASE_VERSION/$asset"
@@ -1225,6 +1255,10 @@ if [[ "$START_SERVICE" -eq 1 ]]; then
   if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
     systemctl restart "$UPDATE_TIMER_NAME.timer"
   fi
+fi
+
+if [[ "$AUTO_UPDATE_RUN" -eq 1 ]]; then
+  record_update_event "update_completed" "$UPDATE_TARGET_VERSION" "Completed the local Postizer update."
 fi
 
 echo "Installed Postizer to $INSTALL_DIR"

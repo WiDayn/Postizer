@@ -11,6 +11,10 @@ log() {
   printf '%s\n' "$*" >&2
 }
 
+update_event() {
+  printf 'POSTIZER_UPDATE_EVENT\t%s\t%s\t%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" "$2" "$3" >&2
+}
+
 fail() {
   log "$*"
   exit 1
@@ -105,6 +109,8 @@ if [ "$(current_version)" = "$release_version" ] && [ -x "$current_link/postizer
   exit 0
 fi
 
+update_event "update_detected" "$release_version" "Detected a newer Postizer release."
+
 platform="$(platform_name)"
 asset_name="postizer-$release_version-$platform.tar.gz"
 asset_url="https://github.com/$slug/releases/download/$release_version/$asset_name"
@@ -117,6 +123,7 @@ release_dir="$runtime_root/releases/$release_version"
 if [ -x "$release_dir/postizer" ] && [ -d "$release_dir/web" ] && [ -d "$release_dir/internal/bundles" ]; then
   log "Switching to already-downloaded Postizer $release_version."
   ln -sfn "$release_dir" "$current_link"
+  update_event "update_completed" "$release_version" "Switched to an already-downloaded Postizer release."
   exit 42
 fi
 
@@ -143,4 +150,5 @@ mv "$extract_dir" "$release_dir"
 ln -sfn "$release_dir" "$current_link"
 
 log "Updated Postizer runtime to $release_version."
+update_event "update_completed" "$release_version" "Updated the local Postizer runtime."
 exit 42

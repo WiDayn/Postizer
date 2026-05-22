@@ -26,6 +26,34 @@ function postizerFormatMessage(key, fallback, replacements = {}) {
 window.postizerMessage = postizerMessage;
 window.postizerFormatMessage = postizerFormatMessage;
 
+const loginNoticeDismissedKey = "postizer.loginNotice.dismissed";
+
+function setupAdminLoginNotice() {
+  const notice = document.querySelector("[data-login-notice]");
+  if (!notice) return;
+  const noticeKey = notice.dataset.loginNoticeKey || "";
+
+  try {
+    if (noticeKey && localStorage.getItem(loginNoticeDismissedKey) === noticeKey) {
+      notice.hidden = true;
+      return;
+    }
+  } catch (_) {
+    // Storage can be unavailable; closing still works for the current page.
+  }
+
+  const closeButton = notice.querySelector("[data-login-notice-close]");
+  if (!closeButton) return;
+  closeButton.addEventListener("click", () => {
+    notice.hidden = true;
+    try {
+      if (noticeKey) localStorage.setItem(loginNoticeDismissedKey, noticeKey);
+    } catch (_) {
+      // Ignore storage failures.
+    }
+  });
+}
+
 function bindFileDropZone(dropZone) {
   const input = dropZone.querySelector('input[type="file"]');
   if (!input) return;
@@ -216,6 +244,7 @@ function setupArticleLightbox() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  setupAdminLoginNotice();
   bindFileDropZones();
   setupArticleLightbox();
   document.querySelectorAll(".article-body").forEach(enhanceArticle);
