@@ -170,7 +170,7 @@
    * 图片使用居中裁切，避免大图或竖图把首页撑得过高。
    */
   .site-shell:has(.home-image-band--home) {
-    grid-template-rows: var(--pure-hero-height) var(--pure-nav-height) minmax(0, 1fr);
+    grid-template-rows: var(--pure-hero-height) var(--pure-nav-height) minmax(0, 1fr) auto;
   }
 
   .main-column {
@@ -194,28 +194,31 @@
       --pure-hero-height: calc(100svh - var(--pure-nav-height));
       display: grid;
       grid-template-columns: minmax(1.25rem, 1fr) minmax(0, 44rem) minmax(1.25rem, 1fr);
-      grid-template-rows: auto auto auto auto;
+      grid-template-rows: auto auto auto auto auto;
       grid-template-areas:
         "header header header"
         "nav nav nav"
         ". main ."
-        ". side .";
+        ". side ."
+        "footer footer footer";
       column-gap: 0;
       min-height: 100vh;
       border: 0;
     }
 
     .site-shell:has(.front-page) {
-      grid-template-rows: clamp(15rem, 56vw, 20rem) auto auto auto;
+      grid-template-rows: clamp(15rem, 56vw, 20rem) auto auto auto auto;
       grid-template-areas:
         "hero hero hero"
         "nav nav nav"
         ". main ."
-        ". side .";
+        ". side ."
+        "footer footer footer";
     }
 
     .site-shell.site-shell--no-sidebar,
     .site-shell.site-shell--no-sidebar:has(.front-page) {
+      grid-template-rows: auto auto auto auto;
       grid-template-areas:
         "header header header"
         "nav nav nav"
@@ -224,6 +227,7 @@
     }
 
     .site-shell.site-shell--no-sidebar:has(.front-page) {
+      grid-template-rows: clamp(15rem, 56vw, 20rem) auto auto auto;
       grid-template-areas:
         "hero hero hero"
         "nav nav nav"
@@ -232,6 +236,10 @@
     }
 
     .site-shell:has(.home-image-band--home) {
+      grid-template-rows: var(--pure-hero-height) var(--pure-nav-height) auto auto auto;
+    }
+
+    .site-shell.site-shell--no-sidebar:has(.home-image-band--home) {
       grid-template-rows: var(--pure-hero-height) var(--pure-nav-height) auto auto;
     }
 
@@ -455,7 +463,7 @@ body {
     text-transform: none;
   }
 
-  .section-nav button.hero-collapse-button:not(.ui-button):not(.ui-media-button) {
+  .site-shell .section-nav button.hero-collapse-button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button):not(.menu-item-list__button):not(.admin-nav-disclosure) {
     position: relative;
     display: block;
     flex: 0 0 auto;
@@ -778,6 +786,66 @@ body {
     color: #888;
   }
 
+  .site-footer {
+    /*
+     * 新版公共模板会始终渲染站点页脚。Pure White 使用横向留白作为主视觉，
+     * 因此页脚也沿用正文/侧栏共用的内容边界，而不是默认报纸主题的紧凑边框。
+     */
+    grid-area: footer;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .85rem 1.5rem;
+    align-items: center;
+    padding: 1.35rem var(--pure-content-edge);
+    border-top: 1px solid #eee;
+    background: #fff;
+    color: #777;
+    font-size: .82rem;
+    text-transform: none;
+  }
+
+  .site-footer__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem .85rem;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .site-footer__brand {
+    color: #222;
+    font-family: var(--font-heading);
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+  }
+
+  .site-footer__powered {
+    color: #888;
+  }
+
+  .site-footer__nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem 1rem;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .site-footer__nav a {
+    color: #333;
+    text-decoration: none;
+  }
+
+  .site-footer__brand:hover,
+  .site-footer__brand:focus-visible,
+  .site-footer__nav a:hover,
+  .site-footer__nav a:focus-visible {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
   .image-lightbox {
     background: rgba(255, 255, 255, .98);
   }
@@ -793,6 +861,15 @@ body {
       min-height: 3.8rem;
       padding-inline: 1.25rem;
       overflow-x: auto;
+    }
+
+    .site-footer {
+      grid-template-columns: 1fr;
+      padding-inline: 1.25rem;
+    }
+
+    .site-footer__nav {
+      justify-content: flex-start;
     }
 
     .site-shell:has(.front-page) .newspaper-header {
