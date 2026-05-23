@@ -1847,23 +1847,32 @@ function renderAll() {
   renderSidebarStructure();
 }
 
-function payload() {
-  return {
-    menus: state.menus
+/**
+ * 生成后台菜单 API 的增量保存 payload。
+ * @param {string} target - menus 表示只保存自定义菜单，sidebar 表示只保存自定义侧边栏。
+ * @returns {{menus?: Array, sidebars?: Array}} 返回只包含当前编辑区域的请求体。
+ */
+function payload(target = "menus") {
+  const body = {};
+  if (target !== "sidebar") {
+    body.menus = state.menus
       .filter((menu) => !isProtectedMenu(menu))
       .map((menu) => ({
         id: menu.id,
         name: String(menu.name || "").trim(),
         items: menu.items.map(serializeMenuItem)
-      })),
-    sidebars: state.sidebars
+      }));
+  }
+  if (target === "sidebar") {
+    body.sidebars = state.sidebars
       .filter((sidebar) => !isProtectedSidebar(sidebar))
       .map((sidebar) => ({
         id: sidebar.id,
         name: String(sidebar.name || "").trim(),
         items: sidebar.items.map(serializeSidebarBlock)
-      }))
-  };
+      }));
+  }
+  return body;
 }
 
 /**
@@ -1951,12 +1960,14 @@ function validateSidebarGroups() {
 }
 
 /**
- * 保存前校验完整 payload。
+ * 保存前按当前编辑区域校验 payload。
  *
+ * @param {string} target - menus 表示保存自定义菜单，sidebar 表示保存自定义侧边栏。
  * @returns {string} 返回第一条错误文案；空字符串表示可以提交。
  */
-function validateBeforeSave() {
-  return validateMenuGroups(state.menus, tr("menus.validation.group.menu", "Menu")) || validateSidebarGroups();
+function validateBeforeSave(target = "menus") {
+  if (target === "sidebar") return validateSidebarGroups();
+  return validateMenuGroups(state.menus, tr("menus.validation.group.menu", "Menu"));
 }
 
 if (menuSelector) {
@@ -2093,7 +2104,7 @@ async function saveMenus(statusMessage, options = {}) {
   } else {
     commitActiveThemeMenuRename();
   }
-  const validationMessage = validateBeforeSave();
+  const validationMessage = validateBeforeSave(target);
   if (validationMessage) {
     if (target === "sidebar") {
       setCustomSidebarStatus(validationMessage);
@@ -2117,7 +2128,7 @@ async function saveMenus(statusMessage, options = {}) {
     response = await fetch(apiURL("/admin/api/menus"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload())
+      body: JSON.stringify(payload(target))
     });
   } catch (error) {
     const message = error && error.message ? error.message : tr("settings.status.error", "Error");

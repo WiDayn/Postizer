@@ -56,6 +56,69 @@ func TestViewNeedsMathOnlyForMathContentAndEditor(t *testing.T) {
 	}
 }
 
+func TestAdminThemeNavGroupMarksThemePagesActive(t *testing.T) {
+	group := adminThemeNavGroup(ViewData{ActiveAdmin: "theme-settings"})
+
+	if got, want := group.Key, "theme"; got != want {
+		t.Fatalf("theme nav group key = %q, want %q", got, want)
+	}
+	if !group.Active {
+		t.Fatal("theme nav group should be active on theme settings page")
+	}
+	if len(group.Items) != 2 {
+		t.Fatalf("theme nav item count = %d, want 2", len(group.Items))
+	}
+	if group.Items[0].Active {
+		t.Fatal("theme packs item should not be active on theme settings page")
+	}
+	if !group.Items[1].Active {
+		t.Fatal("theme settings item should be active on theme settings page")
+	}
+}
+
+func TestAdminSettingsNavGroupMarksGeneralSettingsActive(t *testing.T) {
+	group := adminSettingsNavGroup(ViewData{ActiveAdmin: "settings"})
+
+	if got, want := group.Key, "settings"; got != want {
+		t.Fatalf("settings nav group key = %q, want %q", got, want)
+	}
+	if !group.Active {
+		t.Fatal("settings nav group should be active on general settings page")
+	}
+	if len(group.Items) != 3 {
+		t.Fatalf("settings nav item count = %d, want 3", len(group.Items))
+	}
+	if got, want := group.Items[0].URL, "/admin/settings"; got != want {
+		t.Fatalf("general settings url = %q, want %q", got, want)
+	}
+	if !group.Items[0].Active {
+		t.Fatal("general settings item should be active on settings page")
+	}
+}
+
+func TestAdminCustomNavGroupMarksSidebarPageActive(t *testing.T) {
+	group := adminCustomNavGroup(ViewData{ActiveAdmin: "sidebars"})
+
+	if got, want := group.Key, "customize"; got != want {
+		t.Fatalf("custom nav group key = %q, want %q", got, want)
+	}
+	if !group.Active {
+		t.Fatal("custom nav group should be active on custom sidebar page")
+	}
+	if len(group.Items) != 2 {
+		t.Fatalf("custom nav item count = %d, want 2", len(group.Items))
+	}
+	if group.Items[0].Active {
+		t.Fatal("custom menus item should not be active on custom sidebar page")
+	}
+	if !group.Items[1].Active {
+		t.Fatal("custom sidebar item should be active on custom sidebar page")
+	}
+	if got, want := group.Items[1].URL, "/admin/sidebars"; got != want {
+		t.Fatalf("custom sidebar url = %q, want %q", got, want)
+	}
+}
+
 func TestGzipStaticCompressesTextAssets(t *testing.T) {
 	body := strings.Repeat("body{color:#111}", 20)
 	handler := gzipStatic(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

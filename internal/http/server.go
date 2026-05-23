@@ -117,6 +117,28 @@ type ViewData struct {
 	Pagination    Pagination
 }
 
+// AdminNavGroup 描述后台侧边栏中的一个可折叠二级导航组。
+// View 用于模板里继续访问翻译、主题消息等页面上下文；Items 保存子菜单项。
+type AdminNavGroup struct {
+	View          ViewData
+	Key           string
+	ControlsID    string
+	TitleKey      string
+	TitleFallback string
+	Active        bool
+	Items         []AdminNavItem
+}
+
+// AdminNavItem 描述后台二级导航中的一个子菜单链接。
+// ActiveAdmin 对应 ViewData.ActiveAdmin（当前后台页面标识），用于计算当前高亮状态。
+type AdminNavItem struct {
+	ActiveAdmin   string
+	URL           string
+	LabelKey      string
+	LabelFallback string
+	Active        bool
+}
+
 type AdminComment struct {
 	Comment     site.Comment
 	PostTitle   string
@@ -274,6 +296,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("GET /admin/plugins", s.requireAdmin(http.HandlerFunc(s.adminPlugins)))
 	mux.Handle("GET /admin/plugins/{id}", s.requireAdmin(http.HandlerFunc(s.adminPluginSettings)))
 	mux.Handle("GET /admin/menus", s.requireAdmin(http.HandlerFunc(s.adminMenus)))
+	mux.Handle("GET /admin/sidebars", s.requireAdmin(http.HandlerFunc(s.adminSidebars)))
 	mux.Handle("GET /admin/theme-settings", s.requireAdmin(http.HandlerFunc(s.adminThemeSettings)))
 	mux.Handle("GET /admin/settings", s.requireAdmin(http.HandlerFunc(s.adminSettings)))
 	mux.Handle("GET /admin/settings/permalinks", s.requireAdmin(http.HandlerFunc(s.adminPermalinks)))
@@ -419,6 +442,15 @@ func loadTemplatesFromRoot(activeTheme appearance.Pack, templatesRoot string) (*
 		},
 		"themeSettingsData": func(data ViewData) any {
 			return themeSettingsData(data)
+		},
+		"adminThemeNavGroup": func(data ViewData) AdminNavGroup {
+			return adminThemeNavGroup(data)
+		},
+		"adminCustomNavGroup": func(data ViewData) AdminNavGroup {
+			return adminCustomNavGroup(data)
+		},
+		"adminSettingsNavGroup": func(data ViewData) AdminNavGroup {
+			return adminSettingsNavGroup(data)
 		},
 		"msg": func(data ViewData, key string, fallback ...string) string {
 			return messageFromViewData(data, key, fallback...)
@@ -989,9 +1021,36 @@ func (s *Server) adminPluginSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// adminMenus 渲染自定义菜单编辑页。
+// 参数:
+//   - w: HTTP 响应写入器。
+//   - r: 当前请求；这里只需要通过登录态中间件确认权限，不读取额外参数。
+//
+// 返回:
+//   - 无直接返回值；函数会把 admin_menus.html 写入响应。
+//
+// 设计说明:
+//
+//	/admin/menus 现在专职编辑自定义菜单，侧边栏编辑已拆到 /admin/sidebars。
 func (s *Server) adminMenus(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin_menus.html", ViewData{Title: "Customize", TitleKey: "title.admin.menus", Store: store, ActiveAdmin: "menus"})
+	s.render(w, "admin_menus.html", ViewData{Title: "Custom Menus", TitleKey: "title.admin.custom_menus", Store: store, ActiveAdmin: "menus"})
+}
+
+// adminSidebars 渲染自定义侧边栏编辑页。
+// 参数:
+//   - w: HTTP 响应写入器。
+//   - r: 当前请求；这里只需要通过登录态中间件确认权限，不读取额外参数。
+//
+// 返回:
+//   - 无直接返回值；函数会把 admin_sidebars.html 写入响应。
+//
+// 设计说明:
+//
+//	该页面复用自定义菜单编辑器的布局和 menus.js（菜单编辑脚本），但保存时只提交 sidebars 字段。
+func (s *Server) adminSidebars(w http.ResponseWriter, r *http.Request) {
+	store := s.currentStore()
+	s.render(w, "admin_sidebars.html", ViewData{Title: "Custom Sidebar", TitleKey: "title.admin.custom_sidebars", Store: store, ActiveAdmin: "sidebars"})
 }
 
 func (s *Server) adminThemeSettings(w http.ResponseWriter, r *http.Request) {
@@ -3222,6 +3281,128 @@ func pageTitleFromViewData(data ViewData) string {
 		pageTitle += " | " + subtitle
 	}
 	return pageTitle
+}
+
+// adminThemeNavGroup 构造后台侧边栏的主题二级导航数据。
+// 参数:
+//   - data: 当前页面的 ViewData（视图数据），其中 ActiveAdmin 用于判断当前高亮项。
+//
+// 返回:
+//   - AdminNavGroup（后台导航组），包含“主题”父级和主题包、主题设置两个子项。
+//
+// 使用示例:
+//
+//	模板中通过 {{template "adminNavGroup" (adminThemeNavGroup .)}} 复用统一的折叠组件。
+func adminThemeNavGroup(data ViewData) AdminNavGroup {
+	return newAdminNavGroup(data, "theme", "adminNavThemeSub", "nav.theme", "Theme", []AdminNavItem{
+		{
+			ActiveAdmin:   "appearance",
+			URL:           "/admin/appearance",
+			LabelKey:      "nav.appearance",
+			LabelFallback: "Theme Packs",
+		},
+		{
+			ActiveAdmin:   "theme-settings",
+			URL:           "/admin/theme-settings",
+			LabelKey:      "nav.theme_settings",
+			LabelFallback: "Theme Settings",
+		},
+	})
+}
+
+// adminCustomNavGroup 构造后台侧边栏的自定义二级导航数据。
+// 参数:
+//   - data: 当前页面的 ViewData（视图数据），其中 ActiveAdmin 用于判断当前高亮项。
+//
+// 返回:
+//   - AdminNavGroup（后台导航组），包含“自定义”父级和自定义菜单、自定义侧边栏两个子项。
+//
+// 使用示例:
+//
+//	模板中通过 {{template "adminNavGroup" (adminCustomNavGroup .)}} 复用统一的折叠组件。
+func adminCustomNavGroup(data ViewData) AdminNavGroup {
+	return newAdminNavGroup(data, "customize", "adminNavCustomizeSub", "nav.menus", "Customize", []AdminNavItem{
+		{
+			ActiveAdmin:   "menus",
+			URL:           "/admin/menus",
+			LabelKey:      "nav.custom_menus",
+			LabelFallback: "Custom Menus",
+		},
+		{
+			ActiveAdmin:   "sidebars",
+			URL:           "/admin/sidebars",
+			LabelKey:      "nav.custom_sidebars",
+			LabelFallback: "Custom Sidebar",
+		},
+	})
+}
+
+// adminSettingsNavGroup 构造后台侧边栏的设置二级导航数据。
+// 参数:
+//   - data: 当前页面的 ViewData（视图数据），其中 ActiveAdmin 用于判断当前高亮项。
+//
+// 返回:
+//   - AdminNavGroup（后台导航组），包含“设置”父级和通用设置、固定链接、自动更新三个子项。
+//
+// 使用示例:
+//
+//	模板中通过 {{template "adminNavGroup" (adminSettingsNavGroup .)}} 复用统一的折叠组件。
+func adminSettingsNavGroup(data ViewData) AdminNavGroup {
+	return newAdminNavGroup(data, "settings", "adminNavSettingsSub", "nav.settings", "Settings", []AdminNavItem{
+		{
+			ActiveAdmin:   "settings",
+			URL:           "/admin/settings",
+			LabelKey:      "nav.general_settings",
+			LabelFallback: "General Settings",
+		},
+		{
+			ActiveAdmin:   "permalinks",
+			URL:           "/admin/settings/permalinks",
+			LabelKey:      "nav.permalinks",
+			LabelFallback: "Permalinks",
+		},
+		{
+			ActiveAdmin:   "updates",
+			URL:           "/admin/settings/updates",
+			LabelKey:      "nav.updates",
+			LabelFallback: "Auto Update",
+		},
+	})
+}
+
+// newAdminNavGroup 根据当前后台页面状态生成可折叠导航组。
+// 参数:
+//   - data: 当前页面的 ViewData（视图数据）。
+//   - key: 分组稳定标识，用于 CSS/JS 状态和 localStorage 记忆展开状态。
+//   - controlsID: 子菜单容器 ID，用于 aria-controls 关联父级按钮和子菜单。
+//   - titleKey: 父级标题的翻译键。
+//   - titleFallback: 父级标题缺少翻译时使用的英文 fallback。
+//   - items: 子菜单项列表，ActiveAdmin 字段会与 data.ActiveAdmin 匹配。
+//
+// 返回:
+//   - AdminNavGroup（后台导航组），其中 Active 表示当前页面是否落在该分组下。
+//
+// 设计说明:
+//
+//	组件需要知道哪个子项处于当前页，以便服务端首屏就展开对应分组，避免 JS 加载前
+//	侧边栏先闪一下收起状态。这里集中计算 Active，模板只负责展示。
+func newAdminNavGroup(data ViewData, key, controlsID, titleKey, titleFallback string, items []AdminNavItem) AdminNavGroup {
+	active := false
+	for index := range items {
+		items[index].Active = data.ActiveAdmin == items[index].ActiveAdmin
+		if items[index].Active {
+			active = true
+		}
+	}
+	return AdminNavGroup{
+		View:          data,
+		Key:           key,
+		ControlsID:    controlsID,
+		TitleKey:      titleKey,
+		TitleFallback: titleFallback,
+		Active:        active,
+		Items:         items,
+	}
 }
 
 func siteFeedDescription(data ViewData) string {
