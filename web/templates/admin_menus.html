@@ -2,44 +2,108 @@
 {{template "adminStart" .}}
 <header class="admin-page-header">
   <p class="kicker">{{msg . "admin.kicker"}}</p>
-  <h1>{{msg . "menus.heading" "Custom Menus"}}</h1>
+  <h1>{{msg . "menus.heading" "Customize"}}</h1>
 </header>
 
 <section id="themeMenuSettings" class="ui-panel admin-panel theme-settings-panel menu-builder-panel">
   <div class="ui-panel__head">
-    <h2>{{msg . "menus.title" "Menus"}}</h2>
+    <h2>{{msg . "menus.title" "Custom Menus"}}</h2>
     <span id="themeMenuStatus" class="ui-status">{{msg . "settings.status.ready" "Ready"}}</span>
   </div>
-  <div class="menu-selector-bar">
-    <label for="menuSelector">{{msg . "menus.selector.label" "Select a menu to edit"}}</label>
-    <select id="menuSelector" class="ui-input"></select>
-    <button id="selectThemeMenu" class="ui-button" type="button">{{msg . "menus.selector.select" "Select"}}</button>
-    <button id="addThemeMenu" class="ui-button" type="button">{{msg . "menus.selector.create" "Create a new menu"}}</button>
-    <span>{{msg . "menus.selector.reminder" "Save your changes when you are done."}}</span>
+  <div class="menu-selector-bar menu-selector-bar--theme">
+    <div class="editable-selector">
+      <input id="menuSelector" class="editable-selector__input" type="text" autocomplete="off" aria-label="{{msg . "menus.selector.label" "Select a menu to edit"}}">
+      <button id="menuSelectorToggle" class="editable-selector__toggle" type="button" aria-label="{{msg . "menus.selector.select" "Select"}}">▾</button>
+      <div id="menuSelectorList" class="editable-selector__list" role="listbox" hidden></div>
+    </div>
+    <div class="menu-selector-actions">
+      <button id="addThemeMenu" class="ui-button" type="button">{{msg . "menus.selector.create" "New Menu"}}</button>
+      <button id="saveThemeMenus" class="ui-button" type="button">{{msg . "menus.save" "Save Menus"}}</button>
+      <button id="deleteThemeMenu" class="ui-button" type="button">{{msg . "menus.menu.delete" "Delete Menu"}}</button>
+    </div>
   </div>
   <div class="menu-builder-layout">
-    <aside class="menu-add-panel">
-      <h2>{{msg . "menus.add_items.title" "Add Menu Items"}}</h2>
-      <div id="menuSourcePanels" class="menu-source-panels"></div>
-    </aside>
     <section class="menu-structure-panel">
       <div class="menu-structure-head">
         <h2>{{msg . "menus.structure.title" "Menu Structure"}}</h2>
-        <button id="deleteThemeMenu" class="ui-button ui-button--ghost" type="button">{{msg . "menus.menu.delete" "Delete Menu"}}</button>
+        <button id="addThemeMenuItem" class="ui-button menu-structure-head__button" type="button">{{msg . "menus.structure.new" "New"}}</button>
       </div>
-      <label class="menu-name-row">
-        <span>{{msg . "menus.structure.name" "Menu name"}}</span>
-        <input id="menuNameInput" class="ui-input" type="text">
-      </label>
+      <div id="themeMenuItemList" class="menu-item-list"></div>
+    </section>
+    <section class="menu-structure-panel">
+      <div class="menu-structure-head">
+        <div class="menu-structure-title-slot">
+          <h2 id="themeMenuDetailsTitle">{{msg . "menus.structure.details_title" "Structure Details"}}</h2>
+          <input id="themeMenuDetailsTitleInput" class="ui-input menu-structure-title-input" type="text" hidden>
+        </div>
+      </div>
+      <div id="themeMenuItemActions" class="menu-structure-inline-actions" hidden>
+        <button id="themeMenuRenameItem" class="ui-button menu-structure-head__button" type="button" hidden>{{msg . "menus.item.rename" "Rename"}}</button>
+        <button id="themeMenuDeleteItem" class="ui-button menu-structure-head__button" type="button" hidden>{{msg . "common.delete" "Delete"}}</button>
+        <span id="themeMenuDeleteActions" class="menu-structure-confirm-actions" hidden>
+          <button id="themeMenuDeleteConfirm" class="ui-button menu-structure-icon-button menu-structure-icon-button--save" type="button" aria-label="{{msg . "menus.item.confirm_delete" "Confirm delete"}}" title="{{msg . "menus.item.confirm_delete" "Confirm delete"}}"></button>
+          <button id="themeMenuDeleteCancel" class="ui-button ui-button--ghost menu-structure-icon-button menu-structure-icon-button--cancel" type="button" aria-label="{{msg . "common.cancel" "Cancel"}}" title="{{msg . "common.cancel" "Cancel"}}"></button>
+        </span>
+        <span id="themeMenuRenameActions" class="menu-structure-rename-actions" hidden>
+          <button id="themeMenuRenameSave" class="ui-button menu-structure-icon-button menu-structure-icon-button--save" type="button" aria-label="{{msg . "common.save" "Save"}}" title="{{msg . "common.save" "Save"}}"></button>
+          <button id="themeMenuRenameCancel" class="ui-button ui-button--ghost menu-structure-icon-button menu-structure-icon-button--cancel" type="button" aria-label="{{msg . "common.cancel" "Cancel"}}" title="{{msg . "common.cancel" "Cancel"}}"></button>
+        </span>
+      </div>
       <div id="themeMenuList" class="menu-structure-list"></div>
-      <div class="settings-actions theme-settings-actions">
-        <button id="saveThemeMenus" class="ui-button ui-button--primary" type="button">{{msg . "menus.save" "Save Menus"}}</button>
+    </section>
+  </div>
+</section>
+
+<section id="customSidebarSettings" class="ui-panel admin-panel theme-settings-panel menu-builder-panel">
+  <div class="ui-panel__head">
+    <h2>{{msg . "sidebar.title" "Custom Sidebar"}}</h2>
+    <span id="customSidebarStatus" class="ui-status">{{msg . "settings.status.ready" "Ready"}}</span>
+  </div>
+  <div class="menu-selector-bar menu-selector-bar--theme">
+    <div class="editable-selector">
+      <input id="sidebarSectionSelector" class="editable-selector__input" type="text" autocomplete="off" aria-label="{{msg . "sidebar.selector.label" "Select a sidebar to edit"}}">
+      <button id="sidebarSectionSelectorToggle" class="editable-selector__toggle" type="button" aria-label="{{msg . "menus.selector.select" "Select"}}">▾</button>
+      <div id="sidebarSectionSelectorList" class="editable-selector__list" role="listbox" hidden></div>
+    </div>
+    <div class="menu-selector-actions">
+      <button id="addSidebarSection" class="ui-button" type="button">{{msg . "sidebar.selector.create" "Create a new sidebar"}}</button>
+      <button id="saveCustomSidebar" class="ui-button" type="button">{{msg . "sidebar.save" "Save Sidebar"}}</button>
+      <button id="deleteSidebarSection" class="ui-button" type="button">{{msg . "sidebar.section.delete" "Delete Sidebar"}}</button>
+    </div>
+  </div>
+  <div class="menu-builder-layout">
+    <section class="menu-structure-panel">
+      <div class="menu-structure-head">
+        <h2>{{msg . "sidebar.structure.title" "Sidebar Structure"}}</h2>
+        <button id="addSidebarSectionItem" class="ui-button menu-structure-head__button" type="button">{{msg . "menus.structure.new" "New"}}</button>
       </div>
+      <div id="sidebarSectionItemList" class="menu-item-list"></div>
+    </section>
+    <section class="menu-structure-panel">
+      <div class="menu-structure-head">
+        <div class="menu-structure-title-slot">
+          <h2 id="sidebarSectionDetailsTitle">{{msg . "sidebar.structure.details_title" "Structure Details"}}</h2>
+          <input id="sidebarSectionDetailsTitleInput" class="ui-input menu-structure-title-input" type="text" hidden>
+        </div>
+      </div>
+      <div id="sidebarSectionItemActions" class="menu-structure-inline-actions" hidden>
+        <button id="sidebarSectionRenameItem" class="ui-button menu-structure-head__button" type="button" hidden>{{msg . "menus.item.rename" "Rename"}}</button>
+        <button id="sidebarSectionDeleteItem" class="ui-button menu-structure-head__button" type="button" hidden>{{msg . "common.delete" "Delete"}}</button>
+        <span id="sidebarSectionDeleteActions" class="menu-structure-confirm-actions" hidden>
+          <button id="sidebarSectionDeleteConfirm" class="ui-button menu-structure-icon-button menu-structure-icon-button--save" type="button" aria-label="{{msg . "menus.item.confirm_delete" "Confirm delete"}}" title="{{msg . "menus.item.confirm_delete" "Confirm delete"}}"></button>
+          <button id="sidebarSectionDeleteCancel" class="ui-button ui-button--ghost menu-structure-icon-button menu-structure-icon-button--cancel" type="button" aria-label="{{msg . "common.cancel" "Cancel"}}" title="{{msg . "common.cancel" "Cancel"}}"></button>
+        </span>
+        <span id="sidebarSectionRenameActions" class="menu-structure-rename-actions" hidden>
+          <button id="sidebarSectionRenameSave" class="ui-button menu-structure-icon-button menu-structure-icon-button--save" type="button" aria-label="{{msg . "common.save" "Save"}}" title="{{msg . "common.save" "Save"}}"></button>
+          <button id="sidebarSectionRenameCancel" class="ui-button ui-button--ghost menu-structure-icon-button menu-structure-icon-button--cancel" type="button" aria-label="{{msg . "common.cancel" "Cancel"}}" title="{{msg . "common.cancel" "Cancel"}}"></button>
+        </span>
+      </div>
+      <div id="sidebarSectionList" class="menu-structure-list"></div>
     </section>
   </div>
 </section>
 
 <script id="themeMenuInitialData" type="application/json">{{toScriptJSON (menuAdminData .)}}</script>
-<script defer src="/static/menus.js?v=6"></script>
+<script defer src="/static/menus.js?v=72"></script>
 {{template "adminEnd" .}}
 {{end}}

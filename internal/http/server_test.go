@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"html/template"
 	"io"
 	"net/http"
@@ -405,7 +406,9 @@ func TestUpdateThemeSettingsSavesCustomPrimitiveSettings(t *testing.T) {
 
 	contentRoot := t.TempDir()
 	s := &Server{
-		store:              &site.Store{Settings: site.Settings{}},
+		store: &site.Store{Settings: site.Settings{ThemeSettings: site.ThemeSettings{
+			Sidebars: []site.Menu{{ID: "right-rail", Name: "右侧栏"}},
+		}}},
 		contentRoot:        contentRoot,
 		builtinBundlesRoot: filepath.Join("internal", "bundles"),
 		userContentRoot:    contentRoot,
@@ -413,6 +416,7 @@ func TestUpdateThemeSettingsSavesCustomPrimitiveSettings(t *testing.T) {
 	}
 	request := httptest.NewRequest("POST", "/admin/api/theme-settings", bytes.NewBufferString(`{
   "menu_locations": {"navbar": ""},
+  "sidebar": "right-rail",
   "custom": {
     "pure-white": {
       "hero_title": "Hello",
@@ -441,6 +445,12 @@ func TestUpdateThemeSettingsSavesCustomPrimitiveSettings(t *testing.T) {
 	}
 	if got, want := values["opacity"].FloatValue(), 0.75; got != want {
 		t.Fatalf("opacity = %v, want %v", got, want)
+	}
+	if settings.ThemeSettings.Sidebar == nil {
+		t.Fatal("sidebar selection was not saved")
+	}
+	if got, want := *settings.ThemeSettings.Sidebar, "right-rail"; got != want {
+		t.Fatalf("sidebar selection = %q, want %q", got, want)
 	}
 }
 
@@ -991,14 +1001,67 @@ func TestHomeUsesConfiguredPageSize(t *testing.T) {
 		t.Fatalf("home status = %d, body = %s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, "Post Three") {
+	mainStart := strings.Index(body, `<main class="main-column">`)
+	mainEnd := strings.Index(body, `</main>`)
+	if mainStart < 0 || mainEnd <= mainStart {
+		t.Fatalf("home page should render main content:\n%s", body)
+	}
+	mainBody := body[mainStart:mainEnd]
+	if !strings.Contains(mainBody, "Post Three") {
 		t.Fatalf("second home page should include third post:\n%s", body)
 	}
-	if strings.Contains(body, "Post One") || strings.Contains(body, "Post Two") {
+	if strings.Contains(mainBody, "Post One") || strings.Contains(mainBody, "Post Two") {
 		t.Fatalf("second home page should not include first-page posts:\n%s", body)
 	}
 	if !strings.Contains(body, `aria-current="page">2`) {
 		t.Fatalf("home page should render current pagination link:\n%s", body)
+	}
+}
+
+func TestHomeOmitsRightRailWhenSidebarDisabled(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	templates, err := loadTemplates(appearance.Pack{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledSidebar := ""
+	s := &Server{
+		store: &site.Store{
+			Settings: site.Settings{
+				ThemeSettings: site.ThemeSettings{
+					Sidebar: &disabledSidebar,
+				},
+			},
+			Posts: []*site.Post{{Title: "Post One", Slug: "post-one", URL: "/posts/post-one", Summary: "First"}},
+		},
+		templates: templates,
+	}
+	request := httptest.NewRequest("GET", "/", nil)
+	response := httptest.NewRecorder()
+
+	s.home(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("home status = %d, body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if strings.Contains(body, `class="right-rail"`) {
+		t.Fatalf("disabled sidebar should not render right rail:\n%s", body)
+	}
+	if !strings.Contains(body, `site-shell--no-sidebar`) {
+		t.Fatalf("disabled sidebar should mark the shell as no-sidebar:\n%s", body)
 	}
 }
 
@@ -1189,6 +1252,333 @@ func TestPageTitleFromViewDataUsesConfiguredSiteTitle(t *testing.T) {
 	}
 }
 
+func TestUpdateMenusSavesCustomSidebars(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/menus", bytes.NewBufferString(`{
+  "menus": [
+    {
+      "id": "menu",
+      "name": "新菜单",
+      "items": []
+    }
+  ],
+  "sidebars": [
+    {
+      "id": "sidebar",
+      "name": "自定义侧边栏",
+      "items": [
+        {
+          "label": "订阅",
+          "main": {
+            "type": "custom"
+          },
+          "items": [
+            {
+              "label": "RSS",
+              "main": {
+                "type": "url",
+                "url": "/feed.xml"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateMenus(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateMenus status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.ThemeSettings.Sidebars) != 1 {
+		t.Fatalf("sidebars = %#v, want one sidebar", settings.ThemeSettings.Sidebars)
+	}
+	sidebar := settings.ThemeSettings.Sidebars[0]
+	if got, want := sidebar.ID, "sidebar"; got != want {
+		t.Fatalf("sidebar id = %q, want %q", got, want)
+	}
+	if got, want := sidebar.Name, "自定义侧边栏"; got != want {
+		t.Fatalf("sidebar name = %q, want %q", got, want)
+	}
+	if len(sidebar.Items) != 1 {
+		t.Fatalf("sidebar items = %#v, want one item", sidebar.Items)
+	}
+	if got, want := sidebar.Items[0].Type, site.SidebarSectionTypeCustom; got != want {
+		t.Fatalf("sidebar item type = %q, want %q", got, want)
+	}
+	if got, want := sidebar.Items[0].Label, "订阅"; got != want {
+		t.Fatalf("sidebar item label = %q, want %q", got, want)
+	}
+	if len(sidebar.Items[0].Items) != 1 {
+		t.Fatalf("sidebar custom items = %#v, want one item", sidebar.Items[0].Items)
+	}
+	if got, want := sidebar.Items[0].Items[0].Label, "RSS"; got != want {
+		t.Fatalf("sidebar custom item label = %q, want %q", got, want)
+	}
+	body, err := os.ReadFile(filepath.Join(contentRoot, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"sidebars"`) {
+		t.Fatalf("settings.json did not contain sidebars:\n%s", body)
+	}
+}
+
+// TestUpdateMenusNormalizesBareURLLink 覆盖后台菜单保存接口的自定义链接输入。
+//
+// 前端菜单编辑器会发送 main.type/main.url 新结构。用户输入裸域名时，接口应保存为
+// https 链接并回读到菜单项里，不能在 SaveSettings/LoadSettings 归一化后消失。
+func TestUpdateMenusNormalizesBareURLLink(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/menus", bytes.NewBufferString(`{
+  "menus": [
+    {
+      "id": "main",
+      "name": "Main",
+      "items": [
+        {
+          "label": "Docs",
+          "main": {
+            "type": "url",
+            "url": "example.com/docs?from=menu"
+          }
+        }
+      ]
+    }
+  ],
+  "sidebars": []
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateMenus(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateMenus status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := settings.ThemeSettings.Menus[0].Items
+	if len(items) != 1 {
+		t.Fatalf("menu items = %#v, want one custom link", items)
+	}
+	if got, want := items[0].URL, "https://example.com/docs?from=menu"; got != want {
+		t.Fatalf("menu item url = %q, want %q", got, want)
+	}
+}
+
+func TestUpdateMenusDoesNotPersistDefaultMenu(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/menus", bytes.NewBufferString(`{
+  "menus": [
+    {
+      "id": "default-menu",
+      "name": "默认菜单",
+      "items": [
+        {
+          "label": "首页",
+          "main": {
+            "type": "home"
+          }
+        }
+      ]
+    },
+    {
+      "id": "test-menu",
+      "name": "测试菜单",
+      "items": []
+    }
+  ],
+  "sidebars": []
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateMenus(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateMenus status = %d, body = %s", response.Code, response.Body.String())
+	}
+	loaded, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, menu := range loaded.ThemeSettings.Menus {
+		if menu.ID == defaultThemeMenuID {
+			t.Fatalf("default menu should not be persisted: %#v", loaded.ThemeSettings.Menus)
+		}
+	}
+	if len(loaded.ThemeSettings.Menus) != 1 {
+		t.Fatalf("menus = %#v, want only custom menu", loaded.ThemeSettings.Menus)
+	}
+	if got, want := loaded.ThemeSettings.Menus[0].ID, "test-menu"; got != want {
+		t.Fatalf("menu id = %q, want %q", got, want)
+	}
+	var returned site.ThemeSettings
+	if err := json.Unmarshal(response.Body.Bytes(), &returned); err != nil {
+		t.Fatalf("decode updateMenus response: %v", err)
+	}
+	if len(returned.Menus) != 2 {
+		t.Fatalf("response menus = %#v, want default menu plus custom menu", returned.Menus)
+	}
+	if got, want := returned.Menus[0].ID, defaultThemeMenuID; got != want {
+		t.Fatalf("response first menu id = %q, want %q", got, want)
+	}
+	if got, want := returned.Menus[1].ID, "test-menu"; got != want {
+		t.Fatalf("response second menu id = %q, want %q", got, want)
+	}
+}
+
+func TestUpdateMenusDoesNotPersistDefaultSidebar(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store:              &site.Store{Settings: site.Settings{}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/menus", bytes.NewBufferString(`{
+  "menus": [],
+  "sidebars": [
+    {
+      "id": "default-sidebar",
+      "name": "默认侧边栏",
+      "items": [
+        {
+          "label": "标签",
+          "main": {
+            "type": "topics"
+          }
+        }
+      ]
+    },
+    {
+      "id": "custom-sidebar",
+      "name": "自定义侧边栏",
+      "items": [
+        {
+          "label": "订阅",
+          "main": {
+            "type": "feeds"
+          }
+        }
+      ]
+    }
+  ]
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateMenus(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateMenus status = %d, body = %s", response.Code, response.Body.String())
+	}
+	loaded, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ThemeSettings.Sidebars) != 1 {
+		t.Fatalf("sidebars = %#v, want only custom sidebar", loaded.ThemeSettings.Sidebars)
+	}
+	if got, want := loaded.ThemeSettings.Sidebars[0].ID, "custom-sidebar"; got != want {
+		t.Fatalf("sidebar id = %q, want %q", got, want)
+	}
+	var returned site.ThemeSettings
+	if err := json.Unmarshal(response.Body.Bytes(), &returned); err != nil {
+		t.Fatalf("decode updateMenus response: %v", err)
+	}
+	if len(returned.Sidebars) != 2 {
+		t.Fatalf("response sidebars = %#v, want default sidebar plus custom sidebar", returned.Sidebars)
+	}
+	if got, want := returned.Sidebars[0].ID, defaultSidebarID; got != want {
+		t.Fatalf("response first sidebar id = %q, want %q", got, want)
+	}
+	if got, want := returned.Sidebars[1].ID, "custom-sidebar"; got != want {
+		t.Fatalf("response second sidebar id = %q, want %q", got, want)
+	}
+}
+
 func TestResolvedThemeLocaleDoesNotSwitchToPluginLocaleWhenRequestedEmpty(t *testing.T) {
 	themes := []appearance.Pack{
 		{
@@ -1258,6 +1648,202 @@ func TestMenuLinksForUnspecifiedDeclaredNavbarUsesDefault(t *testing.T) {
 	}
 	if got, want := links[0].URL, "/"; got != want {
 		t.Fatalf("first default link = %q, want %q", got, want)
+	}
+}
+
+func TestMenuLinksForUnspecifiedDeclaredFooterUsesNoMenu(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{},
+			Pages:    []*site.Page{{Title: "About", Slug: "about"}},
+		},
+		Appearance: &appearance.Catalog{
+			ActiveTheme: appearance.Pack{
+				Manifest: appearance.Manifest{
+					MenuLocations: []appearance.MenuLocation{{ID: "footer", Name: "Footer"}},
+				},
+			},
+		},
+	}
+
+	links := menuLinksForLocation(data, "footer")
+	if len(links) != 0 {
+		t.Fatalf("unspecified declared footer links = %#v, want none", links)
+	}
+}
+
+func TestMenuLinksForExplicitDefaultFooterUsesDefault(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{
+				ThemeSettings: site.ThemeSettings{
+					MenuLocations: map[string]string{"footer": defaultThemeMenuID},
+				},
+			},
+			Pages: []*site.Page{{Title: "About", Slug: "about"}},
+		},
+		Appearance: &appearance.Catalog{
+			ActiveTheme: appearance.Pack{
+				Manifest: appearance.Manifest{
+					MenuLocations: []appearance.MenuLocation{{ID: "footer", Name: "Footer"}},
+				},
+			},
+		},
+	}
+
+	links := menuLinksForLocation(data, "footer")
+	if len(links) == 0 {
+		t.Fatal("explicit default footer should use default links")
+	}
+	if got, want := links[0].URL, "/"; got != want {
+		t.Fatalf("first explicit default footer link = %q, want %q", got, want)
+	}
+}
+
+func TestMenuAdminDataIncludesProtectedDefaultMenu(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{},
+			Pages:    []*site.Page{{Title: "About", Slug: "about"}},
+		},
+	}
+
+	result := menuAdminData(data).(map[string]any)
+	if got, want := result["default_menu_id"], defaultThemeMenuID; got != want {
+		t.Fatalf("default_menu_id = %#v, want %q", got, want)
+	}
+	if got, want := result["default_sidebar_id"], defaultSidebarID; got != want {
+		t.Fatalf("default_sidebar_id = %#v, want %q", got, want)
+	}
+	settings := result["settings"].(site.ThemeSettings)
+	if len(settings.Menus) == 0 {
+		t.Fatalf("menus = %#v, want default menu", settings.Menus)
+	}
+	menu := settings.Menus[0]
+	if got, want := menu.ID, defaultThemeMenuID; got != want {
+		t.Fatalf("default menu id = %q, want %q", got, want)
+	}
+	if len(menu.Items) == 0 {
+		t.Fatalf("default menu items = %#v, want generated items", menu.Items)
+	}
+	if len(settings.Sidebars) == 0 {
+		t.Fatalf("sidebars = %#v, want default sidebar", settings.Sidebars)
+	}
+	sidebar := settings.Sidebars[0]
+	if got, want := sidebar.ID, defaultSidebarID; got != want {
+		t.Fatalf("default sidebar id = %q, want %q", got, want)
+	}
+	if len(sidebar.Items) != 3 {
+		t.Fatalf("default sidebar items = %#v, want three generated blocks", sidebar.Items)
+	}
+	for index, item := range sidebar.Items {
+		if item.Type == site.SidebarSectionTypeRecentPosts {
+			t.Fatalf("default sidebar item[%d] = recent posts, want no recent posts block", index)
+		}
+	}
+}
+
+func TestMenuAdminDataWrapsLegacySidebarsWithoutDefaultBlocks(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{
+				ThemeSettings: site.ThemeSettings{
+					Sidebars: []site.Menu{
+						{
+							ID:   "legacy",
+							Name: "旧侧边栏",
+							Items: []site.MenuItem{
+								{Type: "url", Label: "RSS", URL: "/feed.xml"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := menuAdminData(data).(map[string]any)
+	settings := result["settings"].(site.ThemeSettings)
+	if len(settings.Sidebars) != 2 {
+		t.Fatalf("sidebars = %#v, want default sidebar plus legacy sidebar", settings.Sidebars)
+	}
+	legacy := settings.Sidebars[1]
+	if len(legacy.Items) != 1 {
+		t.Fatalf("legacy sidebar items = %#v, want only custom area", legacy.Items)
+	}
+	custom := legacy.Items[0]
+	if got, want := custom.Type, site.SidebarSectionTypeCustom; got != want {
+		t.Fatalf("legacy custom item type = %q, want %q", got, want)
+	}
+	if len(custom.Items) != 1 {
+		t.Fatalf("legacy custom links = %#v, want one preserved link", custom.Items)
+	}
+	if got, want := custom.Items[0].Label, "RSS"; got != want {
+		t.Fatalf("legacy custom link label = %q, want %q", got, want)
+	}
+}
+
+func TestMenuAdminDataPreservesEmptyCustomSidebar(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{
+				ThemeSettings: site.ThemeSettings{
+					Sidebars: []site.Menu{
+						{ID: "empty-sidebar", Name: "Custom Sidebar"},
+					},
+				},
+			},
+		},
+	}
+
+	result := menuAdminData(data).(map[string]any)
+	settings := result["settings"].(site.ThemeSettings)
+	if len(settings.Sidebars) != 2 {
+		t.Fatalf("sidebars = %#v, want default sidebar plus empty custom sidebar", settings.Sidebars)
+	}
+	sidebar := settings.Sidebars[1]
+	if got, want := sidebar.ID, "empty-sidebar"; got != want {
+		t.Fatalf("sidebar id = %q, want %q", got, want)
+	}
+	if got, want := sidebar.Name, "New Sidebar"; got != want {
+		t.Fatalf("sidebar name = %q, want %q", got, want)
+	}
+	if len(sidebar.Items) != 0 {
+		t.Fatalf("empty sidebar items = %#v, want empty items", sidebar.Items)
+	}
+}
+
+func TestThemeSettingsDataHidesDefaultMenuFromLocationChoices(t *testing.T) {
+	data := ViewData{
+		Store: &site.Store{
+			Settings: site.Settings{
+				ThemeSettings: site.ThemeSettings{
+					Menus: []site.Menu{
+						{ID: defaultThemeMenuID, Name: "默认菜单"},
+						{ID: "test-menu", Name: "测试菜单"},
+					},
+					Sidebars: []site.Menu{
+						{ID: defaultSidebarID, Name: "默认侧边栏"},
+						{ID: "test-sidebar", Name: "测试侧边栏"},
+					},
+				},
+			},
+		},
+	}
+
+	result := themeSettingsData(data).(map[string]any)
+	settings := result["settings"].(site.ThemeSettings)
+	if len(settings.Menus) != 1 {
+		t.Fatalf("theme settings menus = %#v, want only custom menu", settings.Menus)
+	}
+	if got, want := settings.Menus[0].ID, "test-menu"; got != want {
+		t.Fatalf("theme settings menu id = %q, want %q", got, want)
+	}
+	if len(settings.Sidebars) != 1 {
+		t.Fatalf("theme settings sidebars = %#v, want only custom sidebar", settings.Sidebars)
+	}
+	if got, want := settings.Sidebars[0].ID, "test-sidebar"; got != want {
+		t.Fatalf("theme settings sidebar id = %q, want %q", got, want)
 	}
 }
 

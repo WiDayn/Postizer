@@ -408,6 +408,12 @@ func loadTemplatesFromRoot(activeTheme appearance.Pack, templatesRoot string) (*
 		"menuLinks": func(data ViewData, location string) []site.MenuLink {
 			return menuLinksForLocation(data, location)
 		},
+		"sidebarSections": func(data ViewData) []site.SidebarLinkSection {
+			if data.Store == nil {
+				return nil
+			}
+			return data.Store.SidebarSectionsWithLabels(sidebarLabelsFromViewData(data))
+		},
 		"menuAdminData": func(data ViewData) any {
 			return menuAdminData(data)
 		},
@@ -985,7 +991,7 @@ func (s *Server) adminPluginSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminMenus(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
-	s.render(w, "admin_menus.html", ViewData{Title: "Custom Menus", TitleKey: "title.admin.menus", Store: store, ActiveAdmin: "menus"})
+	s.render(w, "admin_menus.html", ViewData{Title: "Customize", TitleKey: "title.admin.menus", Store: store, ActiveAdmin: "menus"})
 }
 
 func (s *Server) adminThemeSettings(w http.ResponseWriter, r *http.Request) {
@@ -1604,7 +1610,8 @@ func (s *Server) updateMenus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	settings := s.currentStore().Settings
-	settings.ThemeSettings.Menus = payload.Menus
+	settings.ThemeSettings.Menus = filterPersistedMenus(payload.Menus)
+	settings.ThemeSettings.Sidebars = filterPersistedSidebars(payload.Sidebars)
 	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -1613,13 +1620,17 @@ func (s *Server) updateMenus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, s.currentStore().Settings.ThemeSettings)
+	writeJSON(w, themeSettingsWithDefaultMenu(ViewData{
+		Store:      s.currentStore(),
+		Appearance: s.currentAppearance(),
+	}))
 }
 
 func (s *Server) updateThemeSettings(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
 		MenuLocations map[string]string         `json:"menu_locations"`
+		Sidebar       *string                   `json:"sidebar"`
 		Custom        *site.ThemeCustomSettings `json:"custom"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -1628,6 +1639,7 @@ func (s *Server) updateThemeSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := s.currentStore().Settings
 	settings.ThemeSettings.MenuLocations = payload.MenuLocations
+	settings.ThemeSettings.Sidebar = payload.Sidebar
 	if payload.Custom != nil {
 		settings.ThemeSettings.Custom = *payload.Custom
 	}
@@ -3209,6 +3221,11 @@ func menuLinksForLocation(data ViewData, location string) []site.MenuLink {
 	if data.Store == nil {
 		return nil
 	}
+	if menuID, ok := data.Store.Settings.ThemeSettings.MenuLocations[strings.TrimSpace(location)]; ok {
+		if menuID == defaultThemeMenuID {
+			return menuLinksFromMenu(data.Store, defaultMenu(data))
+		}
+	}
 	links := data.Store.MenuLinks(location)
 	if len(links) > 0 || data.Store.MenuLocationAssigned(location) {
 		return links
@@ -3216,17 +3233,7 @@ func menuLinksForLocation(data ViewData, location string) []site.MenuLink {
 	if location != "navbar" {
 		return nil
 	}
-	links = []site.MenuLink{
-		{Label: messageFromViewData(data, "nav.front_page", "Front Page"), URL: "/"},
-		{Label: messageFromViewData(data, "nav.archive", "Archive"), URL: "/archive"},
-		{Label: messageFromViewData(data, "nav.topics", "Topics"), URL: "/tags"},
-		{Label: messageFromViewData(data, "nav.search", "Search"), URL: "/search"},
-	}
-	for _, page := range data.Store.Pages {
-		links = append(links, site.MenuLink{Label: page.Title, URL: site.PageURL(data.Store.Settings, page)})
-	}
-	links = append(links, site.MenuLink{Label: messageFromViewData(data, "nav.admin", "Admin"), URL: "/admin"})
-	return links
+	return menuLinksFromMenu(data.Store, defaultMenu(data))
 }
 
 func menuAdminData(data ViewData) any {
@@ -3234,9 +3241,100 @@ func menuAdminData(data ViewData) any {
 		return map[string]any{}
 	}
 	return map[string]any{
-		"settings": data.Store.Settings.ThemeSettings,
-		"options":  menuContentOptions(data.Store),
+		"default_menu_id":    defaultThemeMenuID,
+		"default_sidebar_id": defaultSidebarID,
+		"settings":           themeSettingsWithDefaultMenu(data),
+		"options":            menuContentOptions(data.Store),
 	}
+}
+
+// sidebarLabelsFromViewData 读取当前主题语言下的侧边栏区块默认文案。
+//
+// @param data 当前模板视图数据。
+// @returns 返回自动区块和订阅链接使用的文案。
+func sidebarLabelsFromViewData(data ViewData) site.SidebarLabels {
+	return site.SidebarLabels{
+		TopicsTitle:      messageFromViewData(data, "site.right_rail.topics", "Topics"),
+		PagesTitle:       messageFromViewData(data, "site.right_rail.pages", "Pages"),
+		FeedsTitle:       messageFromViewData(data, "site.right_rail.feeds", "Feeds"),
+		RecentPostsTitle: messageFromViewData(data, "site.right_rail.recent_posts", "Recent Posts"),
+		CustomTitle:      messageFromViewData(data, "sidebar.type.custom", "Custom Area"),
+		RSSLabel:         messageFromViewData(data, "site.feed.rss", "RSS"),
+		SitemapLabel:     messageFromViewData(data, "site.feed.sitemap", "Sitemap"),
+	}
+}
+
+// sidebarAdminMenus 返回后台侧边栏编辑器使用的侧边栏列表。
+//
+// 设计说明：
+//   - 第一层保持“侧边栏列表”，不把标签/页面等功能塞进顶部下拉框。
+//   - default-sidebar 和 default-menu 一样只是后台展示用的运行时哨兵项，
+//     前端会禁止保存、删除或改名，保存 payload 时也会过滤掉。
+//   - 空侧边栏按空结构展示，和新建空菜单一致，不自动塞默认区块。
+//   - 旧版直接链接侧边栏只包装成一个“自定义区域”区块，不在后台结构里
+//     额外插入标签、页面、订阅等预设项。
+//
+// @param data 当前模板视图数据，用于读取默认标题。
+// @param sidebars settings.json 中保存的侧边栏列表。
+// @returns 返回可由后台直接编辑的侧边栏列表。
+func sidebarAdminMenus(data ViewData, sidebars []site.Menu) []site.Menu {
+	labels := sidebarLabelsFromViewData(data)
+	adminSidebars := make([]site.Menu, 0, len(sidebars)+1)
+	adminSidebars = append(adminSidebars, defaultSidebar(data, labels))
+	for _, sidebar := range sidebars {
+		if sidebar.ID == defaultSidebarID {
+			continue
+		}
+		if len(sidebar.Items) == 0 {
+			if legacyGeneratedSidebarName(sidebar.Name, labels) {
+				sidebar.Name = messageFromViewData(data, "sidebar.section.default_name", "New Sidebar")
+			}
+			adminSidebars = append(adminSidebars, sidebar)
+			continue
+		}
+		if sidebarHasSidebarBlocks(sidebar.Items) {
+			adminSidebars = append(adminSidebars, sidebar)
+			continue
+		}
+		title := strings.TrimSpace(sidebar.Name)
+		if title == "" {
+			title = labels.CustomTitle
+		}
+		sidebar.Items = []site.MenuItem{{
+			Type:  site.SidebarSectionTypeCustom,
+			Label: title,
+			Items: sidebar.Items,
+		}}
+		adminSidebars = append(adminSidebars, sidebar)
+	}
+	return adminSidebars
+}
+
+// legacyGeneratedSidebarName 判断侧边栏名是否是旧版新建逻辑生成的默认名称。
+//
+// @param name settings.json 中保存的侧边栏名称。
+// @param labels 当前主题语言下的侧边栏文案。
+// @returns 如果名称像旧版“自定义侧边栏 / Custom Sidebar”默认名则返回 true。
+func legacyGeneratedSidebarName(name string, labels site.SidebarLabels) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true
+	}
+	return name == strings.TrimSpace(labels.CustomTitle) || name == "自定义侧边栏" || name == "Custom Sidebar"
+}
+
+// sidebarHasSidebarBlocks 判断侧边栏是否已经使用新版区块结构。
+//
+// @param items 侧边栏项目列表。
+// @returns 如果包含任一新版区块类型则返回 true。
+func sidebarHasSidebarBlocks(items []site.MenuItem) bool {
+	for _, item := range items {
+		switch strings.TrimSpace(item.Type) {
+		case site.SidebarSectionTypeNone, site.SidebarSectionTypeCustom, site.SidebarSectionTypeTopics, site.SidebarSectionTypePages, site.SidebarSectionTypeFeeds, site.SidebarSectionTypeRecentPosts:
+			return true
+		}
+	}
+	return false
 }
 
 func themeSettingsData(data ViewData) any {
@@ -3247,11 +3345,187 @@ func themeSettingsData(data ViewData) any {
 	if data.Appearance != nil {
 		locations = data.Appearance.ActiveTheme.MenuLocations
 	}
+	settings := themeSettingsWithoutDefaultMenu(data.Store.Settings.ThemeSettings)
+	settings.Sidebars = themeSettingsSidebarChoices(data, settings.Sidebars)
 	return map[string]any{
-		"settings":  data.Store.Settings.ThemeSettings,
-		"locations": locations,
-		"options":   menuContentOptions(data.Store),
+		"default_menu_id": defaultThemeMenuID,
+		"settings":        settings,
+		"locations":       locations,
+		"options":         menuContentOptions(data.Store),
 	}
+}
+
+// themeSettingsSidebarChoices 返回主题设置页侧边栏下拉框使用的自定义侧边栏列表。
+//
+// @param data 当前模板视图数据，用于复用后台侧边栏名称兼容逻辑。
+// @param sidebars settings.json 中保存的侧边栏列表。
+// @returns 返回不包含 default-sidebar 的可选自定义侧边栏列表。
+func themeSettingsSidebarChoices(data ViewData, sidebars []site.Menu) []site.Menu {
+	adminSidebars := sidebarAdminMenus(data, sidebars)
+	choices := make([]site.Menu, 0, len(adminSidebars))
+	for _, sidebar := range adminSidebars {
+		if sidebar.ID == defaultSidebarID {
+			continue
+		}
+		choices = append(choices, sidebar)
+	}
+	return choices
+}
+
+const (
+	defaultThemeMenuID = "default-menu"
+	defaultSidebarID   = "default-sidebar"
+)
+
+// themeSettingsWithDefaultMenu 返回后台菜单编辑器使用的主题菜单设置。
+//
+// 设计说明：
+//   - “默认菜单”原本只是未指定 navbar 时的 fallback，不存在于 settings.json。
+//   - 菜单编辑页需要把它当作真实菜单结构展示，因此这里在返回给前端的数据中补上
+//     default-menu。
+//   - default-menu 是运行时只读菜单，不会从 settings.json 读取或写回。
+//
+// @param data 当前模板视图数据，用于生成本地化默认标签和页面菜单项。
+// @returns 返回包含 default-menu 的 ThemeSettings 副本，不会直接修改 Store。
+func themeSettingsWithDefaultMenu(data ViewData) site.ThemeSettings {
+	settings := data.Store.Settings.ThemeSettings
+	menus := make([]site.Menu, 0, len(settings.Menus)+1)
+	menus = append(menus, defaultMenu(data))
+	for _, menu := range settings.Menus {
+		if menu.ID == defaultThemeMenuID {
+			continue
+		}
+		menus = append(menus, menu)
+	}
+	settings.Menus = menus
+	settings.Sidebars = sidebarAdminMenus(data, settings.Sidebars)
+	return settings
+}
+
+// themeSettingsWithoutDefaultMenu 返回主题位置设置页使用的主题菜单和侧边栏设置。
+//
+// 设计说明：
+// 主题位置下拉框已经有 “Default menu” 哨兵选项；如果把 default-menu 也作为普通
+// 菜单传给前端，会出现两个“默认菜单”。侧边栏也同理过滤 default-sidebar，让
+// 哨兵选项继续代表默认侧边栏结构。
+//
+// @param settings 原始主题设置。
+// @returns 返回过滤 default-menu 后的 ThemeSettings 副本。
+func themeSettingsWithoutDefaultMenu(settings site.ThemeSettings) site.ThemeSettings {
+	menus := make([]site.Menu, 0, len(settings.Menus))
+	for _, menu := range settings.Menus {
+		if menu.ID == defaultThemeMenuID {
+			continue
+		}
+		menus = append(menus, menu)
+	}
+	settings.Menus = menus
+	sidebars := make([]site.Menu, 0, len(settings.Sidebars))
+	for _, sidebar := range settings.Sidebars {
+		if sidebar.ID == defaultSidebarID {
+			continue
+		}
+		sidebars = append(sidebars, sidebar)
+	}
+	settings.Sidebars = sidebars
+	return settings
+}
+
+// filterPersistedMenus 过滤不允许写入 settings.json 的运行时菜单。
+//
+// @param menus 前端提交的菜单列表。
+// @returns 返回去除 default-menu 后的可持久化菜单列表。
+func filterPersistedMenus(menus []site.Menu) []site.Menu {
+	filtered := make([]site.Menu, 0, len(menus))
+	for _, menu := range menus {
+		if menu.ID == defaultThemeMenuID {
+			continue
+		}
+		filtered = append(filtered, menu)
+	}
+	return filtered
+}
+
+// filterPersistedSidebars 过滤不允许写入 settings.json 的运行时侧边栏。
+//
+// @param sidebars 前端提交的侧边栏列表。
+// @returns 返回去除 default-sidebar 后的可持久化侧边栏列表。
+func filterPersistedSidebars(sidebars []site.Menu) []site.Menu {
+	filtered := make([]site.Menu, 0, len(sidebars))
+	for _, sidebar := range sidebars {
+		if sidebar.ID == defaultSidebarID {
+			continue
+		}
+		filtered = append(filtered, sidebar)
+	}
+	return filtered
+}
+
+// defaultSidebar 生成只读展示用的默认侧边栏结构。
+//
+// @param data 当前模板视图数据，用于读取本地化默认名称。
+// @param labels 当前主题语言下的侧边栏文案。
+// @returns 返回固定 ID 的默认侧边栏。
+func defaultSidebar(data ViewData, labels site.SidebarLabels) site.Menu {
+	return site.Menu{
+		ID:    defaultSidebarID,
+		Name:  messageFromViewData(data, "sidebar.section.default", "Default Sidebar"),
+		Items: defaultSidebarItemsForLabels(labels),
+	}
+}
+
+// defaultSidebarItemsForLabels 生成后台默认侧边栏展示用的自动区块列表。
+//
+// @param labels 当前主题语言下的侧边栏文案。
+// @returns 返回标签、页面、订阅三个自动区块。
+func defaultSidebarItemsForLabels(labels site.SidebarLabels) []site.MenuItem {
+	return []site.MenuItem{
+		{Type: site.SidebarSectionTypeTopics, Label: labels.TopicsTitle},
+		{Type: site.SidebarSectionTypePages, Label: labels.PagesTitle},
+		{Type: site.SidebarSectionTypeFeeds, Label: labels.FeedsTitle},
+	}
+}
+
+// defaultMenu 生成只读展示用的默认菜单结构。
+//
+// @param data 当前模板视图数据，用于读取页面列表和本地化导航标签。
+// @returns 返回固定 ID 的默认菜单。
+func defaultMenu(data ViewData) site.Menu {
+	menu := site.Menu{
+		ID:   defaultThemeMenuID,
+		Name: messageFromViewData(data, "theme_settings.locations.default", "Default menu"),
+		Items: []site.MenuItem{
+			{Type: "home", Label: messageFromViewData(data, "nav.front_page", "Front Page")},
+			{Type: "archive", Label: messageFromViewData(data, "nav.archive", "Archive")},
+			{Type: "tags", Label: messageFromViewData(data, "nav.topics", "Topics")},
+			{Type: "search", Label: messageFromViewData(data, "nav.search", "Search")},
+		},
+	}
+	if data.Store != nil {
+		for _, page := range data.Store.Pages {
+			menu.Items = append(menu.Items, site.MenuItem{Type: "page", Label: page.Title, Target: page.Slug})
+		}
+	}
+	menu.Items = append(menu.Items, site.MenuItem{Type: "admin", Label: messageFromViewData(data, "nav.admin", "Admin")})
+	return menu
+}
+
+// menuLinksFromMenu 把可编辑菜单项解析成前台链接。
+//
+// @param store 当前站点 Store，用于解析页面、文章、标签等目标。
+// @param menu 要解析的菜单。
+// @returns 返回过滤无效项后的菜单链接。
+func menuLinksFromMenu(store *site.Store, menu site.Menu) []site.MenuLink {
+	if store == nil {
+		return nil
+	}
+	links := make([]site.MenuLink, 0, len(menu.Items))
+	for _, item := range menu.Items {
+		if link, ok := store.ResolveMenuItem(item); ok {
+			links = append(links, link)
+		}
+	}
+	return links
 }
 
 func menuContentOptions(store *site.Store) map[string]any {

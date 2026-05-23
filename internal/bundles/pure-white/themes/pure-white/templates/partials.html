@@ -4,7 +4,7 @@
 {{$pureWhiteEditionLine := .Store.ThemeStringSetting "pure-white" "hero_subtitle" (siteEditionLine .)}}
 {{$pureWhiteBrandScale := .Store.ThemeFloatSetting "pure-white" "hero_title_scale" 1}}
 {{$pureWhiteEditionLineScale := .Store.ThemeFloatSetting "pure-white" "hero_subtitle_scale" 1}}
-<div class="site-shell" style="--pure-brand-scale: {{$pureWhiteBrandScale}}; --pure-edition-scale: {{$pureWhiteEditionLineScale}};{{if .Store.Settings.HomeImage.Enabled}} --home-image-src: url('{{.Store.Settings.HomeImage.Src}}');{{end}}">
+<div class="site-shell {{if sidebarSections .}}site-shell--with-sidebar{{else}}site-shell--no-sidebar{{end}}" style="width: 100vw; inline-size: 100vw; max-width: none; max-inline-size: none; margin: 0; --pure-brand-scale: {{$pureWhiteBrandScale}}; --pure-edition-scale: {{$pureWhiteEditionLineScale}};{{if .Store.Settings.HomeImage.Enabled}} --home-image-src: url('{{.Store.Settings.HomeImage.Src}}');{{end}}">
   <header class="newspaper-header">
     <a class="brand compact-brand" href="/">{{$pureWhiteBrand}}</a>
     <div class="edition-line">
