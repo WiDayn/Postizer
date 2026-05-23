@@ -1769,6 +1769,39 @@
     padding: .75rem;
   }
 
+  #customSidebarSettings #sidebarSectionList > .menu-structure-item > .menu-structure-item__fields > .menu-structure-detail-area {
+    /*
+     * 只让自定义侧边栏右侧“顶层详情区”统一承担滚动。
+     * 这里必须用直接子级选择器，避免影响自定义项内部复用的详情区。
+     * 这样自定义项较多时，滚轮出现在整个编辑大区域上，而不是只挤在自定义项小列表里。
+     */
+    display: block;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  #customSidebarSettings #sidebarSectionList > .menu-structure-item > .menu-structure-item__fields > .menu-structure-detail-area > .sidebar-custom-editor {
+    /*
+     * 外层详情区已经负责滚动，内部编辑器不能在 flex 容器中被压缩；
+     * 否则列表内容会溢出自己的网格行，和下面的当前项编辑器重叠。
+     */
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  #customSidebarSettings #sidebarSectionList > .menu-structure-item > .menu-structure-item__fields > .menu-structure-detail-area .menu-detail-option-list {
+    /*
+     * 右侧大框滚动后，内部所有选项列表都按内容撑开。
+     * 这会移除自定义项列表和子详情内容列表的小滚轮，避免多层滚动互相抢滚轮事件。
+     */
+    flex: 0 0 auto;
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
   .menu-detail-option-list {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -1827,7 +1860,11 @@
   }
 
   .sidebar-custom-editor {
-    grid-template-rows: auto minmax(6rem, .7fr) minmax(10rem, 1fr);
+    /*
+     * 自定义项列表和当前项表单按内容自然排布；
+     * 高度超出时由外层 .menu-structure-detail-area 负责滚动，避免出现嵌套小滚轮。
+     */
+    grid-template-rows: auto auto auto;
   }
 
   .sidebar-custom-editor__actions,
@@ -1839,7 +1876,10 @@
   }
 
   .sidebar-custom-editor__list {
-    max-height: 10rem;
+    flex: 0 0 auto;
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .menu-structure-panel .theme-settings-actions {
