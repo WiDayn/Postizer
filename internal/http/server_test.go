@@ -1351,6 +1351,131 @@ func TestUpdateMenusSavesCustomSidebars(t *testing.T) {
 	}
 }
 
+func TestUpdateMenusPreservesSidebarsWhenPayloadOmitsSidebars(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store: &site.Store{Settings: site.Settings{ThemeSettings: site.ThemeSettings{
+			Sidebars: []site.Menu{
+				{
+					ID:   "existing-sidebar",
+					Name: "Existing Sidebar",
+					Items: []site.MenuItem{
+						{Type: site.SidebarSectionTypeFeeds, Label: "Feeds"},
+					},
+				},
+			},
+		}}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/menus", bytes.NewBufferString(`{
+  "menus": [
+    {
+      "id": "main",
+      "name": "Main",
+      "items": []
+    }
+  ]
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateMenus(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateMenus status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.ThemeSettings.Menus) != 1 {
+		t.Fatalf("menus = %#v, want one updated menu", settings.ThemeSettings.Menus)
+	}
+	if got, want := settings.ThemeSettings.Menus[0].ID, "main"; got != want {
+		t.Fatalf("menu id = %q, want %q", got, want)
+	}
+	if len(settings.ThemeSettings.Sidebars) != 1 {
+		t.Fatalf("sidebars = %#v, want existing sidebar preserved", settings.ThemeSettings.Sidebars)
+	}
+	sidebar := settings.ThemeSettings.Sidebars[0]
+	if got, want := sidebar.ID, "existing-sidebar"; got != want {
+		t.Fatalf("sidebar id = %q, want %q", got, want)
+	}
+	if len(sidebar.Items) != 1 {
+		t.Fatalf("sidebar items = %#v, want one preserved item", sidebar.Items)
+	}
+	if got, want := sidebar.Items[0].Type, site.SidebarSectionTypeFeeds; got != want {
+		t.Fatalf("sidebar item type = %q, want %q", got, want)
+	}
+}
+
+func TestUpdateMenusClearsSidebarsWhenPayloadIncludesEmptySidebars(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	contentRoot := t.TempDir()
+	s := &Server{
+		store: &site.Store{Settings: site.Settings{ThemeSettings: site.ThemeSettings{
+			Sidebars: []site.Menu{
+				{
+					ID:   "existing-sidebar",
+					Name: "Existing Sidebar",
+					Items: []site.MenuItem{
+						{Type: site.SidebarSectionTypeFeeds, Label: "Feeds"},
+					},
+				},
+			},
+		}}},
+		contentRoot:        contentRoot,
+		builtinBundlesRoot: filepath.Join("internal", "bundles"),
+		userContentRoot:    contentRoot,
+		userBundlesRoot:    filepath.Join(contentRoot, "bundles"),
+	}
+	request := httptest.NewRequest("POST", "/admin/api/menus", bytes.NewBufferString(`{
+  "menus": [],
+  "sidebars": []
+}`))
+	response := httptest.NewRecorder()
+
+	s.updateMenus(response, request)
+
+	if response.Code != 200 {
+		t.Fatalf("updateMenus status = %d, body = %s", response.Code, response.Body.String())
+	}
+	settings, err := site.LoadSettings(contentRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.ThemeSettings.Sidebars) != 0 {
+		t.Fatalf("sidebars = %#v, want explicit empty sidebars saved", settings.ThemeSettings.Sidebars)
+	}
+}
+
 // TestUpdateMenusNormalizesBareURLLink 覆盖后台菜单保存接口的自定义链接输入。
 //
 // 前端菜单编辑器会发送 main.type/main.url 新结构。用户输入裸域名时，接口应保存为

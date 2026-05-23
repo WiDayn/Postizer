@@ -1602,16 +1602,31 @@ func (s *Server) updateMediaProcessingSettings(w http.ResponseWriter, r *http.Re
 	writeJSON(w, s.currentStore().Settings.MediaProcessing)
 }
 
+// updateMenusPayload 表示后台菜单编辑器提交的增量保存请求。
+//
+// 设计说明：
+// Menus 和 Sidebars 使用切片指针，是为了区分“字段没有提交”和“字段提交为空列表”：
+// - nil 表示旧客户端或分区保存没有提交该字段，应保留当前配置。
+// - 非 nil 但长度为 0 表示用户明确删除了该类自定义结构，应保存为空列表。
+type updateMenusPayload struct {
+	Menus    *[]site.Menu `json:"menus"`
+	Sidebars *[]site.Menu `json:"sidebars"`
+}
+
 func (s *Server) updateMenus(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	var payload site.ThemeSettings
+	var payload updateMenusPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	settings := s.currentStore().Settings
-	settings.ThemeSettings.Menus = filterPersistedMenus(payload.Menus)
-	settings.ThemeSettings.Sidebars = filterPersistedSidebars(payload.Sidebars)
+	if payload.Menus != nil {
+		settings.ThemeSettings.Menus = filterPersistedMenus(*payload.Menus)
+	}
+	if payload.Sidebars != nil {
+		settings.ThemeSettings.Sidebars = filterPersistedSidebars(*payload.Sidebars)
+	}
 	if err := site.SaveSettings(s.contentRoot, settings); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
