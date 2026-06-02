@@ -1718,7 +1718,12 @@ func (s *Server) installResourceMarketplaceItem(w http.ResponseWriter, r *http.R
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	if err := marketplace.VerifyReleaseAsset(item, body); err != nil {
+	checksumBody, checksumURL, err := marketplace.DownloadReleaseChecksums(r.Context(), s.marketplaceClient, item)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if err := marketplace.VerifyReleaseAsset(item, body, checksumBody); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -1737,8 +1742,9 @@ func (s *Server) installResourceMarketplaceItem(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, map[string]any{
-		"installed": installed,
-		"asset_url": assetURL,
+		"installed":    installed,
+		"asset_url":    assetURL,
+		"checksum_url": checksumURL,
 	})
 }
 

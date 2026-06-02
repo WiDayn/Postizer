@@ -18,10 +18,12 @@ import (
 )
 
 const (
-	SchemaVersion        = 1
-	MaxIndexBytes        = 1 << 20
-	MaxReleaseAssetBytes = 32 << 20
-	DefaultPackIndexURL  = "https://raw.githubusercontent.com/WiDayn/Postizer/main/marketplace/packs/index.json"
+	SchemaVersion           = 1
+	MaxIndexBytes           = 1 << 20
+	MaxReleaseAssetBytes    = 32 << 20
+	MaxReleaseChecksumBytes = 1 << 20
+	ReleaseChecksumAsset    = "SHA256SUMS"
+	DefaultPackIndexURL     = "https://raw.githubusercontent.com/WiDayn/Postizer/main/marketplace/packs/index.json"
 )
 
 type Index struct {
@@ -52,9 +54,8 @@ type PackMember struct {
 }
 
 type Release struct {
-	Tag    string `json:"tag"`
-	Asset  string `json:"asset"`
-	SHA256 string `json:"sha256"`
+	Tag   string `json:"tag"`
+	Asset string `json:"asset"`
 }
 
 func LoadIndex(ctx context.Context, source string, client *http.Client) (Index, error) {
@@ -89,6 +90,18 @@ func FindPack(index Index, id string) (PackItem, bool) {
 }
 
 func ReleaseAssetURL(item PackItem) (string, error) {
+	asset := strings.TrimSpace(item.Release.Asset)
+	if !validReleaseAssetName(asset) {
+		return "", fmt.Errorf("release asset must be a .zip filename: %q", asset)
+	}
+	return releaseAssetURL(item, asset)
+}
+
+func ReleaseChecksumURL(item PackItem) (string, error) {
+	return releaseAssetURL(item, ReleaseChecksumAsset)
+}
+
+func releaseAssetURL(item PackItem, asset string) (string, error) {
 	slug, err := GitHubRepoSlug(item.Repo)
 	if err != nil {
 		return "", err
@@ -97,9 +110,8 @@ func ReleaseAssetURL(item PackItem) (string, error) {
 	if !validReleaseTag(tag) {
 		return "", fmt.Errorf("release tag must match vX.X.X: %q", tag)
 	}
-	asset := strings.TrimSpace(item.Release.Asset)
-	if !validReleaseAssetName(asset) {
-		return "", fmt.Errorf("release asset must be a .zip filename: %q", asset)
+	if !validReleaseDownloadName(asset) {
+		return "", fmt.Errorf("release asset filename is invalid: %q", asset)
 	}
 	return "https://github.com/" + slug + "/releases/download/" + url.PathEscape(tag) + "/" + url.PathEscape(asset), nil
 }
@@ -109,6 +121,26 @@ func DownloadReleaseAsset(ctx context.Context, client *http.Client, item PackIte
 	if err != nil {
 		return nil, "", err
 	}
+	body, err := downloadReleaseURL(ctx, client, assetURL, MaxReleaseAssetBytes, "download release asset")
+	if err != nil {
+		return nil, "", err
+	}
+	return body, assetURL, nil
+}
+
+func DownloadReleaseChecksums(ctx context.Context, client *http.Client, item PackItem) ([]byte, string, error) {
+	checksumURL, err := ReleaseChecksumURL(item)
+	if err != nil {
+		return nil, "", err
+	}
+	body, err := downloadReleaseURL(ctx, client, checksumURL, MaxReleaseChecksumBytes, "download release checksums")
+	if err != nil {
+		return nil, "", err
+	}
+	return body, checksumURL, nil
+}
+
+func downloadReleaseURL(ctx context.Context, client *http.Client, assetURL string, limit int64, label string) ([]byte, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -117,29 +149,28 @@ func DownloadReleaseAsset(ctx context.Context, client *http.Client, item PackIte
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	request.Header.Set("User-Agent", "Postizer Resource Marketplace")
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, "", fmt.Errorf("download release asset: %w", err)
+		return nil, fmt.Errorf("%s: %w", label, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, "", fmt.Errorf("download release asset: GitHub returned %s", response.Status)
+		return nil, fmt.Errorf("%s: GitHub returned %s", label, response.Status)
 	}
-	body, err := readLimited(response.Body, MaxReleaseAssetBytes)
+	body, err := readLimited(response.Body, limit)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return body, assetURL, nil
+	return body, nil
 }
 
-func VerifyReleaseAsset(item PackItem, body []byte) error {
-	want := strings.ToLower(strings.TrimSpace(item.Release.SHA256))
-	decoded, err := hex.DecodeString(want)
-	if err != nil || len(decoded) != sha256.Size {
-		return fmt.Errorf("invalid sha256 for resource pack %q", item.ID)
+func VerifyReleaseAsset(item PackItem, body, checksumBody []byte) error {
+	want, err := releaseAssetChecksum(item.Release.Asset, checksumBody)
+	if err != nil {
+		return fmt.Errorf("verify checksum for resource pack %q: %w", item.ID, err)
 	}
 	sum := sha256.Sum256(body)
 	got := hex.EncodeToString(sum[:])
@@ -147,6 +178,29 @@ func VerifyReleaseAsset(item PackItem, body []byte) error {
 		return fmt.Errorf("sha256 mismatch for resource pack %q", item.ID)
 	}
 	return nil
+}
+
+func releaseAssetChecksum(asset string, checksumBody []byte) (string, error) {
+	asset = strings.TrimSpace(asset)
+	for lineNumber, rawLine := range strings.Split(string(checksumBody), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if len(line) < sha256.Size*2+1 {
+			return "", fmt.Errorf("%s line %d is invalid", ReleaseChecksumAsset, lineNumber+1)
+		}
+		digest := strings.ToLower(line[:sha256.Size*2])
+		if err := validateSHA256(digest); err != nil {
+			return "", fmt.Errorf("%s line %d has an invalid SHA-256 digest", ReleaseChecksumAsset, lineNumber+1)
+		}
+		filename := strings.TrimSpace(line[sha256.Size*2:])
+		filename = strings.TrimPrefix(filename, "*")
+		if filename == asset {
+			return digest, nil
+		}
+	}
+	return "", fmt.Errorf("%s does not include checksum for %q", ReleaseChecksumAsset, asset)
 }
 
 func GitHubRepoSlug(repo string) (string, error) {
@@ -279,9 +333,6 @@ func validateIndex(index *Index) error {
 		if _, err := ReleaseAssetURL(item); err != nil {
 			return fmt.Errorf("items[%d].release: %w", i, err)
 		}
-		if err := validateSHA256(item.Release.SHA256); err != nil {
-			return fmt.Errorf("items[%d].release.sha256: %w", i, err)
-		}
 		if item.MinPostizer != "" && !validLooseVersion(item.MinPostizer) {
 			return fmt.Errorf("items[%d].min_postizer must match X.X.X or vX.X.X", i)
 		}
@@ -301,7 +352,6 @@ func normalizePackItem(item PackItem) PackItem {
 	item.Plugins = normalizePackMembers(item.Plugins)
 	item.Release.Tag = strings.TrimSpace(item.Release.Tag)
 	item.Release.Asset = strings.TrimSpace(item.Release.Asset)
-	item.Release.SHA256 = strings.ToLower(strings.TrimSpace(item.Release.SHA256))
 	item.MinPostizer = strings.TrimSpace(item.MinPostizer)
 
 	tags := make([]string, 0, len(item.Tags))
@@ -478,6 +528,14 @@ func validReleaseAssetName(value string) bool {
 		return false
 	}
 	return !strings.ContainsAny(value, `/\`) && !containsControl(value)
+}
+
+func validReleaseDownloadName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == ReleaseChecksumAsset {
+		return true
+	}
+	return validReleaseAssetName(value)
 }
 
 func validReleaseTag(value string) bool {

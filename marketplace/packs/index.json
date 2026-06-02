@@ -8,7 +8,6 @@
       "summary": "Export posts, pages, and media as a downloadable ZIP archive.",
       "description": "Adds an admin plugin action that packages Postizer content, page files, media metadata, and media files into a single ZIP export.",
       "repo": "https://github.com/widayn/postizer-content-exporter",
-      "preview": "",
       "tags": [
         "plugin",
         "exporter"
@@ -24,8 +23,7 @@
       ],
       "release": {
         "tag": "v1.0.0",
-        "asset": "content-exporter-v1.0.0.zip",
-        "sha256": "93e144e471e9ae5d2892a8cfccc758214894b9ea17e89816ed5b31d543f461fe"
+        "asset": "content-exporter-v1.0.0.zip"
       },
       "min_postizer": "v0.1.4"
     }

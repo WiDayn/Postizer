@@ -31,16 +31,17 @@ Entries belong in `packs/index.json`:
   ],
   "release": {
     "tag": "v1.0.0",
-    "asset": "editorial-tools-v1.0.0.zip",
-    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    "asset": "editorial-tools-v1.0.0.zip"
   },
   "min_postizer": "v0.1.4"
 }
 ```
 
-Release assets must be `.zip` bundle packs with a top-level `manifest.json`.
-The top-level manifest must use the same `id` as the index entry and its
-`source_url` must point to the indexed GitHub repository.
+Release assets must include the `.zip` bundle pack and a `SHA256SUMS` file in
+the same GitHub Release. Postizer verifies the ZIP against the matching
+`SHA256SUMS` line before installing it. The top-level manifest must use the same
+`id` as the index entry and its `source_url` must point to the indexed GitHub
+repository.
 
 Use the `theme` and `plugin` tags to describe what the bundle contains. The
 admin UI currently exposes those two tags as the built-in filters.
