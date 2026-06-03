@@ -10,6 +10,7 @@ import (
 	"html/template"
 	"io/fs"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -62,6 +63,9 @@ const (
 	ThemeSettingTypeInteger = "integer"
 	ThemeSettingTypeFloat   = "float"
 
+	defaultThemeMenuID = "default-menu"
+
+	currentSettingsVersion            = "v0.1.5"
 	legacyPureWhiteHeroTitlePrefix    = "pure-white-hero-title-"
 	legacyPureWhiteHeroSubtitlePrefix = "pure-white-hero-subtitle-"
 )
@@ -81,6 +85,7 @@ type Store struct {
 }
 
 type Settings struct {
+	Version         string               `json:"version,omitempty"`
 	SiteTitle       SiteTitle            `json:"site_title"`
 	Permalinks      PermalinkSettings    `json:"permalinks"`
 	AutoUpdate      AutoUpdateSettings   `json:"auto_update"`
@@ -133,6 +138,8 @@ type MediaProcessing struct {
 type ThemeSettings struct {
 	Menus         []Menu              `json:"menus"`
 	MenuLocations map[string]string   `json:"menu_locations"`
+	Sidebars      []Menu              `json:"sidebars"`
+	Sidebar       *string             `json:"sidebar,omitempty"`
 	Custom        ThemeCustomSettings `json:"custom,omitempty"`
 }
 
@@ -278,15 +285,120 @@ type Menu struct {
 }
 
 type MenuItem struct {
+	Type   string     `json:"-"`
+	Label  string     `json:"-"`
+	Target string     `json:"-"`
+	URL    string     `json:"-"`
+	Items  []MenuItem `json:"-"`
+}
+
+// MenuItemMain 保存菜单项真正指向的资源信息。
+//
+// 设计说明：
+// - label 留在 MenuItem 顶层，表示后台结构里显示的名称。
+// - main 聚合 type/target/url，避免 settings.json 里菜单项字段继续扁平扩散。
+// - Go 内部仍保留 MenuItem.Type/MenuItem.Target/MenuItem.URL，减少调用点改动。
+type MenuItemMain struct {
 	Type   string `json:"type"`
-	Label  string `json:"label"`
-	Target string `json:"target"`
-	URL    string `json:"url"`
+	Target string `json:"target,omitempty"`
+	URL    string `json:"url,omitempty"`
+}
+
+// MarshalJSON 把菜单项写成新的 settings.json 结构。
+//
+// @returns 返回形如 {"label":"内容","main":{"type":"page","target":"about"}} 的 JSON。
+func (item MenuItem) MarshalJSON() ([]byte, error) {
+	payload := struct {
+		Label string       `json:"label"`
+		Main  MenuItemMain `json:"main"`
+		Items []MenuItem   `json:"items,omitempty"`
+	}{
+		Label: item.Label,
+		Main: MenuItemMain{
+			Type:   item.Type,
+			Target: item.Target,
+			URL:    item.URL,
+		},
+	}
+	if len(item.Items) > 0 {
+		payload.Items = item.Items
+	}
+	return json.Marshal(payload)
+}
+
+// UnmarshalJSON 读取新旧两种菜单项结构。
+//
+// 兼容策略：
+// - 新结构优先读取 main.type/main.target/main.url。
+// - 如果没有 main，则读取旧版顶层 type/target/url。
+//
+// @param body settings.json 中单个菜单项的 JSON 内容。
+// @returns 解析失败时返回 JSON 错误。
+func (item *MenuItem) UnmarshalJSON(body []byte) error {
+	var raw struct {
+		Label  string        `json:"label"`
+		Main   *MenuItemMain `json:"main"`
+		Type   string        `json:"type"`
+		Target string        `json:"target"`
+		URL    string        `json:"url"`
+		Items  []MenuItem    `json:"items"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return err
+	}
+	main := MenuItemMain{
+		Type:   raw.Type,
+		Target: raw.Target,
+		URL:    raw.URL,
+	}
+	if raw.Main != nil {
+		main = *raw.Main
+	}
+	*item = MenuItem{
+		Type:   main.Type,
+		Label:  raw.Label,
+		Target: main.Target,
+		URL:    main.URL,
+		Items:  raw.Items,
+	}
+	return nil
 }
 
 type MenuLink struct {
 	Label string
 	URL   string
+	Count int
+}
+
+type SidebarLinkSection struct {
+	Type  string
+	Title string
+	Links []MenuLink
+}
+
+const (
+	SidebarSectionTypeNone        = ""
+	SidebarSectionTypeCustom      = "custom"
+	SidebarSectionTypeTopics      = "topics"
+	SidebarSectionTypePages       = "pages"
+	SidebarSectionTypeFeeds       = "feeds"
+	SidebarSectionTypeRecentPosts = "recent-posts"
+)
+
+const recentSidebarPostLimit = 5
+
+// SidebarLabels 保存侧边栏自动区块的默认标题和链接标签。
+//
+// Store 本身不持有当前主题语言；模板渲染时会传入本地化文案，纯 Store 测试
+// 则使用这里的中文默认值。
+type SidebarLabels struct {
+	TopicsTitle      string
+	PagesTitle       string
+	FeedsTitle       string
+	RecentPostsTitle string
+	CustomTitle      string
+	RSSLabel         string
+	SitemapLabel     string
 }
 
 type Post struct {
@@ -508,6 +620,315 @@ func (s *Store) MenuLocationAssigned(location string) bool {
 	return ok
 }
 
+// SidebarSections 使用默认文案解析前台右侧栏区块。
+//
+// @returns 返回可渲染的侧边栏区块列表。
+func (s *Store) SidebarSections() []SidebarLinkSection {
+	return s.SidebarSectionsWithLabels(DefaultSidebarLabels())
+}
+
+// DefaultSidebarLabels 返回侧边栏自动区块默认文案。
+//
+// @returns 返回中文默认文案；模板渲染时通常会用当前语言覆盖。
+func DefaultSidebarLabels() SidebarLabels {
+	return SidebarLabels{
+		TopicsTitle:      "标签",
+		PagesTitle:       "页面",
+		FeedsTitle:       "订阅",
+		RecentPostsTitle: "最近文章",
+		CustomTitle:      "自定义区域",
+		RSSLabel:         "RSS",
+		SitemapLabel:     "站点地图",
+	}
+}
+
+// SidebarSectionsWithLabels 解析前台右侧栏区块。
+//
+// 设计说明：
+//   - settings.theme_settings.sidebars 仍然表示“侧边栏列表”，和自定义菜单列表一致。
+//   - 每个侧边栏的 items 才表示这个侧边栏里的区块列表，例如标签、页面、订阅、
+//     最近文章和自定义区域。
+//   - theme_settings.sidebar 和菜单投放一样控制实际使用哪个侧边栏：nil 表示默认
+//     侧边栏，空字符串表示不使用侧边栏，其他值表示自定义侧边栏 ID。
+//   - 旧数据的 items 是直接链接而不是区块；这里只会把旧链接包装成一个自定义区域，
+//     不额外插入默认区块。
+//
+// @param labels 当前语言的侧边栏文案。
+// @returns 返回过滤失效链接后的可渲染区块。
+func (s *Store) SidebarSectionsWithLabels(labels SidebarLabels) []SidebarLinkSection {
+	if s == nil {
+		return nil
+	}
+	labels = labels.withDefaults()
+	sidebars := s.selectedSidebarMenus(labels)
+	if len(sidebars) == 0 {
+		return nil
+	}
+	sections := make([]SidebarLinkSection, 0, len(sidebars)*4)
+	for _, sidebar := range sidebars {
+		items := sidebar.Items
+		if legacySidebarItems(items) {
+			items = []MenuItem{{
+				Type:  SidebarSectionTypeCustom,
+				Label: strings.TrimSpace(sidebar.Name),
+				Items: normalizeLegacySidebarMenuItems(items),
+			}}
+		} else {
+			items = normalizeSidebarCollectionItems(items)
+		}
+		for _, item := range items {
+			if section, ok := s.resolveSidebarSectionItem(item, labels); ok {
+				sections = append(sections, section)
+			}
+		}
+	}
+	return sections
+}
+
+// selectedSidebarMenus 返回当前主题设置实际投放的侧边栏。
+//
+// @param labels 当前语言的默认标题文案。
+// @returns 返回一个待解析的侧边栏；显式禁用或无效选择时返回空切片。
+func (s *Store) selectedSidebarMenus(labels SidebarLabels) []Menu {
+	selected := s.Settings.ThemeSettings.Sidebar
+	if selected == nil {
+		return []Menu{defaultSidebarMenu(labels)}
+	}
+	sidebarID := normalizeMenuID(*selected)
+	if sidebarID == "" {
+		return nil
+	}
+	for _, sidebar := range s.Settings.ThemeSettings.Sidebars {
+		if sidebar.ID == sidebarID {
+			return []Menu{sidebar}
+		}
+	}
+	return nil
+}
+
+// withDefaults 补齐调用方没有提供的侧边栏文案。
+//
+// @returns 返回所有字段都有值的文案集合。
+func (labels SidebarLabels) withDefaults() SidebarLabels {
+	defaults := DefaultSidebarLabels()
+	if strings.TrimSpace(labels.TopicsTitle) == "" {
+		labels.TopicsTitle = defaults.TopicsTitle
+	}
+	if strings.TrimSpace(labels.PagesTitle) == "" {
+		labels.PagesTitle = defaults.PagesTitle
+	}
+	if strings.TrimSpace(labels.FeedsTitle) == "" {
+		labels.FeedsTitle = defaults.FeedsTitle
+	}
+	if strings.TrimSpace(labels.RecentPostsTitle) == "" {
+		labels.RecentPostsTitle = defaults.RecentPostsTitle
+	}
+	if strings.TrimSpace(labels.CustomTitle) == "" {
+		labels.CustomTitle = defaults.CustomTitle
+	}
+	if strings.TrimSpace(labels.RSSLabel) == "" {
+		labels.RSSLabel = defaults.RSSLabel
+	}
+	if strings.TrimSpace(labels.SitemapLabel) == "" {
+		labels.SitemapLabel = defaults.SitemapLabel
+	}
+	return labels
+}
+
+// defaultSidebarMenu 返回没有任何侧边栏配置时的默认侧边栏。
+//
+// @param labels 当前语言的默认标题文案。
+// @returns 返回一个包含默认区块的侧边栏。
+func defaultSidebarMenu(labels SidebarLabels) Menu {
+	return Menu{
+		ID:    "default-sidebar",
+		Name:  labels.CustomTitle,
+		Items: defaultSidebarItems(labels),
+	}
+}
+
+// defaultSidebarItems 返回旧模板原本固定显示的侧边栏区块。
+//
+// @param labels 当前语言的默认标题文案。
+// @returns 返回话题、页面、订阅三个默认区块。
+func defaultSidebarItems(labels SidebarLabels) []MenuItem {
+	return []MenuItem{
+		{Type: SidebarSectionTypeTopics, Label: labels.TopicsTitle},
+		{Type: SidebarSectionTypePages, Label: labels.PagesTitle},
+		{Type: SidebarSectionTypeFeeds, Label: labels.FeedsTitle},
+	}
+}
+
+// legacySidebarItems 判断侧边栏 items 是否仍是旧版直接链接列表。
+//
+// @param items 侧边栏下保存的项目。
+// @returns 如果项目整体仍像旧版直接链接列表则返回 true。
+func legacySidebarItems(items []MenuItem) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		if !legacySidebarDirectMenuItem(item) {
+			return false
+		}
+	}
+	return true
+}
+
+// legacySidebarDirectMenuItem 判断项目是否是旧版侧边栏里的直接菜单链接。
+//
+// @param item 侧边栏中的一个项目。
+// @returns 如果该项目可按旧版菜单链接迁移则返回 true。
+func legacySidebarDirectMenuItem(item MenuItem) bool {
+	if legacySidebarDirectCustomLink(item) {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(item.Type)) {
+	case "page", "post", "tag", "tagindex", "url", "home", "archive", "tags", "search", "admin":
+		return true
+	default:
+		return false
+	}
+}
+
+// legacySidebarDirectCustomLink 判断项目是否是旧版侧边栏里的直接自定义链接。
+//
+// 设计说明：
+// 旧版侧边栏曾经和菜单一样直接保存链接，且自定义链接写作 type="custom"。
+// 新版 type="custom" 表示“自定义区块”，所以只有带地址、没有子项的 custom
+// 才能判断为旧链接；空的自定义区块或包含子链接的自定义区块仍保留为新版结构。
+//
+// @param item 侧边栏中的一个项目。
+// @returns 如果该项目应按旧版直接链接迁移则返回 true。
+func legacySidebarDirectCustomLink(item MenuItem) bool {
+	if !strings.EqualFold(strings.TrimSpace(item.Type), SidebarSectionTypeCustom) {
+		return false
+	}
+	if len(item.Items) > 0 {
+		return false
+	}
+	return strings.TrimSpace(item.URL) != "" || strings.TrimSpace(item.Target) != ""
+}
+
+// normalizeLegacySidebarMenuItems 把旧版侧边栏直接链接清洗为当前菜单链接结构。
+//
+// 设计说明：
+// 旧版侧边栏 items 保存的是菜单链接；这里先复用菜单旧自定义链接迁移，把
+// type="custom" 转成 type="url"，再走菜单链接归一化，确保裸链接、安全链接
+// 和失效链接的处理规则与菜单一致。
+//
+// @param items 旧版侧边栏直接链接列表。
+// @returns 返回可以挂到新版自定义区块中的链接列表。
+func normalizeLegacySidebarMenuItems(items []MenuItem) []MenuItem {
+	return normalizeMenuItems(migrateLegacyCustomMenuItems(items))
+}
+
+// normalizeSidebarCollectionItems 清洗单个侧边栏里的项目列表。
+//
+// 设计说明：
+// 新版侧边栏第一层应全部是区块。为了兼容手动编辑或开发版升级留下的混合结构，
+// 这里会把夹在新区块中的旧版直接链接收拢成自定义区块，避免链接地址在
+// normalizeSidebarSectionItems 阶段被当作区块字段清空。
+//
+// @param items settings.json 中单个侧边栏的 items。
+// @returns 返回可安全渲染和写回的新结构；纯旧版列表仍返回旧链接列表。
+func normalizeSidebarCollectionItems(items []MenuItem) []MenuItem {
+	if legacySidebarItems(items) {
+		return normalizeLegacySidebarMenuItems(items)
+	}
+	normalized := make([]MenuItem, 0, len(items))
+	legacyLinks := []MenuItem{}
+	flushLegacyLinks := func() {
+		links := normalizeLegacySidebarMenuItems(legacyLinks)
+		if len(links) > 0 {
+			normalized = append(normalized, MenuItem{
+				Type:  SidebarSectionTypeCustom,
+				Items: links,
+			})
+		}
+		legacyLinks = nil
+	}
+	for _, item := range items {
+		if legacySidebarDirectMenuItem(item) {
+			legacyLinks = append(legacyLinks, item)
+			continue
+		}
+		flushLegacyLinks()
+		normalized = append(normalized, normalizeSidebarSectionItems([]MenuItem{item})...)
+	}
+	flushLegacyLinks()
+	return normalized
+}
+
+// resolveSidebarSectionItem 把一个侧边栏区块解析为前台链接区块。
+//
+// @param item 侧边栏中的一个区块项目。
+// @param labels 当前语言的默认文案。
+// @returns 返回可渲染区块以及是否应该显示。
+func (s *Store) resolveSidebarSectionItem(item MenuItem, labels SidebarLabels) (SidebarLinkSection, bool) {
+	sectionType := normalizeSidebarSectionType(item.Type)
+	title := strings.TrimSpace(item.Label)
+	if title == "" {
+		title = sidebarSectionTitle(sectionType, labels)
+	}
+	section := SidebarLinkSection{Type: sectionType, Title: title}
+	switch sectionType {
+	case SidebarSectionTypeTopics:
+		for _, tag := range s.Tags {
+			section.Links = append(section.Links, MenuLink{Label: tag.Title, URL: TagURL(s.Settings, tag), Count: len(tag.Posts)})
+		}
+	case SidebarSectionTypePages:
+		for _, page := range s.Pages {
+			section.Links = append(section.Links, MenuLink{Label: page.Title, URL: PageURL(s.Settings, page)})
+		}
+	case SidebarSectionTypeFeeds:
+		section.Links = []MenuLink{
+			{Label: labels.RSSLabel, URL: "/feed.xml"},
+			{Label: labels.SitemapLabel, URL: "/sitemap.xml"},
+		}
+	case SidebarSectionTypeRecentPosts:
+		for index, post := range s.Posts {
+			if index >= recentSidebarPostLimit {
+				break
+			}
+			section.Links = append(section.Links, MenuLink{Label: post.Title, URL: PostURL(s.Settings, post)})
+		}
+	default:
+		for _, child := range item.Items {
+			if link, ok := s.resolveMenuItem(child); ok {
+				section.Links = append(section.Links, link)
+			}
+		}
+		if title == "" || len(section.Links) == 0 {
+			return SidebarLinkSection{}, false
+		}
+	}
+	if title == "" {
+		return SidebarLinkSection{}, false
+	}
+	return section, true
+}
+
+// sidebarSectionTitle 返回侧边栏区块的默认标题。
+//
+// @param sectionType 区块类型。
+// @param labels 当前语言的默认文案。
+// @returns 返回对应标题。
+func sidebarSectionTitle(sectionType string, labels SidebarLabels) string {
+	switch normalizeSidebarSectionType(sectionType) {
+	case SidebarSectionTypeTopics:
+		return labels.TopicsTitle
+	case SidebarSectionTypePages:
+		return labels.PagesTitle
+	case SidebarSectionTypeFeeds:
+		return labels.FeedsTitle
+	case SidebarSectionTypeRecentPosts:
+		return labels.RecentPostsTitle
+	default:
+		return labels.CustomTitle
+	}
+}
+
 // ThemeSetting 读取指定主题的自定义设置。
 //
 // @param themeID 主题包 ID，例如 pure-white。
@@ -579,9 +1000,47 @@ func (s *Store) ThemeFloatSetting(themeID string, key string, fallback float64) 
 	}
 }
 
+// ResolveMenuItem 把后台保存的菜单项解析成前台可渲染链接。
+//
+// 设计说明：
+//   - Store.MenuLinks 会按菜单位置解析整个菜单；管理后台还需要复用同一套解析逻辑，
+//     例如渲染未绑定位置时的默认菜单结构。
+//   - 无效的内容目标或 URL 会返回 ok=false，由调用方决定是否过滤。
+//
+// @param item 后台保存的菜单项。
+// @returns 第一个返回值是可渲染链接，第二个返回值表示菜单项是否有效。
+func (s *Store) ResolveMenuItem(item MenuItem) (MenuLink, bool) {
+	return s.resolveMenuItem(item)
+}
+
 func (s *Store) resolveMenuItem(item MenuItem) (MenuLink, bool) {
 	label := strings.TrimSpace(item.Label)
 	switch strings.ToLower(strings.TrimSpace(item.Type)) {
+	case "home":
+		if label == "" {
+			label = "首页"
+		}
+		return MenuLink{Label: label, URL: "/"}, true
+	case "archive":
+		if label == "" {
+			label = "归档"
+		}
+		return MenuLink{Label: label, URL: "/archive"}, true
+	case "tags":
+		if label == "" {
+			label = "标签"
+		}
+		return MenuLink{Label: label, URL: "/tags"}, true
+	case "search":
+		if label == "" {
+			label = "搜索"
+		}
+		return MenuLink{Label: label, URL: "/search"}, true
+	case "admin":
+		if label == "" {
+			label = "后台"
+		}
+		return MenuLink{Label: label, URL: "/admin"}, true
 	case "page":
 		page := s.PagesBySlug[strings.TrimSpace(item.Target)]
 		if page == nil {
@@ -609,9 +1068,9 @@ func (s *Store) resolveMenuItem(item MenuItem) (MenuLink, bool) {
 			label = tag.Title
 		}
 		return MenuLink{Label: label, URL: TagURL(s.Settings, tag)}, true
-	case "custom":
-		url := strings.TrimSpace(item.URL)
-		if !ValidMenuURL(url) {
+	case "url":
+		url, ok := normalizeMenuURL(item.URL)
+		if !ok {
 			return MenuLink{}, false
 		}
 		if label == "" {
@@ -665,6 +1124,7 @@ func SaveSettings(root string, settings Settings) error {
 // defaultSettings 返回系统启动时应采用的默认设置。
 func defaultSettings() Settings {
 	return Settings{
+		Version:         currentSettingsVersion,
 		SiteTitle:       defaultSiteTitle(),
 		Permalinks:      defaultPermalinks(),
 		AutoUpdate:      defaultAutoUpdate(),
@@ -717,11 +1177,13 @@ func defaultMediaProcessing() MediaProcessing {
 // normalizeSettings 负责兼容旧字段，并补全新的默认值。
 //
 // 兼容策略：
-// 1. 如果旧版 `theme` 字段存在而新版主题包还没写入，则把它迁移到主题包选择。
-// 2. 如果旧版 `text_pack` 存在，则迁移成主题语言或插件顺序。
-// 3. 无论来源如何，都会补上默认主题包 ID，并清洗插件顺序里的空值和重复值。
+// 1. 先读取旧 settings 版本，用它决定是否执行版本限定的数据迁移。
+// 2. 如果旧版 `theme` 字段存在而新版主题包还没写入，则把它迁移到主题包选择。
+// 3. 如果旧版 `text_pack` 存在，则迁移成主题语言或插件顺序。
+// 4. 无论来源如何，都会补上默认主题包 ID，并清洗插件顺序里的空值和重复值。
 func normalizeSettings(settings *Settings) {
 	defaults := defaultSettings()
+	sourceVersion := strings.TrimSpace(settings.Version)
 
 	if strings.TrimSpace(settings.ThemePack.PackID) == "" {
 		switch strings.TrimSpace(settings.Theme) {
@@ -746,6 +1208,7 @@ func normalizeSettings(settings *Settings) {
 	settings.AutoUpdate = normalizeAutoUpdate(settings.AutoUpdate)
 	settings.Comments = normalizeCommentSettings(settings.Comments)
 	settings.HomePage = normalizeHomePageSettings(settings.HomePage)
+	settings.Version = normalizedSettingsVersion(sourceVersion)
 
 	// 旧版文字包迁移：
 	// - 只有旧配置明确启用了 text_pack，才把它迁移到新外观系统。
@@ -1115,32 +1578,104 @@ func normalizePluginOrder(values []string) []string {
 	return normalized
 }
 
-func normalizeThemeSettings(settings ThemeSettings) ThemeSettings {
-	menus := make([]Menu, 0, len(settings.Menus))
-	menuIDs := map[string]bool{}
-	for index, menu := range settings.Menus {
-		name := strings.TrimSpace(menu.Name)
-		id := normalizeMenuID(menu.ID)
-		if id == "" {
-			id = normalizeMenuID(name)
-		}
-		if id == "" {
-			id = fmt.Sprintf("menu-%d", index+1)
-		}
-		baseID := id
-		for suffix := 2; menuIDs[id]; suffix++ {
-			id = fmt.Sprintf("%s-%d", baseID, suffix)
-		}
-		menuIDs[id] = true
-		if name == "" {
-			name = id
-		}
-		menus = append(menus, Menu{
-			ID:    id,
-			Name:  name,
-			Items: normalizeMenuItems(menu.Items),
-		})
+// normalizedSettingsVersion 返回当前应用应写回 settings.json 的配置版本。
+//
+// 设计说明：
+//   - 老版本 settings.json 没有版本字段，保存后写入当前配置版本，后续启动就不会
+//     重复执行只面向旧结构的迁移。
+//   - 如果将来新版程序写入了更高版本，旧程序不应把版本号降级，避免破坏后续迁移判断。
+//
+// @param value settings.json 中读到的版本号。
+// @returns 返回应写回 settings.json 的版本号。
+func normalizedSettingsVersion(value string) string {
+	value = strings.TrimSpace(value)
+	if compare, ok := compareSettingsVersions(value, currentSettingsVersion); ok && compare > 0 {
+		return value
 	}
+	return currentSettingsVersion
+}
+
+// settingsVersionAtOrBefore 判断 settings.json 是否不晚于某个迁移版本。
+//
+// @param version settings.json 中保存的版本；空值表示旧版未记录版本。
+// @param target 迁移上限版本，格式为 vX.Y.Z。
+// @returns 版本缺失、无法解析或小于等于 target 时返回 true。
+func settingsVersionAtOrBefore(version, target string) bool {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return true
+	}
+	compare, ok := compareSettingsVersions(version, target)
+	if !ok {
+		return true
+	}
+	return compare <= 0
+}
+
+// compareSettingsVersions 比较两个 Postizer 版本号。
+//
+// @param left 左侧版本号，支持 vX.Y.Z 或 X.Y.Z。
+// @param right 右侧版本号，支持 vX.Y.Z 或 X.Y.Z。
+// @returns 返回 -1/0/1 表示 left 小于/等于/大于 right；解析失败时 ok=false。
+func compareSettingsVersions(left, right string) (result int, ok bool) {
+	leftParts, ok := parseSettingsVersion(left)
+	if !ok {
+		return 0, false
+	}
+	rightParts, ok := parseSettingsVersion(right)
+	if !ok {
+		return 0, false
+	}
+	for index := range leftParts {
+		if leftParts[index] < rightParts[index] {
+			return -1, true
+		}
+		if leftParts[index] > rightParts[index] {
+			return 1, true
+		}
+	}
+	return 0, true
+}
+
+// parseSettingsVersion 把 vX.Y.Z 版本号解析为三段整数。
+//
+// @param value 待解析版本号。
+// @returns 返回三段版本号；格式无效时 ok=false。
+func parseSettingsVersion(value string) ([3]int, bool) {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return [3]int{}, false
+	}
+	var parsed [3]int
+	for index, part := range parts {
+		number, err := strconv.Atoi(part)
+		if err != nil || number < 0 {
+			return [3]int{}, false
+		}
+		parsed[index] = number
+	}
+	return parsed, true
+}
+
+// normalizeThemeSettings 清洗主题菜单、菜单位置、侧边栏和主题自定义设置。
+//
+// @param settings settings.json 中读取到的主题设置。
+// @returns 返回可供运行时使用并可安全写回 settings.json 的主题设置。
+func normalizeThemeSettings(settings ThemeSettings) ThemeSettings {
+	settings.Menus = migrateLegacyCustomMenuLinks(settings.Menus)
+	menus := normalizeMenuCollection(settings.Menus, "menu")
+	menuIDs := map[string]bool{}
+	for _, menu := range menus {
+		menuIDs[menu.ID] = true
+	}
+
+	sidebars := normalizeSidebarCollection(settings.Sidebars, "sidebar")
+	sidebarIDs := map[string]bool{}
+	for _, sidebar := range sidebars {
+		sidebarIDs[sidebar.ID] = true
+	}
+	sidebar := normalizeSidebarSelection(settings.Sidebar, sidebarIDs)
 
 	custom := normalizeThemeCustomSettings(settings.Custom)
 	custom = migrateLegacyPureWhiteHeroSettings(settings.MenuLocations, custom)
@@ -1156,13 +1691,150 @@ func normalizeThemeSettings(settings ThemeSettings) ThemeSettings {
 			locations[location] = ""
 			continue
 		}
+		if menuID == defaultThemeMenuID {
+			locations[location] = menuID
+			continue
+		}
 		if !menuIDs[menuID] {
 			continue
 		}
 		locations[location] = menuID
 	}
 
-	return ThemeSettings{Menus: menus, MenuLocations: locations, Custom: custom}
+	return ThemeSettings{Menus: menus, MenuLocations: locations, Sidebars: sidebars, Sidebar: sidebar, Custom: custom}
+}
+
+// migrateLegacyCustomMenuLinks 迁移旧菜单中的自定义链接类型。
+//
+// 旧版自定义链接写作 type="custom"；当前菜单编辑器把“自定义链接”写作
+// type="url"，而 type="custom" 已被侧边栏区块复用。这里仅迁移主题菜单列表，
+// 不处理侧边栏区块，避免把新版自定义区域误改为普通链接。
+//
+// @param menus settings.json 中的主题菜单列表。
+// @returns 返回迁移后的菜单副本。
+func migrateLegacyCustomMenuLinks(menus []Menu) []Menu {
+	if len(menus) == 0 {
+		return menus
+	}
+	migrated := make([]Menu, len(menus))
+	for index, menu := range menus {
+		migrated[index] = menu
+		migrated[index].Items = migrateLegacyCustomMenuItems(menu.Items)
+	}
+	return migrated
+}
+
+// migrateLegacyCustomMenuItems 把旧版 type="custom" 菜单项改成 type="url"。
+//
+// @param items 菜单项列表。
+// @returns 返回迁移后的菜单项副本。
+func migrateLegacyCustomMenuItems(items []MenuItem) []MenuItem {
+	if len(items) == 0 {
+		return items
+	}
+	migrated := make([]MenuItem, len(items))
+	for index, item := range items {
+		migrated[index] = item
+		if strings.EqualFold(strings.TrimSpace(item.Type), "custom") {
+			migrated[index].Type = "url"
+		}
+		if len(item.Items) > 0 {
+			migrated[index].Items = migrateLegacyCustomMenuItems(item.Items)
+		}
+	}
+	return migrated
+}
+
+// normalizeSidebarSelection 清洗主题当前投放的侧边栏 ID。
+//
+// @param value settings.json 中保存的侧边栏选择；nil 表示默认侧边栏。
+// @param sidebarIDs 当前存在的自定义侧边栏 ID 集合。
+// @returns 返回清洗后的选择；nil 表示默认，空字符串表示显式不使用侧边栏。
+func normalizeSidebarSelection(value *string, sidebarIDs map[string]bool) *string {
+	if value == nil {
+		return nil
+	}
+	sidebarID := normalizeMenuID(*value)
+	if sidebarID == "" {
+		return stringPtr("")
+	}
+	if !sidebarIDs[sidebarID] {
+		return nil
+	}
+	return stringPtr(sidebarID)
+}
+
+// stringPtr 返回字符串指针，供可选配置字段保存显式空值。
+//
+// @param value 字符串值。
+// @returns 返回指向 value 副本的指针。
+func stringPtr(value string) *string {
+	return &value
+}
+
+func normalizeMenuCollection(values []Menu, fallbackPrefix string) []Menu {
+	normalized := make([]Menu, 0, len(values))
+	usedIDs := map[string]bool{}
+	for index, menu := range values {
+		name := strings.TrimSpace(menu.Name)
+		id := normalizeMenuID(menu.ID)
+		if id == "" {
+			id = normalizeMenuID(name)
+		}
+		if id == "" {
+			id = fmt.Sprintf("%s-%d", fallbackPrefix, index+1)
+		}
+		baseID := id
+		for suffix := 2; usedIDs[id]; suffix++ {
+			id = fmt.Sprintf("%s-%d", baseID, suffix)
+		}
+		usedIDs[id] = true
+		if name == "" {
+			name = id
+		}
+		normalized = append(normalized, Menu{
+			ID:    id,
+			Name:  name,
+			Items: normalizeMenuItems(menu.Items),
+		})
+	}
+	return normalized
+}
+
+// normalizeSidebarCollection 清洗侧边栏列表。
+//
+// 设计说明：
+// 侧边栏和自定义菜单一样，第一层是多个可命名的列表；区别在于侧边栏列表里的
+// items 是区块。旧版 items 如果是直接链接，会保持为旧结构，渲染和后台初始数据
+// 再把它包装为“自定义区域”，避免保存前就改写用户配置。
+//
+// @param values settings.json 中的侧边栏列表。
+// @param fallbackPrefix 缺少 ID 时使用的前缀。
+// @returns 返回归一化后的侧边栏列表。
+func normalizeSidebarCollection(values []Menu, fallbackPrefix string) []Menu {
+	normalized := make([]Menu, 0, len(values))
+	usedIDs := map[string]bool{}
+	for index, sidebar := range values {
+		name := strings.TrimSpace(sidebar.Name)
+		id := normalizeMenuID(sidebar.ID)
+		if id == "" {
+			id = normalizeMenuID(name)
+		}
+		if id == "" {
+			id = fmt.Sprintf("%s-%d", fallbackPrefix, index+1)
+		}
+		baseID := id
+		for suffix := 2; usedIDs[id]; suffix++ {
+			id = fmt.Sprintf("%s-%d", baseID, suffix)
+		}
+		usedIDs[id] = true
+		if name == "" {
+			name = id
+		}
+		items := normalizeSidebarCollectionItems(sidebar.Items)
+		normalized = append(normalized, Menu{ID: id, Name: name, Items: items})
+	}
+	return normalized
 }
 
 // normalizeThemeCustomSettings 清洗主题自定义设置。
@@ -1307,24 +1979,98 @@ func legacyPureWhiteHeroLocation(location string) bool {
 		strings.HasPrefix(location, legacyPureWhiteHeroSubtitlePrefix)
 }
 
+// normalizeSidebarSectionItems 清洗一个侧边栏里的区块列表。
+//
+// @param items 侧边栏区块列表。
+// @returns 返回只包含受支持区块类型的项目。
+func normalizeSidebarSectionItems(items []MenuItem) []MenuItem {
+	normalized := make([]MenuItem, 0, len(items))
+	for _, item := range items {
+		item.Type = normalizeSidebarSectionType(item.Type)
+		item.Label = strings.TrimSpace(item.Label)
+		item.Target = ""
+		item.URL = ""
+		if item.Type == SidebarSectionTypeCustom {
+			item.Items = normalizeMenuItems(item.Items)
+			if item.Label == "" && len(item.Items) == 0 {
+				continue
+			}
+		} else {
+			item.Items = nil
+		}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+// normalizeSidebarSectionType 清洗侧边栏区块类型。
+//
+// @param value 原始区块类型。
+// @returns 返回受支持的区块类型；未知值按自定义区域处理。
+func normalizeSidebarSectionType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case SidebarSectionTypeNone:
+		return SidebarSectionTypeNone
+	case SidebarSectionTypeTopics:
+		return SidebarSectionTypeTopics
+	case SidebarSectionTypePages:
+		return SidebarSectionTypePages
+	case SidebarSectionTypeFeeds, "feed", "subscriptions":
+		return SidebarSectionTypeFeeds
+	case SidebarSectionTypeRecentPosts, "recent", "recent_posts":
+		return SidebarSectionTypeRecentPosts
+	case SidebarSectionTypeCustom:
+		return SidebarSectionTypeCustom
+	default:
+		return SidebarSectionTypeCustom
+	}
+}
+
+// isSidebarSectionType 判断类型是否是新版侧边栏区块类型。
+//
+// @param value 待检查的类型。
+// @returns 属于侧边栏区块类型时返回 true。
+func isSidebarSectionType(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case SidebarSectionTypeNone, SidebarSectionTypeCustom, SidebarSectionTypeTopics, SidebarSectionTypePages, SidebarSectionTypeFeeds, SidebarSectionTypeRecentPosts:
+		return true
+	default:
+		return false
+	}
+}
+
 func normalizeMenuItems(items []MenuItem) []MenuItem {
 	normalized := make([]MenuItem, 0, len(items))
 	for _, item := range items {
 		item.Type = strings.ToLower(strings.TrimSpace(item.Type))
+		if item.Type == "tagindex" {
+			item.Type = "tags"
+		}
 		item.Label = strings.TrimSpace(item.Label)
 		item.Target = strings.TrimSpace(item.Target)
 		item.URL = strings.TrimSpace(item.URL)
+		item.Items = nil
 		switch item.Type {
+		case "":
+			if item.Label == "" && item.Target == "" {
+				continue
+			}
+			item.URL = ""
 		case "page", "post", "tag":
 			if item.Target == "" {
 				continue
 			}
 			item.URL = ""
-		case "custom":
-			if !ValidMenuURL(item.URL) {
+		case "url":
+			url, ok := normalizeMenuURL(item.URL)
+			if !ok {
 				continue
 			}
+			item.URL = url
 			item.Target = ""
+		case "home", "archive", "tags", "search", "admin":
+			item.Target = ""
+			item.URL = ""
 		default:
 			continue
 		}
@@ -1350,6 +2096,38 @@ func ValidMenuURL(value string) bool {
 		return true
 	}
 	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "mailto:")
+}
+
+// normalizeMenuURL 把后台自定义链接输入归一成可直接渲染的安全 URL。
+//
+// 设计说明：
+// - 以 / 开头的站内路径、http(s) 和 mailto 链接保持原样。
+// - 裸域名是后台输入的常见形式，例如 example.com/docs；保存时补成 https 链接。
+// - 协议相对 URL、脚本协议、空白字符和没有明显主机名的值继续拒绝，避免保存后生成危险链接。
+//
+// @param value 用户在自定义链接输入框中填写的原始 URL。
+// @returns 第一个返回值是归一化后的 URL，第二个返回值表示是否可保存。
+func normalizeMenuURL(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if ValidMenuURL(value) {
+		return value, true
+	}
+	if value == "" || strings.HasPrefix(value, "/") || strings.ContainsAny(value, " \t\r\n") {
+		return "", false
+	}
+	candidate := "https://" + value
+	parsed, err := url.Parse(candidate)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", false
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", false
+	}
+	if !strings.EqualFold(host, "localhost") && !strings.Contains(host, ".") {
+		return "", false
+	}
+	return candidate, true
 }
 
 func prependPluginID(values []string, id string) []string {

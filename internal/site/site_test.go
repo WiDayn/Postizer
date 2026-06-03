@@ -1,6 +1,7 @@
 package site
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -857,6 +858,29 @@ func TestLoadSettingsIgnoresDisabledLegacyTextPack(t *testing.T) {
 	}
 }
 
+func TestSettingsVersionAtOrBeforeDetectsLegacySettings(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		target  string
+		want    bool
+	}{
+		{name: "missing", version: "", target: "v0.1.4", want: true},
+		{name: "older", version: "v0.1.3", target: "v0.1.4", want: true},
+		{name: "same", version: "v0.1.4", target: "v0.1.4", want: true},
+		{name: "newer", version: "v0.1.5", target: "v0.1.4", want: false},
+		{name: "invalid", version: "dev", target: "v0.1.4", want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := settingsVersionAtOrBefore(tc.version, tc.target); got != tc.want {
+				t.Fatalf("settingsVersionAtOrBefore(%q, %q) = %v, want %v", tc.version, tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadSettingsDefaultsMediaProcessing(t *testing.T) {
 	settings, err := LoadSettings(t.TempDir())
 	if err != nil {
@@ -1126,8 +1150,8 @@ func TestThemeMenuLinksResolveSupportedItems(t *testing.T) {
 					{Type: "page", Target: page.Slug},
 					{Type: "post", Target: post.Slug, Label: "Featured"},
 					{Type: "tag", Target: "go-news"},
-					{Type: "custom", Label: "External", URL: "https://example.com"},
-					{Type: "custom", Label: "Bad", URL: "javascript:alert(1)"},
+					{Type: "url", Label: "External", URL: "https://example.com"},
+					{Type: "url", Label: "Bad", URL: "javascript:alert(1)"},
 				},
 			},
 		},
@@ -1140,6 +1164,10 @@ func TestThemeMenuLinksResolveSupportedItems(t *testing.T) {
 	store, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
+	}
+	items := store.Settings.ThemeSettings.Menus[0].Items
+	if len(items) == 0 {
+		t.Fatal("menu items should not be empty")
 	}
 	if !store.MenuLocationAssigned("navbar") {
 		t.Fatal("navbar menu location should be marked assigned")
@@ -1158,6 +1186,576 @@ func TestThemeMenuLinksResolveSupportedItems(t *testing.T) {
 		if links[index] != want[index] {
 			t.Fatalf("menu link[%d] = %#v, want %#v", index, links[index], want[index])
 		}
+	}
+}
+
+func TestLoadSettingsMigratesLegacyCustomMenuLinksBeforeVersion(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "version": "v0.1.4",
+  "theme_settings": {
+    "menus": [
+      {
+        "id": "main",
+        "name": "Main",
+        "items": [
+          {"type": "custom", "label": "Docs", "url": "/docs"}
+        ]
+      }
+    ],
+    "menu_locations": {"navbar": "main"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.Version, currentSettingsVersion; got != want {
+		t.Fatalf("settings version = %q, want %q", got, want)
+	}
+	if len(settings.ThemeSettings.Menus) != 1 {
+		t.Fatalf("menus = %#v, want one menu", settings.ThemeSettings.Menus)
+	}
+	items := settings.ThemeSettings.Menus[0].Items
+	if len(items) != 1 {
+		t.Fatalf("menu items = %#v, want one migrated link", items)
+	}
+	if got, want := items[0].Type, "url"; got != want {
+		t.Fatalf("legacy custom item type = %q, want %q", got, want)
+	}
+	if got, want := items[0].URL, "/docs"; got != want {
+		t.Fatalf("legacy custom item url = %q, want %q", got, want)
+	}
+
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(filepath.Join(root, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedText := string(saved)
+	if !strings.Contains(savedText, `"version": "`+currentSettingsVersion+`"`) {
+		t.Fatalf("saved settings should contain current version:\n%s", savedText)
+	}
+	if strings.Contains(savedText, `"type": "custom"`) || !strings.Contains(savedText, `"type": "url"`) {
+		t.Fatalf("saved settings should persist migrated url type:\n%s", savedText)
+	}
+}
+
+func TestLoadSettingsMigratesLegacyCustomMenuLinksAtCurrentVersion(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "version": "` + currentSettingsVersion + `",
+  "theme_settings": {
+    "menus": [
+      {
+        "id": "main",
+        "name": "Main",
+        "items": [
+          {"type": "custom", "label": "Docs", "url": "/docs"}
+        ]
+      }
+    ],
+    "menu_locations": {"navbar": "main"}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.ThemeSettings.Menus) != 1 {
+		t.Fatalf("menus = %#v, want one menu", settings.ThemeSettings.Menus)
+	}
+	items := settings.ThemeSettings.Menus[0].Items
+	if len(items) != 1 {
+		t.Fatalf("menu items = %#v, want one migrated link", items)
+	}
+	if got, want := items[0].Type, "url"; got != want {
+		t.Fatalf("legacy custom item type = %q, want %q", got, want)
+	}
+	if got, want := items[0].URL, "/docs"; got != want {
+		t.Fatalf("legacy custom item url = %q, want %q", got, want)
+	}
+}
+
+func TestLoadSettingsMigratesLegacySidebarCustomLinks(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "version": "` + currentSettingsVersion + `",
+  "theme_settings": {
+    "sidebar": "legacy-links",
+    "sidebars": [
+      {
+        "id": "legacy-links",
+        "name": "Legacy Links",
+        "items": [
+          {"type": "custom", "label": "Docs", "url": "/docs"}
+        ]
+      }
+    ]
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.ThemeSettings.Sidebars) != 1 {
+		t.Fatalf("sidebars = %#v, want one sidebar", settings.ThemeSettings.Sidebars)
+	}
+	items := settings.ThemeSettings.Sidebars[0].Items
+	if len(items) != 1 {
+		t.Fatalf("legacy sidebar items = %#v, want one migrated link", items)
+	}
+	if got, want := items[0].Type, "url"; got != want {
+		t.Fatalf("legacy sidebar custom link type = %q, want %q", got, want)
+	}
+	if got, want := items[0].URL, "/docs"; got != want {
+		t.Fatalf("legacy sidebar custom link url = %q, want %q", got, want)
+	}
+
+	store := Store{Settings: settings}
+	sections := store.SidebarSections()
+	if len(sections) != 1 {
+		t.Fatalf("sidebar sections = %#v, want one custom section", sections)
+	}
+	if len(sections[0].Links) != 1 {
+		t.Fatalf("sidebar links = %#v, want one preserved link", sections[0].Links)
+	}
+	if got, want := sections[0].Links[0].URL, "/docs"; got != want {
+		t.Fatalf("sidebar link url = %q, want %q", got, want)
+	}
+
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(filepath.Join(root, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedText := string(saved)
+	if strings.Contains(savedText, `"type": "custom"`) || !strings.Contains(savedText, `"type": "url"`) {
+		t.Fatalf("saved settings should persist migrated url type:\n%s", savedText)
+	}
+}
+
+func TestLoadSettingsPreservesLegacySidebarLinksMixedWithBlocks(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "version": "` + currentSettingsVersion + `",
+  "theme_settings": {
+    "sidebars": [
+      {
+        "id": "mixed-sidebar",
+        "name": "Mixed Sidebar",
+        "items": [
+          {"type": "custom", "label": "Docs", "url": "/docs"},
+          {"main": {"type": "topics"}, "label": "Topics"}
+        ]
+      }
+    ]
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.ThemeSettings.Sidebars) != 1 {
+		t.Fatalf("sidebars = %#v, want one sidebar", settings.ThemeSettings.Sidebars)
+	}
+	items := settings.ThemeSettings.Sidebars[0].Items
+	if len(items) != 2 {
+		t.Fatalf("mixed sidebar items = %#v, want legacy link block plus topics block", items)
+	}
+	if got, want := items[0].Type, SidebarSectionTypeCustom; got != want {
+		t.Fatalf("legacy link wrapper type = %q, want %q", got, want)
+	}
+	if len(items[0].Items) != 1 {
+		t.Fatalf("legacy link wrapper items = %#v, want one link", items[0].Items)
+	}
+	if got, want := items[0].Items[0].Type, "url"; got != want {
+		t.Fatalf("legacy custom link type = %q, want %q", got, want)
+	}
+	if got, want := items[0].Items[0].URL, "/docs"; got != want {
+		t.Fatalf("legacy custom link url = %q, want %q", got, want)
+	}
+	if got, want := items[1].Type, SidebarSectionTypeTopics; got != want {
+		t.Fatalf("second sidebar block type = %q, want %q", got, want)
+	}
+}
+
+func TestLoadSettingsLegacyMenuMigrationPreservesSidebarCustomBlocks(t *testing.T) {
+	root := t.TempDir()
+	body := `{
+  "theme_settings": {
+    "sidebars": [
+      {
+        "id": "right-rail",
+        "name": "Right Rail",
+        "items": [
+          {
+            "label": "Links",
+            "main": {"type": "custom"},
+            "items": [
+              {"label": "Docs", "main": {"type": "url", "url": "/docs"}}
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.ThemeSettings.Sidebars) != 1 {
+		t.Fatalf("sidebars = %#v, want one sidebar", settings.ThemeSettings.Sidebars)
+	}
+	items := settings.ThemeSettings.Sidebars[0].Items
+	if len(items) != 1 {
+		t.Fatalf("sidebar items = %#v, want one custom block", items)
+	}
+	if got, want := items[0].Type, SidebarSectionTypeCustom; got != want {
+		t.Fatalf("sidebar custom block type = %q, want %q", got, want)
+	}
+	if len(items[0].Items) != 1 || items[0].Items[0].Type != "url" {
+		t.Fatalf("sidebar custom links = %#v, want url child preserved", items[0].Items)
+	}
+}
+
+// TestSaveSettingsNormalizesBareURLMenuItems 覆盖后台自定义链接保存场景。
+//
+// 用户在 URL 输入框里常会输入 example.com/path 这样的裸域名；保存链路会先
+// SaveSettings 再 LoadSettings，旧逻辑会在归一化菜单项时把它当作非法 URL
+// URL 丢弃，导致后台保存后链接从列表里消失。这里要求裸域名保存为 https 链接。
+func TestSaveSettingsNormalizesBareURLMenuItems(t *testing.T) {
+	root := t.TempDir()
+	settings := defaultSettings()
+	settings.ThemeSettings = ThemeSettings{
+		Menus: []Menu{
+			{
+				ID:   "main",
+				Name: "Main",
+				Items: []MenuItem{
+					{Type: "url", Label: "Docs", URL: "example.com/docs?from=menu"},
+				},
+			},
+		},
+		MenuLocations: map[string]string{"navbar": "main"},
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ThemeSettings.Menus) != 1 {
+		t.Fatalf("menus = %#v, want one menu", loaded.ThemeSettings.Menus)
+	}
+	items := loaded.ThemeSettings.Menus[0].Items
+	if len(items) != 1 {
+		t.Fatalf("menu items = %#v, want one custom link", items)
+	}
+	if got, want := items[0].Type, "url"; got != want {
+		t.Fatalf("custom menu type = %q, want %q", got, want)
+	}
+	if got, want := items[0].URL, "https://example.com/docs?from=menu"; got != want {
+		t.Fatalf("custom menu url = %q, want %q", got, want)
+	}
+}
+
+func TestSaveSettingsPreservesEmptyMenuItemType(t *testing.T) {
+	root := t.TempDir()
+	settings := defaultSettings()
+	settings.ThemeSettings = ThemeSettings{
+		Menus: []Menu{
+			{
+				ID:   "main",
+				Name: "Main",
+				Items: []MenuItem{
+					{Type: "", Label: "新建1", Target: "", URL: "https://example.com"},
+				},
+			},
+		},
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadSettings(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := loaded.ThemeSettings.Menus[0].Items
+	if len(items) != 1 {
+		t.Fatalf("menu items = %#v, want one empty-type item", items)
+	}
+	if got := items[0].Type; got != "" {
+		t.Fatalf("empty menu item type = %q, want empty", got)
+	}
+	if got, want := items[0].Label, "新建1"; got != want {
+		t.Fatalf("empty menu item label = %q, want %q", got, want)
+	}
+	if got, want := items[0].Target, ""; got != want {
+		t.Fatalf("empty menu item target = %q, want %q", got, want)
+	}
+	if got := items[0].URL; got != "" {
+		t.Fatalf("empty menu item url = %q, want empty", got)
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted struct {
+		ThemeSettings struct {
+			Menus []struct {
+				Items []map[string]any `json:"items"`
+			} `json:"menus"`
+		} `json:"theme_settings"`
+	}
+	if err := json.Unmarshal(body, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	persistedItem := persisted.ThemeSettings.Menus[0].Items[0]
+	if _, ok := persistedItem["type"]; ok {
+		t.Fatalf("settings item still contains flat type field:\n%s", body)
+	}
+	if _, ok := persistedItem["target"]; ok {
+		t.Fatalf("settings item still contains flat target field:\n%s", body)
+	}
+	if _, ok := persistedItem["url"]; ok {
+		t.Fatalf("settings item still contains flat url field:\n%s", body)
+	}
+	if persistedItem["label"] != "新建1" {
+		t.Fatalf("settings item label = %#v, want 新建1", persistedItem["label"])
+	}
+	main, ok := persistedItem["main"].(map[string]any)
+	if !ok {
+		t.Fatalf("settings item main = %#v, want object", persistedItem["main"])
+	}
+	if main["type"] != "" {
+		t.Fatalf("settings item main.type = %#v, want empty", main["type"])
+	}
+	if _, ok := main["target"]; ok {
+		t.Fatalf("settings item main still contains empty target:\n%s", body)
+	}
+	if _, ok := main["url"]; ok {
+		t.Fatalf("settings item main still contains empty url:\n%s", body)
+	}
+}
+
+func TestSystemMenuItemsUseTypeOnlyStorage(t *testing.T) {
+	root := t.TempDir()
+	settings := defaultSettings()
+	settings.ThemeSettings = ThemeSettings{
+		Menus: []Menu{
+			{
+				ID:   "main",
+				Name: "Main",
+				Items: []MenuItem{
+					{Type: "home", Label: "首页", Target: "ignored", URL: "https://example.com"},
+					{Type: "archive", Label: "归档"},
+					{Type: "tags", Label: "标签"},
+					{Type: "search", Label: "搜索"},
+					{Type: "admin", Label: "后台"},
+				},
+			},
+		},
+		MenuLocations: map[string]string{"navbar": "main"},
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	links := store.MenuLinks("navbar")
+	want := []MenuLink{
+		{Label: "首页", URL: "/"},
+		{Label: "归档", URL: "/archive"},
+		{Label: "标签", URL: "/tags"},
+		{Label: "搜索", URL: "/search"},
+		{Label: "后台", URL: "/admin"},
+	}
+	if len(links) != len(want) {
+		t.Fatalf("system menu links = %#v, want %#v", links, want)
+	}
+	for index := range want {
+		if links[index] != want[index] {
+			t.Fatalf("system menu link[%d] = %#v, want %#v", index, links[index], want[index])
+		}
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted struct {
+		ThemeSettings struct {
+			Menus []struct {
+				Items []map[string]any `json:"items"`
+			} `json:"menus"`
+		} `json:"theme_settings"`
+	}
+	if err := json.Unmarshal(body, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	wantTypes := []string{"home", "archive", "tags", "search", "admin"}
+	for index, item := range persisted.ThemeSettings.Menus[0].Items {
+		main, ok := item["main"].(map[string]any)
+		if !ok {
+			t.Fatalf("system item[%d] main = %#v, want object", index, item["main"])
+		}
+		if main["type"] != wantTypes[index] {
+			t.Fatalf("system item[%d] type = %#v, want %#v", index, main["type"], wantTypes[index])
+		}
+		if _, ok := main["target"]; ok {
+			t.Fatalf("system item[%d] still contains target:\n%s", index, body)
+		}
+		if _, ok := main["url"]; ok {
+			t.Fatalf("system item[%d] still contains url:\n%s", index, body)
+		}
+	}
+}
+
+func TestSidebarSectionsResolveSupportedItems(t *testing.T) {
+	root := t.TempDir()
+	page, err := SavePage(root, PageDraft{
+		Title: "Docs",
+		Body:  "Page body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings := defaultSettings()
+	selectedSidebar := "recommended"
+	settings.ThemeSettings = ThemeSettings{
+		Sidebar: &selectedSidebar,
+		Sidebars: []Menu{
+			{
+				ID:   "recommended",
+				Name: "Recommended",
+				Items: []MenuItem{
+					{
+						Type:  SidebarSectionTypeCustom,
+						Label: "Recommended",
+						Items: []MenuItem{
+							{Type: "page", Target: page.Slug},
+							{Type: "url", Label: "External", URL: "https://example.com"},
+							{Type: "url", Label: "Bad", URL: "javascript:alert(1)"},
+						},
+					},
+				},
+			},
+			{
+				ID:   "empty",
+				Name: "Empty",
+			},
+		},
+	}
+	if err := SaveSettings(root, settings); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sections := store.SidebarSections()
+	if len(sections) != 1 {
+		t.Fatalf("sidebar sections = %#v, want one visible section", sections)
+	}
+	if got, want := sections[0].Title, "Recommended"; got != want {
+		t.Fatalf("sidebar title = %q, want %q", got, want)
+	}
+	want := []MenuLink{
+		{Label: "Docs", URL: "/pages/" + page.Slug},
+		{Label: "External", URL: "https://example.com"},
+	}
+	if len(sections[0].Links) != len(want) {
+		t.Fatalf("sidebar links = %#v, want %#v", sections[0].Links, want)
+	}
+	for index := range want {
+		if sections[0].Links[index] != want[index] {
+			t.Fatalf("sidebar link[%d] = %#v, want %#v", index, sections[0].Links[index], want[index])
+		}
+	}
+}
+
+func TestSidebarSectionsUseDefaultWhenUnassigned(t *testing.T) {
+	store := &Store{
+		Settings: defaultSettings(),
+		Tags: []*Tag{
+			{Title: "Go", Slug: "go"},
+		},
+		Pages: []*Page{
+			{Title: "About", Slug: "about"},
+		},
+	}
+	store.Settings.ThemeSettings.Sidebars = []Menu{
+		{
+			ID:   "custom",
+			Name: "Custom",
+			Items: []MenuItem{
+				{Type: SidebarSectionTypeCustom, Label: "Custom", Items: []MenuItem{{Type: "url", Label: "External", URL: "https://example.com"}}},
+			},
+		},
+	}
+
+	sections := store.SidebarSections()
+	if len(sections) != 3 {
+		t.Fatalf("default sidebar sections = %#v, want topics, pages and feeds", sections)
+	}
+	if got, want := sections[0].Type, SidebarSectionTypeTopics; got != want {
+		t.Fatalf("default sidebar first type = %q, want %q", got, want)
+	}
+	for index, section := range sections {
+		if section.Type == SidebarSectionTypeRecentPosts {
+			t.Fatalf("default sidebar section[%d] = recent posts, want no recent posts", index)
+		}
+		if section.Type == SidebarSectionTypeCustom {
+			t.Fatalf("default sidebar section[%d] = custom sidebar, want unassigned custom sidebar hidden", index)
+		}
+	}
+}
+
+func TestSidebarSectionsCanBeDisabled(t *testing.T) {
+	store := &Store{Settings: defaultSettings()}
+	noSidebar := ""
+	store.Settings.ThemeSettings.Sidebar = &noSidebar
+	store.Settings.ThemeSettings.Sidebars = []Menu{
+		{ID: "custom", Name: "Custom", Items: []MenuItem{{Type: SidebarSectionTypeFeeds, Label: "Feeds"}}},
+	}
+
+	if sections := store.SidebarSections(); len(sections) != 0 {
+		t.Fatalf("disabled sidebar sections = %#v, want none", sections)
 	}
 }
 

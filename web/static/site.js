@@ -28,6 +28,79 @@ window.postizerFormatMessage = postizerFormatMessage;
 
 const loginNoticeDismissedKey = "postizer.loginNotice.dismissed";
 
+/**
+ * 判断后台导航组是否属于当前页面所在的大类。
+ * @param {HTMLElement} group - 带有 data-admin-nav-group 的导航分组容器。
+ * @returns {boolean} true 表示该分组包含当前高亮子项，需要保持展开。
+ */
+function adminNavGroupIsCurrent(group) {
+  return Boolean(group && (group.classList.contains("is-current") || group.querySelector(".admin-nav-sub a.is-active")));
+}
+
+/**
+ * 同步后台导航分组的视觉状态和辅助功能状态。
+ * @param {HTMLElement} group - 需要展开或收起的导航分组容器。
+ * @param {boolean} expanded - true 表示展开子菜单，false 表示收起子菜单。
+ * @returns {void}
+ */
+function setAdminNavGroupExpanded(group, expanded) {
+  if (!group) return;
+  const toggle = group.querySelector(".admin-nav-disclosure");
+  const submenu = group.querySelector(".admin-nav-sub");
+
+  group.classList.toggle("is-expanded", expanded);
+  if (submenu) submenu.hidden = !expanded;
+  if (toggle) toggle.setAttribute("aria-expanded", String(expanded));
+}
+
+/**
+ * 统一收敛后台导航组展开状态。
+ * @param {HTMLElement[]} groups - 当前侧边栏内全部后台导航分组。
+ * @param {HTMLElement | null} extraExpandedGroup - 用户手动额外展开的非当前分组。
+ * @returns {void}
+ */
+function syncAdminNavGroupAccordion(groups, extraExpandedGroup = null) {
+  groups.forEach((group) => {
+    const isCurrent = adminNavGroupIsCurrent(group);
+
+    // 当前页面所在的大类必须保持展开；额外展开项最多只能有一个。
+    group.classList.toggle("is-current", isCurrent);
+    setAdminNavGroupExpanded(group, isCurrent || group === extraExpandedGroup);
+  });
+}
+
+/**
+ * 绑定后台侧边栏中的可折叠菜单组。
+ *
+ * 设计思路：
+ * - 当前页面所属大类始终展开，页面跳到哪个大类，哪个大类就在首屏展开。
+ * - 除当前大类外，用户最多只能手动展开一个其他大类。
+ * - 当用户继续展开另一个非当前大类时，之前手动展开的大类会自动收起。
+ *
+ * @returns {void}
+ */
+function setupAdminNavGroups() {
+  const groups = Array.from(document.querySelectorAll("[data-admin-nav-group]"));
+  let extraExpandedGroup = null;
+
+  syncAdminNavGroupAccordion(groups);
+
+  groups.forEach((group) => {
+    const toggle = group.querySelector(".admin-nav-disclosure");
+    if (!toggle) return;
+
+    toggle.addEventListener("click", () => {
+      if (adminNavGroupIsCurrent(group)) {
+        syncAdminNavGroupAccordion(groups, extraExpandedGroup);
+        return;
+      }
+
+      extraExpandedGroup = group.classList.contains("is-expanded") ? null : group;
+      syncAdminNavGroupAccordion(groups, extraExpandedGroup);
+    });
+  });
+}
+
 function setupAdminLoginNotice() {
   const notice = document.querySelector("[data-login-notice]");
   if (!notice) return;
@@ -244,6 +317,7 @@ function setupArticleLightbox() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  setupAdminNavGroups();
   setupAdminLoginNotice();
   bindFileDropZones();
   setupArticleLightbox();

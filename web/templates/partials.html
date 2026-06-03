@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{pageTitle .}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=114">
+  <link rel="stylesheet" href="/static/site.css?v=171">
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
@@ -15,14 +15,14 @@
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
   {{end}}
   <script id="postizerMessages" type="application/json">{{if .Appearance}}{{toScriptJSON .Appearance.Messages}}{{else}}{}{{end}}</script>
-  <script defer src="/static/site.js?v=7"></script>
+  <script defer src="/static/site.js?v=10"></script>
 </head>
 <body>
 {{end}}
 
 {{define "chromeStart"}}
 {{template "head" .}}
-<div class="site-shell">
+<div class="site-shell {{if sidebarSections .}}site-shell--with-sidebar{{else}}site-shell--no-sidebar{{end}}">
   <header class="newspaper-header">
     <a class="brand compact-brand" href="/">{{siteMainTitle .}}</a>
     <div class="edition-line">
@@ -42,6 +42,19 @@
   <main class="main-column">
 {{end}}
 
+{{define "adminNavGroup"}}
+<div class="admin-nav-group{{if .Active}} is-current is-expanded{{end}}" data-admin-nav-group data-admin-nav-group-key="{{.Key}}">
+  <button class="admin-nav-disclosure" type="button" aria-controls="{{.ControlsID}}" aria-expanded="{{if .Active}}true{{else}}false{{end}}" title="{{msg .View .TitleKey .TitleFallback}}">
+    <span>{{msg .View .TitleKey .TitleFallback}}</span>
+  </button>
+  <div id="{{.ControlsID}}" class="admin-nav-sub"{{if not .Active}} hidden{{end}}>
+    {{range .Items}}
+    <a class="{{if .Active}}is-active{{end}}" href="{{.URL}}">{{msg $.View .LabelKey .LabelFallback}}</a>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{define "adminStart"}}
 {{template "head" .}}
 <div class="admin-shell">
@@ -53,16 +66,11 @@
       <a class="{{if eq .ActiveAdmin "pages"}}is-active{{end}}" href="/admin/pages">{{msg . "nav.pages" "Pages"}}</a>
       <a class="{{if eq .ActiveAdmin "comments"}}is-active{{end}}" href="/admin/comments">{{msg . "nav.comments" "Comments"}}</a>
       <a class="{{if eq .ActiveAdmin "media"}}is-active{{end}}" href="/admin/media">{{msg . "nav.media"}}</a>
-      <a class="{{if eq .ActiveAdmin "menus"}}is-active{{end}}" href="/admin/menus">{{msg . "nav.menus" "Custom Menus"}}</a>
-      <a class="{{if eq .ActiveAdmin "appearance"}}is-active{{end}}" href="/admin/appearance">{{msg . "nav.appearance"}}</a>
+      {{template "adminNavGroup" (adminCustomNavGroup .)}}
+      {{template "adminNavGroup" (adminThemeNavGroup .)}}
       <a class="{{if eq .ActiveAdmin "resource-marketplace"}}is-active{{end}}" href="/admin/resource-marketplace">{{msg . "nav.resource_marketplace" "Resource Marketplace"}}</a>
-      <a class="{{if eq .ActiveAdmin "theme-settings"}}is-active{{end}}" href="/admin/theme-settings">{{msg . "nav.theme_settings" "Theme Settings"}}</a>
       <a class="{{if eq .ActiveAdmin "plugins"}}is-active{{end}}" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
-      <a class="{{if or (eq .ActiveAdmin "settings") (eq .ActiveAdmin "permalinks") (eq .ActiveAdmin "updates")}}is-active{{end}}" href="/admin/settings">{{msg . "nav.settings"}}</a>
-      <div class="admin-nav-sub">
-        <a class="{{if eq .ActiveAdmin "permalinks"}}is-active{{end}}" href="/admin/settings/permalinks">{{msg . "nav.permalinks" "Permalinks"}}</a>
-        <a class="{{if eq .ActiveAdmin "updates"}}is-active{{end}}" href="/admin/settings/updates">{{msg . "nav.updates" "Auto Update"}}</a>
-      </div>
+      {{template "adminNavGroup" (adminSettingsNavGroup .)}}
     </nav>
     <div class="admin-sidebar-footer">
       <a href="/">{{msg . "nav.view_site"}}</a>
@@ -141,23 +149,23 @@
 
 {{define "chromeEnd"}}
   </main>
+  {{$sidebarSections := sidebarSections .}}
+  {{if $sidebarSections}}
   <aside class="right-rail">
-    <div class="rail-section">
-      <h2>{{msg . "site.right_rail.topics"}}</h2>
+    {{range $sidebarSections}}
+    <div class="rail-section rail-section--{{.Type}}">
+      <h2>{{.Title}}</h2>
+      {{if eq .Type "topics"}}
       <div class="tag-list">
-        {{range .Store.Tags}}<a href="{{tagURL .}}">{{.Title}} <span>{{len .Posts}}</span></a>{{end}}
+        {{range .Links}}<a href="{{.URL}}">{{.Label}} <span>{{.Count}}</span></a>{{end}}
       </div>
+      {{else}}
+      {{range .Links}}<a href="{{.URL}}">{{.Label}}{{if gt .Count 0}} <span>{{.Count}}</span>{{end}}</a>{{end}}
+      {{end}}
     </div>
-    <div class="rail-section">
-      <h2>{{msg . "site.right_rail.pages"}}</h2>
-      {{range .Store.Pages}}<a href="{{pageURL .}}">{{.Title}}</a>{{end}}
-    </div>
-    <div class="rail-section">
-      <h2>{{msg . "site.right_rail.feeds"}}</h2>
-      <a href="/feed.xml">{{msg . "site.feed.rss"}}</a>
-      <a href="/sitemap.xml">{{msg . "site.feed.sitemap"}}</a>
-    </div>
+    {{end}}
   </aside>
+  {{end}}
   {{$footerLinks := menuLinks . "footer"}}
   <footer class="site-footer">
     <div class="site-footer__meta">
