@@ -210,7 +210,7 @@ const (
 	pluginSettingsUIOutlet   = "admin.plugin"
 )
 
-var AppVersion = "v0.1.4"
+var AppVersion = "v0.1.5"
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
 	appRoot := env("POSTIZER_APP_ROOT", ".")

@@ -35,23 +35,23 @@
     <p class="settings-form-note">{{msg . "settings.auto_update.changelog.help" "Local automatic update events, including when this instance detected an update and when the update finished."}}</p>
     {{if .UpdateLog}}
     <div class="changelog-list">
+      <ul class="changelog-items">
       {{range .UpdateLog}}
-      <article class="changelog-release">
-        <header class="changelog-release__head">
-          <div>
-            <h3>
+        <li>
+          <div class="changelog-items__event">
+            <strong>
               {{if eq .Event "update_detected"}}{{msg $ "settings.auto_update.changelog.detected" "Update detected"}}
               {{else if eq .Event "update_completed"}}{{msg $ "settings.auto_update.changelog.completed" "Update completed"}}
               {{else if eq .Event "update_failed"}}{{msg $ "settings.auto_update.changelog.failed" "Update failed"}}
               {{else}}{{msg $ "settings.auto_update.changelog.event" "Update event"}}{{end}}
-            </h3>
-            <span>{{date .Time}}</span>
+            </strong>
+            {{if .Version}}<code>{{.Version}}</code>{{end}}
           </div>
-          {{if .Version}}<strong>{{.Version}}</strong>{{end}}
-        </header>
-        {{if .Message}}<p class="settings-form-note">{{.Message}}</p>{{end}}
-      </article>
+          {{if .Message}}<p>{{.Message}}</p>{{else}}<p>{{msg $ "settings.auto_update.changelog.event" "Update event"}}</p>{{end}}
+          <time>{{date .Time}}</time>
+        </li>
       {{end}}
+      </ul>
     </div>
     {{else}}
     <p class="settings-form-note">{{msg . "settings.auto_update.changelog.empty" "No local update events have been recorded yet."}}</p>

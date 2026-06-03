@@ -138,7 +138,7 @@ func updateLogEntriesFromOutput(output string) []site.UpdateLogEntry {
 		if !strings.HasPrefix(line, "POSTIZER_UPDATE_EVENT\t") {
 			continue
 		}
-		parts := strings.Split(line, "\t")
+		parts := strings.SplitN(line, "\t", 5)
 		if len(parts) < 4 {
 			continue
 		}
@@ -195,7 +195,7 @@ func selfUpdateFailureMessage(err error, output string) string {
 	for index := len(lines) - 1; index >= 0; index-- {
 		line := strings.TrimSpace(lines[index])
 		if line != "" && !strings.HasPrefix(line, "POSTIZER_UPDATE_EVENT\t") {
-			return err.Error() + ": " + line
+			return line
 		}
 	}
 	return err.Error()
