@@ -16,7 +16,13 @@ update_event() {
 }
 
 fail() {
-  log "$*"
+  fail_message="$*"
+  fail_version="${release_version:-}"
+  if [ "$fail_version" = "latest" ]; then
+    fail_version=""
+  fi
+  log "$fail_message"
+  update_event "update_failed" "$fail_version" "$fail_message"
   exit 1
 }
 
@@ -28,6 +34,42 @@ download_file() {
   else
     curl -fsSL "$url" -o "$output"
   fi
+}
+
+download_github_api() {
+  url="$1"
+  output="$2"
+  if [ -n "${POSTIZER_GITHUB_TOKEN:-}" ]; then
+    curl -sSL -w '%{http_code}' -H "Authorization: Bearer $POSTIZER_GITHUB_TOKEN" "$url" -o "$output"
+  else
+    curl -sSL -w '%{http_code}' "$url" -o "$output"
+  fi
+}
+
+json_field() {
+  field="$1"
+  file="$2"
+  sed -n 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -n 1
+}
+
+github_latest_release_error() {
+  slug="$1"
+  status="$2"
+  body="$3"
+  message="$(json_field "message" "$body")"
+  documentation_url="$(json_field "documentation_url" "$body")"
+  if [ "$status" = "200" ]; then
+    detail="GitHub latest release response for $slug did not include tag_name"
+  else
+    detail="GitHub latest release request for $slug returned HTTP $status"
+  fi
+  if [ -n "$message" ]; then
+    detail="$detail: $message"
+  fi
+  if [ -n "$documentation_url" ]; then
+    detail="$detail ($documentation_url)"
+  fi
+  printf '%s' "$detail. Check POSTIZER_REPO_URL and make sure the repository has a published release."
 }
 
 github_repo_slug() {
@@ -50,9 +92,11 @@ latest_release_tag() {
   slug="$1"
   tmp="$2"
   api_url="https://api.github.com/repos/$slug/releases/latest"
-  download_file "$api_url" "$tmp"
+  if ! status="$(download_github_api "$api_url" "$tmp")"; then
+    fail "Could not download GitHub latest release metadata for $slug."
+  fi
   tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp" | head -n 1)"
-  [ -n "$tag" ] || fail "Could not find tag_name in GitHub latest release response."
+  [ -n "$tag" ] || fail "$(github_latest_release_error "$slug" "$status" "$tmp")"
   is_release_tag "$tag" || fail "Latest GitHub release tag is not vX.X.X: $tag"
   printf '%s' "$tag"
 }

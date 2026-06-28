@@ -773,6 +773,59 @@ download_file() {
   fi
 }
 
+download_github_api() {
+  local url="$1"
+  local output="$2"
+  if optional_command_exists curl; then
+    if [[ -n "${POSTIZER_GITHUB_TOKEN:-}" ]]; then
+      curl -sSL -w '%{http_code}' -H "Authorization: Bearer $POSTIZER_GITHUB_TOKEN" "$url" -o "$output"
+    else
+      curl -sSL -w '%{http_code}' "$url" -o "$output"
+    fi
+  elif optional_command_exists wget; then
+    wget -qO "$output" "$url"
+    printf '200'
+  else
+    echo "Missing curl or wget for downloading files." >&2
+    exit 1
+  fi
+}
+
+json_field() {
+  local field="$1"
+  local file="$2"
+  sed -n 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -n 1
+}
+
+github_latest_release_error() {
+  local slug="$1"
+  local status="$2"
+  local body="$3"
+  local message documentation_url detail
+  message="$(json_field "message" "$body")"
+  documentation_url="$(json_field "documentation_url" "$body")"
+  if [[ "$status" == "200" ]]; then
+    detail="GitHub latest release response for $slug did not include tag_name"
+  else
+    detail="GitHub latest release request for $slug returned HTTP $status"
+  fi
+  if [[ -n "$message" ]]; then
+    detail="$detail: $message"
+  fi
+  if [[ -n "$documentation_url" ]]; then
+    detail="$detail ($documentation_url)"
+  fi
+  printf '%s' "$detail. Check POSTIZER_REPO_URL and make sure the repository has a published release."
+}
+
+fail_update() {
+  local message="$1"
+  local version="${2:-$UPDATE_TARGET_VERSION}"
+  echo "$message" >&2
+  record_update_event "update_failed" "$version" "$message"
+  exit 1
+}
+
 github_repo_slug() {
   local value="$REPO_URL"
   value="${value#https://github.com/}"
@@ -800,19 +853,22 @@ release_platform() {
 }
 
 latest_github_release_tag() {
-  local slug tmp tag
+  local slug tmp status tag error
   slug="$(github_repo_slug)"
   tmp="$(mktemp)"
-  download_file "https://api.github.com/repos/$slug/releases/latest" "$tmp"
-  tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp" | head -n 1)"
-  rm -f "$tmp"
-  if [[ -z "$tag" ]]; then
-    echo "Could not detect latest GitHub release tag for $slug." >&2
-    exit 1
+  if ! status="$(download_github_api "https://api.github.com/repos/$slug/releases/latest" "$tmp")"; then
+    rm -f "$tmp"
+    fail_update "Could not download GitHub latest release metadata for $slug." ""
   fi
+  tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp" | head -n 1)"
+  if [[ -z "$tag" ]]; then
+    error="$(github_latest_release_error "$slug" "$status" "$tmp")"
+    rm -f "$tmp"
+    fail_update "$error" ""
+  fi
+  rm -f "$tmp"
   if ! is_release_tag "$tag"; then
-    echo "Latest GitHub release tag does not match vX.X.X: $tag" >&2
-    exit 1
+    fail_update "Latest GitHub release tag does not match vX.X.X: $tag" "$tag"
   fi
   printf '%s' "$tag"
 }

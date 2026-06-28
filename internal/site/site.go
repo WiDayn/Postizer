@@ -66,7 +66,7 @@ const (
 
 	defaultThemeMenuID = "default-menu"
 
-	currentSettingsVersion            = "v0.1.5"
+	currentSettingsVersion            = "v0.1.6"
 	legacyPureWhiteHeroTitlePrefix    = "pure-white-hero-title-"
 	legacyPureWhiteHeroSubtitlePrefix = "pure-white-hero-subtitle-"
 )
