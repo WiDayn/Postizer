@@ -60,6 +60,8 @@
   "site.feed.sitemap": "站点地图",
   "site.footer.nav_aria": "页脚",
   "site.footer.powered_by": "\u7531 Postizer \u9a71\u52a8",
+  "site.footer.powered_by_prefix": "由",
+  "site.footer.powered_by_suffix": "驱动",
   "common.ready": "就绪",
   "common.enabled": "已启用",
   "common.not_set": "未设置",
@@ -513,6 +515,8 @@
   "settings.status.deleted": "已删除",
   "settings.upload_pack.empty": "请选择 .zip 资源包",
   "settings.home_image.none": "未设置",
+  "site.code.copy_aria": "复制 {language} 代码",
+  "site.code.language_fallback": "代码",
   "site.image.open": "打开图片",
   "site.lightbox.close": "关闭",
   "site.search.index_label": "索引"

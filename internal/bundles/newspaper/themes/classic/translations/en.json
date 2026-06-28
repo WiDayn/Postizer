@@ -60,6 +60,8 @@
   "site.feed.sitemap": "Sitemap",
   "site.footer.nav_aria": "Footer",
   "site.footer.powered_by": "Powered by Postizer",
+  "site.footer.powered_by_prefix": "Powered by",
+  "site.footer.powered_by_suffix": "",
   "common.ready": "Ready",
   "common.enabled": "Enabled",
   "common.not_set": "Not set",
@@ -504,6 +506,8 @@
   "settings.status.deleted": "Deleted",
   "settings.upload_pack.empty": "Choose a .zip package",
   "settings.home_image.none": "Not set",
+  "site.code.copy_aria": "Copy {language} code",
+  "site.code.language_fallback": "Code",
   "site.image.open": "Open image",
   "site.lightbox.close": "Close",
   "site.search.index_label": "index"

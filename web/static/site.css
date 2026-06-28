@@ -3451,6 +3451,19 @@
     color: var(--muted);
   }
 
+  .site-footer__powered-link {
+    color: inherit;
+    font-weight: 400;
+    text-decoration: none;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  .site-footer__powered-link:hover,
+  .site-footer__powered-link:focus-visible {
+    text-decoration: underline;
+  }
+
   .site-footer__nav {
     display: flex;
     flex-wrap: wrap;
@@ -3957,12 +3970,134 @@
     margin-top: .12rem;
   }
 
+  .article-body .code-block {
+    margin: .9rem 0 1rem;
+    border: 1px solid var(--rule);
+    background: #272822;
+    color: #f8f8f2;
+  }
+
+  .article-body .code-block__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    min-height: 1.7rem;
+    padding: .24rem .5rem .04rem .65rem;
+    border-bottom: 0;
+    background: transparent;
+    font-family: var(--font-ui);
+    font-size: .72rem;
+    line-height: 1;
+  }
+
+  .article-body .code-block__language {
+    overflow: hidden;
+    color: rgba(255, 255, 255, .78);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .article-body .code-block__copy {
+    position: relative;
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 1.55rem;
+    min-width: 1.55rem;
+    height: 1.55rem;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, .38);
+    border-radius: .25rem;
+    background: transparent;
+    color: #f8f8f2;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .article-body .code-block__copy::before,
+  .article-body .code-block__copy::after {
+    content: "";
+    position: absolute;
+    width: .43rem;
+    height: .52rem;
+    border: 1.5px solid currentColor;
+    border-radius: .1rem;
+  }
+
+  .article-body .code-block__copy::before {
+    transform: translate(-.09rem, -.06rem);
+  }
+
+  .article-body .code-block__copy::after {
+    transform: translate(.09rem, .06rem);
+  }
+
+  .article-body .code-block__copy:hover,
+  .article-body .code-block__copy:focus-visible {
+    border-color: var(--inverse-ink);
+    background: var(--inverse-ink);
+    color: var(--inverse);
+    outline: 0;
+  }
+
+  .article-body .code-block__copy.is-complete {
+    border-color: var(--inverse-ink);
+    background: var(--inverse-ink);
+    color: var(--inverse);
+  }
+
+  .article-body .code-block__copy.is-complete::before {
+    width: .7rem;
+    height: .38rem;
+    border-width: 0 0 2px 2px;
+    border-radius: 0;
+    transform: translateY(-.08rem) rotate(-45deg);
+  }
+
+  .article-body .code-block__copy.is-complete::after {
+    display: none;
+  }
+
+  .article-body .code-block__copy.is-error {
+    border-color: var(--inverse-ink);
+  }
+
+  .article-body .code-block__copy.is-error::before,
+  .article-body .code-block__copy.is-error::after {
+    width: .78rem;
+    height: 0;
+    border-width: 0;
+    border-top: 2px solid currentColor;
+    background: transparent;
+  }
+
+  .article-body .code-block__copy.is-error::before {
+    transform: rotate(45deg);
+  }
+
+  .article-body .code-block__copy.is-error::after {
+    display: block;
+    transform: rotate(-45deg);
+  }
+
   .article-body pre {
     overflow: auto;
+    margin: .9rem 0 1rem;
     padding: .75rem;
     border: 1px solid var(--rule);
     background: var(--inverse);
     color: var(--inverse-ink);
+  }
+
+  .article-body .code-block pre {
+    margin: 0;
+    padding-top: .22rem;
+    border: 0;
+    box-shadow: none;
   }
 
   .article-body code {
@@ -4147,7 +4282,7 @@
 
   input:not(.ui-input),
   textarea:not(.ui-textarea),
-  button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button):not(.menu-item-list__button):not(.admin-nav-disclosure) {
+  button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button):not(.menu-item-list__button):not(.admin-nav-disclosure):not(.code-block__copy) {
     border: 1px solid var(--rule);
     border-radius: 0;
     background: var(--surface);
@@ -4161,7 +4296,7 @@
     padding: .45rem;
   }
 
-  button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button):not(.menu-item-list__button):not(.admin-nav-disclosure) {
+  button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button):not(.menu-item-list__button):not(.admin-nav-disclosure):not(.code-block__copy) {
     padding: .42rem .7rem;
     cursor: pointer;
   }

@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{pageTitle .}}</title>
-  <link rel="stylesheet" href="/static/site.css?v=171">
+  <link rel="stylesheet" href="/static/site.css?v=177">
   {{if .Appearance}}{{range .Appearance.ThemeStyles}}
   <link rel="stylesheet" href="{{.}}">
   {{end}}{{end}}
@@ -15,7 +15,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
   {{end}}
   <script id="postizerMessages" type="application/json">{{if .Appearance}}{{toScriptJSON .Appearance.Messages}}{{else}}{}{{end}}</script>
-  <script defer src="/static/site.js?v=10"></script>
+  <script defer src="/static/site.js?v=13"></script>
 </head>
 <body>
 {{end}}
@@ -170,7 +170,7 @@
   <footer class="site-footer">
     <div class="site-footer__meta">
       <a class="site-footer__brand" href="/">{{siteMainTitle .}}</a>
-      <span class="site-footer__powered">{{msg . "site.footer.powered_by" "Powered by Postizer"}}</span>
+      <a class="site-footer__powered site-footer__powered-link" href="https://github.com/WiDayn/Postizer" target="_blank" rel="noopener noreferrer" aria-label="{{msg . "site.footer.powered_by" "Powered by Postizer"}}">{{msg . "site.footer.powered_by_prefix" "Powered by"}} Postizer{{with msg . "site.footer.powered_by_suffix" ""}} {{.}}{{end}}</a>
     </div>
     {{if $footerLinks}}
     <nav class="site-footer__nav" aria-label="{{msg . "site.footer.nav_aria" "Footer"}}">

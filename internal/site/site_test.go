@@ -688,7 +688,7 @@ func TestRenderMarkdownHighlightsFencedCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	rendered := string(html)
-	for _, expected := range []string{`<pre tabindex="0"`, `background-color:#272822`, `<span style=`} {
+	for _, expected := range []string{`<pre tabindex="0"`, `class="code-block__pre"`, `data-language="go"`, `background-color:#272822`, `<span style=`} {
 		if !strings.Contains(rendered, expected) {
 			t.Fatalf("highlighted code block did not contain %q:\n%s", expected, rendered)
 		}
