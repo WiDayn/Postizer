@@ -627,12 +627,22 @@
 
   .site-shell .site-footer__brand,
   .site-shell .site-footer__powered,
+  .site-shell .site-footer__powered-link,
   .site-shell .site-footer__nav a {
     color: var(--inverse-ink);
   }
 
   .site-shell .site-footer__powered {
     opacity: .78;
+  }
+
+  .site-shell .site-footer__powered-link {
+    text-decoration: none;
+  }
+
+  .site-shell .site-footer__powered-link:hover,
+  .site-shell .site-footer__powered-link:focus-visible {
+    text-decoration: underline;
   }
 
   .site-shell .site-footer__nav a:hover,

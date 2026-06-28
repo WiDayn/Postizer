@@ -13,6 +13,8 @@
   "site.code.language_fallback": "Code",
   "site.footer.nav_aria": "Footer",
   "site.footer.powered_by": "Powered by Postizer",
+  "site.footer.powered_by_prefix": "Powered by",
+  "site.footer.powered_by_suffix": "",
   "home.lead_kicker": "Articles",
   "menus.location.navbar": "Navbar",
   "menus.location.navbar.description": "Primary navigation bar",

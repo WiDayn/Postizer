@@ -3463,6 +3463,19 @@
     color: var(--muted);
   }
 
+  .site-footer__powered-link {
+    color: inherit;
+    font-weight: 400;
+    text-decoration: none;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  .site-footer__powered-link:hover,
+  .site-footer__powered-link:focus-visible {
+    text-decoration: underline;
+  }
+
   .site-footer__nav {
     display: flex;
     flex-wrap: wrap;

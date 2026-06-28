@@ -831,6 +831,12 @@ body {
     color: #888;
   }
 
+  .site-footer__powered-link {
+    color: inherit;
+    font-weight: 400;
+    text-decoration: none;
+  }
+
   .site-footer__nav {
     display: flex;
     flex-wrap: wrap;
@@ -846,6 +852,8 @@ body {
 
   .site-footer__brand:hover,
   .site-footer__brand:focus-visible,
+  .site-footer__powered-link:hover,
+  .site-footer__powered-link:focus-visible,
   .site-footer__nav a:hover,
   .site-footer__nav a:focus-visible {
     text-decoration: underline;

@@ -13,6 +13,8 @@
   "site.code.language_fallback": "代码",
   "site.footer.nav_aria": "页脚",
   "site.footer.powered_by": "由 Postizer 驱动",
+  "site.footer.powered_by_prefix": "由",
+  "site.footer.powered_by_suffix": "驱动",
   "home.lead_kicker": "文章",
   "menus.location.navbar": "导航栏",
   "menus.location.navbar.description": "顶部主导航",

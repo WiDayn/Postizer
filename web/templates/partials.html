@@ -170,7 +170,7 @@
   <footer class="site-footer">
     <div class="site-footer__meta">
       <a class="site-footer__brand" href="/">{{siteMainTitle .}}</a>
-      <span class="site-footer__powered">{{msg . "site.footer.powered_by" "Powered by Postizer"}}</span>
+      <a class="site-footer__powered site-footer__powered-link" href="https://github.com/WiDayn/Postizer" target="_blank" rel="noopener noreferrer" aria-label="{{msg . "site.footer.powered_by" "Powered by Postizer"}}">{{msg . "site.footer.powered_by_prefix" "Powered by"}} Postizer{{with msg . "site.footer.powered_by_suffix" ""}} {{.}}{{end}}</a>
     </div>
     {{if $footerLinks}}
     <nav class="site-footer__nav" aria-label="{{msg . "site.footer.nav_aria" "Footer"}}">

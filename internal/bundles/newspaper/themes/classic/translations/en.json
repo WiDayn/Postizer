@@ -60,6 +60,8 @@
   "site.feed.sitemap": "Sitemap",
   "site.footer.nav_aria": "Footer",
   "site.footer.powered_by": "Powered by Postizer",
+  "site.footer.powered_by_prefix": "Powered by",
+  "site.footer.powered_by_suffix": "",
   "common.ready": "Ready",
   "common.enabled": "Enabled",
   "common.not_set": "Not set",
