@@ -9,6 +9,8 @@
   "site.right_rail.recent_posts": "最近文章",
   "site.feed.rss": "RSS",
   "site.feed.sitemap": "站点地图",
+  "site.code.copy_aria": "复制 {language} 代码",
+  "site.code.language_fallback": "代码",
   "site.footer.nav_aria": "页脚",
   "site.footer.powered_by": "由 Postizer 驱动",
   "home.lead_kicker": "文章",

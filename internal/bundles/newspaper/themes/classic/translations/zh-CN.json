@@ -513,6 +513,8 @@
   "settings.status.deleted": "已删除",
   "settings.upload_pack.empty": "请选择 .zip 资源包",
   "settings.home_image.none": "未设置",
+  "site.code.copy_aria": "复制 {language} 代码",
+  "site.code.language_fallback": "代码",
   "site.image.open": "打开图片",
   "site.lightbox.close": "关闭",
   "site.search.index_label": "索引"

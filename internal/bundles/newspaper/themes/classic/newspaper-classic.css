@@ -515,6 +515,26 @@
     color: #302b24;
   }
 
+  .site-shell .article-body .code-block {
+    margin: .9rem 0 1rem;
+    border: 1px solid var(--rule-heavy);
+    background: #272822;
+    color: #f8f8f2;
+    box-shadow: .28rem .28rem 0 rgba(25, 22, 18, .12);
+  }
+
+  .site-shell .article-body .code-block__toolbar {
+    border-bottom: 0;
+    background: transparent;
+  }
+
+  .site-shell .article-body .code-block__copy:hover,
+  .site-shell .article-body .code-block__copy:focus-visible,
+  .site-shell .article-body .code-block__copy.is-complete {
+    background: #fffdf8;
+    color: #151310;
+  }
+
   .site-shell .article-body pre {
     margin: .9rem 0 1rem;
     padding: .85rem;
@@ -522,6 +542,12 @@
     background: #151310;
     color: #fffdf8;
     box-shadow: .28rem .28rem 0 rgba(25, 22, 18, .12);
+  }
+
+  .site-shell .article-body .code-block pre {
+    margin: 0;
+    border: 0;
+    box-shadow: none;
   }
 
   .site-shell .article-body code:not(pre code) {
@@ -575,13 +601,13 @@
 
   .site-shell input:not(.ui-input),
   .site-shell textarea:not(.ui-textarea),
-  .site-shell button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button) {
+  .site-shell button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button):not(.code-block__copy) {
     background: #fffdf8;
   }
 
   .site-shell input:not(.ui-input):focus-visible,
   .site-shell textarea:not(.ui-textarea):focus-visible,
-  .site-shell button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button):focus-visible {
+  .site-shell button:not(.ui-button):not(.ui-media-button):not(.admin-inline-delete__button):not(.code-block__copy):focus-visible {
     outline: 2px solid var(--rule-heavy);
     outline-offset: 2px;
   }

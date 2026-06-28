@@ -22,6 +22,7 @@ import (
 
 	"postizer/internal/appearance"
 
+	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
@@ -3251,11 +3252,74 @@ func newMarkdown() goldmark.Markdown {
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("monokai"),
 				highlighting.WithGuessLanguage(true),
+				highlighting.WithCodeBlockOptions(codeBlockHighlightOptions),
 			),
 		),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 		goldmark.WithRendererOptions(gmhtml.WithXHTML()),
 	)
+}
+
+// codeBlockHighlightOptions 为每个高亮代码块生成 Chroma HTML formatter（HTML 格式化器）选项。
+// 参数 context 来自 goldmark-highlighting，包含 fenced code block（围栏代码块）的语言和高亮状态。
+// 返回值是当前代码块专属的 Chroma HTML 选项；没有语言时返回 nil，保持库默认输出。
+//
+// 设计原因：
+// Chroma 默认会输出带 inline style（内联样式）的 <pre><code>，但不会把 Markdown fence
+// 中的 `bash`、`go` 等语言名带到最终 HTML。前端复制工具栏需要这个语言名，因此这里只替换
+// pre wrapper（pre 包装器），在不改变高亮 span 结构的前提下补上 class 和 data-language。
+func codeBlockHighlightOptions(context highlighting.CodeBlockContext) []chromahtml.Option {
+	language, ok := context.Language()
+	if !ok {
+		return nil
+	}
+	label := normalizeCodeLanguageLabel(string(language))
+	if label == "" {
+		return nil
+	}
+	return []chromahtml.Option{
+		chromahtml.WithPreWrapper(codeBlockPreWrapper{language: label}),
+	}
+}
+
+type codeBlockPreWrapper struct {
+	language string
+}
+
+// Start 写入 Chroma 高亮代码块的 <pre> 起始标签。
+// 参数 code 表示当前 pre 是否包裹真正代码内容；false 通常用于行号列，不应附加复制元数据。
+// 参数 styleAttr 是 Chroma 根据主题生成的 style/class 属性片段。
+// 返回值是要写入 HTML 的起始标签字符串。
+func (w codeBlockPreWrapper) Start(code bool, styleAttr string) string {
+	if !code {
+		return fmt.Sprintf(`<pre tabindex="0"%s>`, styleAttr)
+	}
+	return fmt.Sprintf(
+		`<pre tabindex="0" class="code-block__pre" data-language="%s"%s><code>`,
+		stdhtml.EscapeString(w.language),
+		styleAttr,
+	)
+}
+
+// End 写入 Chroma 高亮代码块的结束标签。
+// 参数 code 表示当前 pre 是否包裹真正代码内容；true 时需要同时关闭 <code>。
+// 返回值是要写入 HTML 的结束标签字符串。
+func (w codeBlockPreWrapper) End(code bool) string {
+	if code {
+		return `</code></pre>`
+	}
+	return `</pre>`
+}
+
+// normalizeCodeLanguageLabel 清洗 fenced code block（围栏代码块）的语言名，确保它适合写入 data-language。
+// 参数 value 是 Markdown fence 或 Chroma guess language（猜测语言）得到的原始语言名。
+// 返回值是小写、去空白后的语言标识；空字符串表示没有可展示语言。
+func normalizeCodeLanguageLabel(value string) string {
+	label := strings.TrimSpace(strings.ToLower(value))
+	if label == "" {
+		return ""
+	}
+	return strings.Fields(label)[0]
 }
 
 func splitFrontMatter(body []byte) (frontMatter, []byte) {

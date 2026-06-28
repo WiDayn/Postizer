@@ -740,6 +740,12 @@ body {
     color: #222;
   }
 
+  .article-body .code-block pre {
+    margin: 0;
+    border: 0;
+    box-shadow: none;
+  }
+
   .article-body blockquote {
     border-left-color: #d7d7d7;
     color: #555;

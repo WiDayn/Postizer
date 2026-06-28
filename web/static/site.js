@@ -235,10 +235,187 @@ function enhanceArticleFigures(root) {
   });
 }
 
+/**
+ * 读取代码块声明的语言名。
+ * @param {HTMLElement} pre - Goldmark/Chroma 输出的 pre 元素。
+ * @returns {string} 返回适合展示的语言名；无法识别时返回本地化的通用“代码”文案。
+ */
+function articleCodeBlockLanguage(pre) {
+  const code = pre && pre.querySelector("code");
+  const raw = [
+    pre && pre.dataset ? pre.dataset.language : "",
+    code && code.dataset ? code.dataset.lang || code.dataset.language : "",
+    code ? Array.from(code.classList).find((name) => name.startsWith("language-")) : ""
+  ].find((value) => typeof value === "string" && value.trim());
+
+  const normalized = String(raw || "").trim().replace(/^language-/, "").toLowerCase();
+  if (!normalized || normalized === "fallback") {
+    return postizerMessage("site.code.language_fallback", "Code");
+  }
+
+  const labels = {
+    bash: "Bash",
+    sh: "Shell",
+    shell: "Shell",
+    zsh: "Zsh",
+    go: "Go",
+    golang: "Go",
+    js: "JavaScript",
+    javascript: "JavaScript",
+    ts: "TypeScript",
+    typescript: "TypeScript",
+    html: "HTML",
+    css: "CSS",
+    json: "JSON",
+    md: "Markdown",
+    markdown: "Markdown",
+    py: "Python",
+    python: "Python",
+    yaml: "YAML",
+    yml: "YAML",
+    text: postizerMessage("site.code.language_fallback", "Code"),
+    plaintext: postizerMessage("site.code.language_fallback", "Code")
+  };
+
+  return labels[normalized] || normalized.replace(/[-_]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+/**
+ * 把文本写入剪贴板。
+ * @param {string} text - 要复制的纯文本代码内容。
+ * @returns {Promise<void>} 复制成功时 resolve；复制失败时 reject。
+ */
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.inset = "0 auto auto 0";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) throw new Error("copy command failed");
+  } finally {
+    textarea.remove();
+  }
+}
+
+/**
+ * 判断一个 Chroma 行内节点是否是行号。
+ * @param {Element} node - Chroma 生成的每行第一个子元素候选。
+ * @returns {boolean} true 表示该节点只承载行号，复制代码时应跳过。
+ */
+function isChromaInlineLineNumber(node) {
+  if (!node || node.nodeType !== 1) return false;
+  return /^\d+$/.test((node.textContent || "").trim());
+}
+
+/**
+ * 从 Chroma 的单行包装节点中提取真实代码文本。
+ * @param {Element} line - Chroma 输出的单行 span 包装元素。
+ * @returns {string} 返回该行真实代码文本，不包含 inline line number（内联行号）。
+ */
+function chromaCodeLineText(line) {
+  const children = Array.from(line.children || []);
+  if (children.length >= 2 && isChromaInlineLineNumber(children[0])) {
+    return children.slice(1).map((child) => child.textContent || "").join("");
+  }
+  return line.textContent || "";
+}
+
+/**
+ * 提取代码块中适合复制到剪贴板的源码文本。
+ * @param {HTMLElement} pre - 文章正文中的 pre 代码块。
+ * @returns {string} 返回源码文本；当 Chroma 开启 inline line number 时会剥离行号。
+ */
+function articleCodeBlockCopyText(pre) {
+  const source = pre && (pre.querySelector("code") || pre);
+  if (!source) return "";
+
+  const lines = Array.from(source.children || []).filter((child) => child.tagName === "SPAN");
+  const onlyLineWrappers = Array.from(source.childNodes || []).every((child) => {
+    if (child.nodeType === 3) return !(child.textContent || "").trim();
+    return child.nodeType === 1 && child.tagName === "SPAN";
+  });
+  if (lines.length > 0 && onlyLineWrappers) {
+    return lines.map(chromaCodeLineText).join("");
+  }
+
+  return source.textContent || source.innerText || "";
+}
+
+/**
+ * 给单个代码块添加语言标签和复制按钮。
+ * @param {HTMLElement} pre - 文章正文中的 pre 代码块。
+ * @returns {void}
+ */
+function enhanceArticleCodeBlock(pre) {
+  if (!pre || pre.closest(".code-block")) return;
+
+  const language = articleCodeBlockLanguage(pre);
+  const wrapper = document.createElement("div");
+  wrapper.className = "code-block";
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "code-block__toolbar";
+
+  const languageLabel = document.createElement("span");
+  languageLabel.className = "code-block__language";
+  languageLabel.textContent = language;
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "code-block__copy";
+  const copyLabel = postizerFormatMessage("site.code.copy_aria", "Copy {language} code", { language });
+  copyButton.setAttribute("aria-label", copyLabel);
+  copyButton.title = copyLabel;
+
+  // 保留原始 pre/code 结构，避免破坏 Chroma 已生成的高亮 span 和滚动行为。
+  pre.before(wrapper);
+  toolbar.append(languageLabel, copyButton);
+  wrapper.append(toolbar, pre);
+
+  copyButton.addEventListener("click", async () => {
+    try {
+      await copyTextToClipboard(articleCodeBlockCopyText(pre));
+      copyButton.classList.add("is-complete");
+      copyButton.classList.remove("is-error");
+    } catch (_) {
+      copyButton.classList.add("is-error");
+      copyButton.classList.remove("is-complete");
+    }
+
+    window.setTimeout(() => {
+      copyButton.classList.remove("is-complete", "is-error");
+    }, 1600);
+  });
+}
+
+/**
+ * 增强文章正文中的所有代码块。
+ * @param {HTMLElement} root - 文章正文或后台预览容器。
+ * @returns {void}
+ */
+function enhanceArticleCodeBlocks(root) {
+  if (!root) return;
+  root.querySelectorAll("pre").forEach((pre) => {
+    if (pre.querySelector("code")) enhanceArticleCodeBlock(pre);
+  });
+}
+
 function enhanceArticle(root) {
   if (!root) return;
   numberArticleHeadings(root);
   enhanceArticleFigures(root);
+  enhanceArticleCodeBlocks(root);
   renderArticleMath(root);
 }
 

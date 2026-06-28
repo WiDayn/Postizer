@@ -504,6 +504,8 @@
   "settings.status.deleted": "Deleted",
   "settings.upload_pack.empty": "Choose a .zip package",
   "settings.home_image.none": "Not set",
+  "site.code.copy_aria": "Copy {language} code",
+  "site.code.language_fallback": "Code",
   "site.image.open": "Open image",
   "site.lightbox.close": "Close",
   "site.search.index_label": "index"
