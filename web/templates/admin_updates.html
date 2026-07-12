@@ -16,6 +16,10 @@
       <span>{{msg . "settings.auto_update.current_version" "Current version"}}</span>
       <strong>{{if .AppVersion}}{{.AppVersion}}{{else}}{{msg . "settings.auto_update.version_unknown" "Unknown"}}{{end}}</strong>
     </div>
+    <div class="settings-actions settings-actions--wrap">
+      <button id="manualUpdateCheckButton" type="button" class="ui-button ui-button--ghost">{{msg . "settings.auto_update.check_now" "Check for updates"}}</button>
+      <span id="manualUpdateCheckResult" class="ui-status" aria-live="polite"></span>
+    </div>
     <label class="ui-check">
       <input id="autoUpdateEnabled" name="enabled" type="checkbox" {{if .Store.Settings.AutoUpdate.Enabled}}checked{{end}}>
       <span>{{msg . "settings.auto_update.enabled" "Enable automatic updates"}}</span>
@@ -58,6 +62,6 @@
     {{end}}
   </div>
 </section>
-<script defer src="/static/admin-settings.js?v=42"></script>
+<script defer src="/static/admin-settings.js?v=47"></script>
 {{template "adminEnd" .}}
 {{end}}
