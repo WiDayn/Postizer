@@ -32,6 +32,7 @@ const (
 
 type Host struct {
 	appRoot     string
+	dataRoot    string
 	hostService pluginrpc.HostServiceServer
 
 	mu      sync.Mutex
@@ -69,6 +70,15 @@ func New(appRoot string, hostService ...pluginrpc.HostServiceServer) *Host {
 		service = hostService[0]
 	}
 	return &Host{appRoot: appRoot, hostService: service, clients: map[string]*client{}}
+}
+
+// SetDataRoot configures a persistent directory outside installed bundle
+// files. Each plugin receives an isolated child directory through
+// POSTIZER_PLUGIN_DATA_DIR.
+func (h *Host) SetDataRoot(root string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.dataRoot = strings.TrimSpace(root)
 }
 
 func (h *Host) InvokeAction(ctx context.Context, pack appearance.Pack, req *pluginrpc.InvokeActionRequest) (*pluginrpc.InvokeActionResponse, error) {
@@ -127,6 +137,10 @@ func (h *Host) start(ctx context.Context, pack appearance.Pack) (*client, error)
 		return nil, err
 	}
 	command := h.resolveCommand(pack, runtimeCommand.command)
+	dataDir, err := h.pluginDataDir(pack.ID)
+	if err != nil {
+		return nil, err
+	}
 	if err := ensureExecutable(command, runtimeCommand.command); err != nil {
 		return nil, fmt.Errorf("prepare plugin executable %q: %w", pack.ID, err)
 	}
@@ -136,7 +150,7 @@ func (h *Host) start(ctx context.Context, pack appearance.Pack) (*client, error)
 	}
 	cmd := exec.Command(command, runtimeCommand.args...)
 	cmd.Dir = h.workDir(pack, runtimeCommand.workDir)
-	cmd.Env = h.env(pack, runtimeCommand.env, command, hostEndpoint)
+	cmd.Env = h.env(pack, runtimeCommand.env, command, hostEndpoint, dataDir)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -290,13 +304,16 @@ func (h *Host) workDir(pack appearance.Pack, configured string) string {
 	return h.absPath(filepath.Join(pack.RootDir, filepath.FromSlash(workDir)))
 }
 
-func (h *Host) env(pack appearance.Pack, runtimeEnv map[string]string, command, hostEndpoint string) []string {
+func (h *Host) env(pack appearance.Pack, runtimeEnv map[string]string, command, hostEndpoint, dataDir string) []string {
 	env := os.Environ()
 	env = append(env,
 		"POSTIZER_PLUGIN_ADDR=127.0.0.1:0",
 		"POSTIZER_PLUGIN_ID="+pack.ID,
 		"POSTIZER_PLUGIN_ROOT="+h.absPath(pack.RootDir),
 	)
+	if dataDir != "" {
+		env = append(env, "POSTIZER_PLUGIN_DATA_DIR="+dataDir)
+	}
 	if strings.TrimSpace(hostEndpoint) != "" {
 		env = append(env, "POSTIZER_HOST_ADDR="+hostEndpoint)
 	}
@@ -312,6 +329,22 @@ func (h *Host) env(pack appearance.Pack, runtimeEnv map[string]string, command, 
 		}
 	}
 	return env
+}
+
+func (h *Host) pluginDataDir(pluginID string) (string, error) {
+	root := strings.TrimSpace(h.dataRoot)
+	if root == "" {
+		return "", nil
+	}
+	dir := filepath.Join(root, pluginID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("create plugin data directory %q: %w", pluginID, err)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve plugin data directory %q: %w", pluginID, err)
+	}
+	return abs, nil
 }
 
 func (h *Host) absPath(path string) string {

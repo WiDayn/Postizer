@@ -41,6 +41,8 @@
   "nav.appearance": "Theme Packs",
   "nav.resource_marketplace": "Resource Marketplace",
   "nav.plugins": "Plugin Packs",
+  "plugins.view_public_page": "View public page",
+  "plugins.public.empty": "No items yet.",
   "nav.settings": "Settings",
   "nav.general_settings": "General Settings",
   "nav.permalinks": "Permalinks",

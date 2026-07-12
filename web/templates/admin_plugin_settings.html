@@ -5,7 +5,10 @@
     <p class="kicker">{{msg . "admin.kicker"}}</p>
     <h1>{{.Plugin.Name}}</h1>
   </div>
-  <a class="ui-button ui-button--ghost" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
+  <div class="settings-actions">
+    {{if hasPublicPluginPage .Plugin}}<a class="ui-button ui-button--primary" href="/plugins/{{.Plugin.ID}}" target="_blank" rel="noopener noreferrer">{{msg . "plugins.view_public_page" "View public page"}}</a>{{end}}
+    <a class="ui-button ui-button--ghost" href="/admin/plugins">{{msg . "nav.plugins"}}</a>
+  </div>
 </header>
 
 <section class="ui-panel admin-panel plugin-settings-panel" data-plugin-id="{{.Plugin.ID}}">
@@ -75,6 +78,6 @@
     </section>
   {{end}}
 </section>
-<script defer src="/static/plugin-admin.js?v=4"></script>
+<script defer src="/static/plugin-admin.js?v=5"></script>
 {{template "adminEnd" .}}
 {{end}}

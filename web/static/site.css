@@ -5113,3 +5113,165 @@
     }
   }
 }
+/* Cover-driven plugin results and public collection pages. */
+.plugin-public-page {
+  width: 100%;
+  min-width: 0;
+}
+
+.plugin-public-hero {
+  margin-bottom: 2rem;
+  padding-bottom: 1.4rem;
+  border-bottom: 1px solid var(--line, #d8d2c8);
+}
+
+.plugin-public-hero h1 {
+  margin: 0.2rem 0 0.55rem;
+  font-size: clamp(2rem, 5vw, 4.2rem);
+  line-height: 0.98;
+}
+
+.plugin-public-hero > p:last-child,
+.plugin-public-section__copy {
+  max-width: 68ch;
+  color: var(--muted, #625f5a);
+}
+
+.plugin-public-section {
+  margin: 0 0 2.5rem;
+}
+
+.plugin-public-section > h2 {
+  margin: 0 0 1rem;
+  font-size: clamp(1.35rem, 2.5vw, 2rem);
+}
+
+.plugin-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: clamp(0.85rem, 2vw, 1.4rem);
+}
+
+.plugin-card-grid--admin {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+.plugin-cover-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line, #d8d2c8) 82%, transparent);
+  border-radius: 0.8rem;
+  background: var(--paper, #fffdf8);
+  box-shadow: 0 0.35rem 1.2rem rgba(23, 20, 16, 0.08);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.plugin-cover-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 0.7rem 1.8rem rgba(23, 20, 16, 0.14);
+}
+
+.plugin-cover-card__link {
+  display: block;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+
+.plugin-cover-card__poster {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background: linear-gradient(145deg, #262626, #080808);
+}
+
+.plugin-cover-card__poster img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform 240ms ease;
+}
+
+.plugin-cover-card:hover .plugin-cover-card__poster img {
+  transform: scale(1.035);
+}
+
+.plugin-cover-card__poster.is-missing {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 2rem;
+}
+
+.plugin-cover-card__body {
+  padding: 0.8rem 0.85rem 0.95rem;
+}
+
+.plugin-cover-card__body h3 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 1rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-cover-card__body > p {
+  margin: 0.3rem 0 0;
+  color: var(--muted, #625f5a);
+  font-size: 0.84rem;
+}
+
+.plugin-cover-card__description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-height: 1.45;
+}
+
+.plugin-cover-card__details {
+  display: inline-block;
+  margin-top: 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.plugin-cover-card__badges,
+.plugin-cover-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.65rem;
+}
+
+.plugin-cover-card__badges span {
+  padding: 0.18rem 0.48rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink, #181715) 9%, transparent);
+  font-size: 0.72rem;
+}
+
+.plugin-cover-card__actions .ui-button {
+  min-height: 2rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.75rem;
+}
+
+.plugin-public-empty {
+  padding: 1.5rem;
+  border: 1px dashed var(--line, #d8d2c8);
+  color: var(--muted, #625f5a);
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .plugin-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plugin-card-grid--admin {
+    grid-template-columns: 1fr;
+  }
+}

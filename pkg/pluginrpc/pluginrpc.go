@@ -72,15 +72,30 @@ type InvokeActionResponse struct {
 }
 
 type ResultSection struct {
-	Title string      `json:"title,omitempty"`
-	Kind  string      `json:"kind,omitempty"`
-	Text  string      `json:"text,omitempty"`
-	Rows  []ResultRow `json:"rows,omitempty"`
+	Title string       `json:"title,omitempty"`
+	Kind  string       `json:"kind,omitempty"`
+	Text  string       `json:"text,omitempty"`
+	Rows  []ResultRow  `json:"rows,omitempty"`
+	Cards []ResultCard `json:"cards,omitempty"`
 }
 
 type ResultRow struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
+}
+
+// ResultCard is a visual plugin result suitable for media, product, book, and
+// other cover-driven collections. Actions are invoked through the same plugin
+// action endpoint as ordinary next actions.
+type ResultCard struct {
+	ID          string       `json:"id,omitempty"`
+	Title       string       `json:"title"`
+	Subtitle    string       `json:"subtitle,omitempty"`
+	Description string       `json:"description,omitempty"`
+	ImageURL    string       `json:"image_url,omitempty"`
+	URL         string       `json:"url,omitempty"`
+	Badges      []string     `json:"badges,omitempty"`
+	Actions     []NextAction `json:"actions,omitempty"`
 }
 
 type NextAction struct {

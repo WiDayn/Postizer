@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -11,6 +12,27 @@ import (
 	"postizer/internal/appearance"
 	"postizer/pkg/pluginrpc"
 )
+
+func TestPluginDataDirIsPersistentAndIsolated(t *testing.T) {
+	root := t.TempDir()
+	host := New(".")
+	host.SetDataRoot(root)
+
+	dir, err := host.pluginDataDir("cover-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.Abs(filepath.Join(root, "cover-plugin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != want {
+		t.Fatalf("data dir = %q, want %q", dir, want)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("data dir was not created: info=%v err=%v", info, err)
+	}
+}
 
 func TestHostStartsGRPCPluginAndInvokesAction(t *testing.T) {
 	host := New(filepath.Join("..", ".."))
