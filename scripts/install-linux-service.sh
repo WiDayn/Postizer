@@ -761,10 +761,12 @@ download_file() {
   local output="$2"
   if optional_command_exists curl; then
     if [[ -n "${POSTIZER_GITHUB_TOKEN:-}" ]]; then
-      curl -fsSL -H "Authorization: Bearer $POSTIZER_GITHUB_TOKEN" "$url" -o "$output"
-    else
-      curl -fsSL "$url" -o "$output"
+      if curl -fsSL -H "Authorization: Bearer $POSTIZER_GITHUB_TOKEN" -H "User-Agent: Postizer Updater" "$url" -o "$output"; then
+        return
+      fi
+      echo "Authenticated GitHub download failed; retrying anonymously for the public repository." >&2
     fi
+    curl -fsSL -H "User-Agent: Postizer Updater" "$url" -o "$output"
   elif optional_command_exists wget; then
     wget -qO "$output" "$url"
   else
@@ -778,10 +780,17 @@ download_github_api() {
   local output="$2"
   if optional_command_exists curl; then
     if [[ -n "${POSTIZER_GITHUB_TOKEN:-}" ]]; then
-      curl -sSL -w '%{http_code}' -H "Authorization: Bearer $POSTIZER_GITHUB_TOKEN" "$url" -o "$output"
-    else
-      curl -sSL -w '%{http_code}' "$url" -o "$output"
+      local status
+      status="$(curl -sSL -w '%{http_code}' -H "Authorization: Bearer $POSTIZER_GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "User-Agent: Postizer Updater" "$url" -o "$output")" || return
+      if [[ "$status" == "401" || "$status" == "403" ]]; then
+        echo "GitHub rejected the configured token with HTTP $status; retrying anonymously for the public repository." >&2
+        curl -sSL -w '%{http_code}' -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "User-Agent: Postizer Updater" "$url" -o "$output"
+      else
+        printf '%s' "$status"
+      fi
+      return
     fi
+    curl -sSL -w '%{http_code}' -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "User-Agent: Postizer Updater" "$url" -o "$output"
   elif optional_command_exists wget; then
     wget -qO "$output" "$url"
     printf '200'
@@ -815,6 +824,13 @@ github_latest_release_error() {
   if [[ -n "$documentation_url" ]]; then
     detail="$detail ($documentation_url)"
   fi
+  if [[ -z "$message" ]]; then
+    local preview
+    preview="$(tr '\r\n' '  ' < "$body" | tr -s ' ' | cut -c1-240)"
+    if [[ -n "$preview" ]]; then
+      detail="$detail. Response: $preview"
+    fi
+  fi
   printf '%s' "$detail. Check POSTIZER_REPO_URL and make sure the repository has a published release."
 }
 
@@ -831,8 +847,9 @@ github_repo_slug() {
   value="${value#https://github.com/}"
   value="${value#http://github.com/}"
   value="${value#git@github.com:}"
+  value="${value%/}"
   value="${value%.git}"
-  if [[ "$value" != */* ]]; then
+  if [[ "$value" != */* || "$value" == */*/* ]]; then
     echo "Repository URL must point to GitHub: $REPO_URL" >&2
     exit 1
   fi
@@ -853,8 +870,24 @@ release_platform() {
 }
 
 latest_github_release_tag() {
-  local slug tmp status tag error
+  local slug tmp status tag error latest_url effective_url
   slug="$(github_repo_slug)"
+  if optional_command_exists curl && [[ -z "${POSTIZER_GITHUB_TOKEN:-}" ]]; then
+    latest_url="https://github.com/$slug/releases/latest"
+    if ! effective_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' -H "User-Agent: Postizer Updater" "$latest_url")"; then
+      fail_update "Could not resolve GitHub latest release redirect for $slug." ""
+    fi
+    effective_url="${effective_url%/}"
+    if [[ "$effective_url" != "https://github.com/$slug/releases/tag/"* ]]; then
+      fail_update "GitHub latest release redirect for $slug ended at an unexpected URL: $effective_url" ""
+    fi
+    tag="${effective_url##*/}"
+    if ! is_release_tag "$tag"; then
+      fail_update "Latest GitHub release tag does not match vX.X.X: $tag" "$tag"
+    fi
+    printf '%s' "$tag"
+    return
+  fi
   tmp="$(mktemp)"
   if ! status="$(download_github_api "https://api.github.com/repos/$slug/releases/latest" "$tmp")"; then
     rm -f "$tmp"

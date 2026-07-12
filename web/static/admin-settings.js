@@ -43,6 +43,8 @@ const permalinkPostPresetInputs = Array.from(document.querySelectorAll('input[na
 const autoUpdateSettingsForm = document.querySelector("#autoUpdateSettingsForm");
 const autoUpdateStatus = document.querySelector("#autoUpdateStatus");
 const autoUpdateEnabled = document.querySelector("#autoUpdateEnabled");
+const manualUpdateCheckButton = document.querySelector("#manualUpdateCheckButton");
+const manualUpdateCheckResult = document.querySelector("#manualUpdateCheckResult");
 const commentSettingsForm = document.querySelector("#commentSettingsForm");
 const commentSettingsStatus = document.querySelector("#commentSettingsStatus");
 const commentsEnabled = document.querySelector("#commentsEnabled");
@@ -109,6 +111,21 @@ function setPermalinkStatus(message) {
 
 function setAutoUpdateStatus(message) {
   if (autoUpdateStatus) autoUpdateStatus.textContent = message;
+}
+
+function setManualUpdateCheckResult(message, releaseURL = "", linkLabel = "") {
+  if (!manualUpdateCheckResult) return;
+  manualUpdateCheckResult.innerHTML = "";
+  manualUpdateCheckResult.appendChild(document.createTextNode(message || ""));
+  if (releaseURL && /^https:\/\/github\.com\//i.test(releaseURL)) {
+    manualUpdateCheckResult.appendChild(document.createTextNode(" "));
+    const link = document.createElement("a");
+    link.href = releaseURL;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = linkLabel || releaseURL;
+    manualUpdateCheckResult.appendChild(link);
+  }
 }
 
 function setCommentSettingsStatus(message) {
@@ -1216,6 +1233,42 @@ if (autoUpdateSettingsForm && autoUpdateEnabled) {
     const result = await response.json();
     autoUpdateEnabled.checked = Boolean(result.enabled);
     setAutoUpdateStatus(tr("settings.status.saved", "Saved"));
+  });
+}
+
+if (manualUpdateCheckButton) {
+  manualUpdateCheckButton.addEventListener("click", async () => {
+    manualUpdateCheckButton.disabled = true;
+    setAutoUpdateStatus(tr("settings.auto_update.checking", "Checking"));
+    setManualUpdateCheckResult(tr("settings.auto_update.checking_detail", "Contacting GitHub Releases..."));
+    try {
+      const response = await fetch(apiURL("/admin/api/settings/updates/check"), { method: "POST" });
+      if (!response.ok) {
+        const message = (await response.text()).trim() || response.statusText;
+        setManualUpdateCheckResult(message);
+        setAutoUpdateStatus(tr("settings.auto_update.check_failed", "Check failed"));
+        return;
+      }
+      const result = await response.json();
+      const latest = String(result.latest_version || "").trim();
+      if (result.update_available) {
+        setManualUpdateCheckResult(
+          formatMessage("settings.auto_update.available", "Update available: {version}", { version: latest }),
+          String(result.release_url || ""),
+          tr("settings.auto_update.view_release", "View release")
+        );
+      } else {
+        setManualUpdateCheckResult(
+          formatMessage("settings.auto_update.up_to_date", "You are up to date ({version}).", { version: latest })
+        );
+      }
+      setAutoUpdateStatus(tr("settings.status.ready", "Ready"));
+    } catch (error) {
+      setManualUpdateCheckResult(error.message || String(error));
+      setAutoUpdateStatus(tr("settings.auto_update.check_failed", "Check failed"));
+    } finally {
+      manualUpdateCheckButton.disabled = false;
+    }
   });
 }
 

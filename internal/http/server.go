@@ -53,6 +53,7 @@ type Server struct {
 	pluginDownloads    map[string]pluginDownload
 	pluginJobs         map[string]*importJob
 	marketplaceClient  *http.Client
+	updateClient       *http.Client
 	loginAttempts      map[string]loginAttemptState
 	auth               authConfig
 	mu                 sync.RWMutex
@@ -234,7 +235,7 @@ const (
 	pluginPublicUIOutlet     = "site.page"
 )
 
-var AppVersion = "v0.1.8"
+var AppVersion = "v0.1.9"
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
 	appRoot := env("POSTIZER_APP_ROOT", ".")
@@ -252,6 +253,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 		pluginDownloads:    map[string]pluginDownload{},
 		pluginJobs:         map[string]*importJob{},
 		marketplaceClient:  &http.Client{Timeout: 45 * time.Second},
+		updateClient:       &http.Client{Timeout: 20 * time.Second},
 		loginAttempts:      map[string]loginAttemptState{},
 		auth:               newAuthConfig(contentRoot),
 	}
@@ -324,6 +326,8 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/settings/site-title", s.requireAdmin(http.HandlerFunc(s.updateSiteTitleSettings)))
 	mux.Handle("POST /admin/api/settings/permalinks", s.requireAdmin(http.HandlerFunc(s.updatePermalinkSettings)))
 	mux.Handle("POST /admin/api/settings/auto-update", s.requireAdmin(http.HandlerFunc(s.updateAutoUpdateSettings)))
+	mux.Handle("GET /admin/api/updates/check", s.requireAdmin(http.HandlerFunc(s.checkForUpdates)))
+	mux.Handle("POST /admin/api/settings/updates/check", s.requireAdmin(http.HandlerFunc(s.checkForUpdates)))
 	mux.Handle("POST /admin/api/settings/comments", s.requireAdmin(http.HandlerFunc(s.updateCommentSettings)))
 	mux.Handle("POST /admin/api/settings/home-page", s.requireAdmin(http.HandlerFunc(s.updateHomePageSettings)))
 	mux.Handle("POST /admin/api/settings/admin-account", s.requireAdmin(http.HandlerFunc(s.updateAdminAccountSettings)))
