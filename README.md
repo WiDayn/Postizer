@@ -92,7 +92,7 @@ curl -fsSL https://raw.githubusercontent.com/WiDayn/Postizer/main/scripts/instal
   --update-interval 15min
 ```
 
-The installer downloads the latest GitHub Release asset matching the host architecture, verifies `SHA256SUMS`, installs the runtime into `/opt/postizer`, writes `/etc/postizer/postizer.env`, registers `postizer.service`, enables it, starts it, and registers `postizer-update.timer`. If `POSTIZER_ADMIN_PASSWORD` is not set, the installer generates an initial admin password and prints it once. Automatic updates are off by default and can be enabled in Admin -> Settings -> Auto Update; the timer only upgrades when a newer GitHub Release tag matching `vX.X.X` is available, so ordinary commits are ignored.
+The installer downloads the latest GitHub Release asset matching the host architecture, verifies `SHA256SUMS`, installs the runtime into `/opt/postizer`, writes `/etc/postizer/postizer.env`, registers `postizer.service`, enables it, starts it, and registers `postizer-update.timer` plus `postizer-update.path`. If `POSTIZER_ADMIN_PASSWORD` is not set, the installer generates an initial admin password and prints it once. Automatic updates are off by default and can be enabled in Admin -> Settings -> Auto Update; the timer only upgrades when a newer GitHub Release tag matching `vX.X.X` is available, so ordinary commits are ignored. A manual update requested from the authenticated admin page writes a protected trigger file, which makes the path unit start the same root-owned updater immediately without granting the web process sudo access.
 
 If you are already inside a cloned repository, you can also run:
 

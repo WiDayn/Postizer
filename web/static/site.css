@@ -5288,6 +5288,23 @@
   font-size: 0.84rem;
 }
 
+.plugin-cover-card__added {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  font-family: var(--font-ui, sans-serif);
+  font-size: 0.74rem !important;
+}
+
+.plugin-cover-card__added span {
+  color: inherit;
+  font-weight: 700;
+}
+
+.plugin-cover-card__added time {
+  font-variant-numeric: tabular-nums;
+}
+
 .plugin-cover-card__description {
   display: -webkit-box;
   overflow: hidden;

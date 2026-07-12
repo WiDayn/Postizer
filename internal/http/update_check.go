@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ type updateCheckResponse struct {
 	ReleaseURL      string    `json:"release_url,omitempty"`
 	PublishedAt     time.Time `json:"published_at,omitempty"`
 	CheckedAt       time.Time `json:"checked_at"`
+	CanApply        bool      `json:"can_apply"`
 }
 
 func (s *Server) checkForUpdates(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +47,36 @@ func (s *Server) checkForUpdates(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	result.CanApply = s.updateTrigger != nil
 	writeJSON(w, result)
+}
+
+func (s *Server) applyUpdate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	var payload struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	version := strings.TrimSpace(payload.Version)
+	comparison, comparable := marketplace.CompareVersions(version, currentAppVersion())
+	if !comparable || comparison <= 0 {
+		http.Error(w, "requested version must be a newer vX.X.X release", http.StatusBadRequest)
+		return
+	}
+	if s.updateTrigger == nil {
+		http.Error(w, "immediate updates are not available for this installation", http.StatusConflict)
+		return
+	}
+	if err := s.updateTrigger(version); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true, "version": version})
 }
 
 func fetchLatestRelease(ctx context.Context, client *http.Client, repoURL, apiBase, token, currentVersion string) (updateCheckResponse, error) {

@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 	_ "time/tzdata"
 
@@ -29,7 +32,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("open media store: %v", err)
 	}
-	handler, err := apphttp.New(store, mediaStore, contentRoot)
+	updateCommand := strings.TrimSpace(os.Getenv("POSTIZER_SELF_UPDATE_COMMAND"))
+	updateRequestFile := strings.TrimSpace(os.Getenv("POSTIZER_UPDATE_REQUEST_FILE"))
+	updateRequests := make(chan string, 1)
+	var updatePending atomic.Bool
+	var updateTrigger func(string) error
+	if updateCommand != "" {
+		updateTrigger = func(version string) error {
+			if !updatePending.CompareAndSwap(false, true) {
+				return fmt.Errorf("an update is already in progress")
+			}
+			updateRequests <- version
+			return nil
+		}
+	} else if updateRequestFile != "" {
+		updateTrigger = func(version string) error {
+			return writeUpdateRequest(updateRequestFile, version)
+		}
+	}
+	handler, err := apphttp.New(store, mediaStore, contentRoot, updateTrigger)
 	if err != nil {
 		log.Fatalf("create server: %v", err)
 	}
@@ -39,7 +60,7 @@ func main() {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	startSelfUpdateLoop(contentRoot)
+	startSelfUpdateLoop(contentRoot, updateCommand, updateRequests, &updatePending)
 
 	log.Printf("Postizer listening on http://localhost%s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -47,8 +68,31 @@ func main() {
 	}
 }
 
-func startSelfUpdateLoop(contentRoot string) {
-	command := strings.TrimSpace(os.Getenv("POSTIZER_SELF_UPDATE_COMMAND"))
+func writeUpdateRequest(filename, version string) error {
+	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(filename), ".postizer-update-request-*")
+	if err != nil {
+		return err
+	}
+	tempName := temp.Name()
+	defer os.Remove(tempName)
+	if err := temp.Chmod(0600); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.WriteString(strings.TrimSpace(version) + "\n"); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempName, filename)
+}
+
+func startSelfUpdateLoop(contentRoot, command string, requests <-chan string, pending *atomic.Bool) {
 	if command == "" {
 		return
 	}
@@ -57,24 +101,42 @@ func startSelfUpdateLoop(contentRoot string) {
 	timeout := envDuration("POSTIZER_SELF_UPDATE_TIMEOUT", 45*time.Minute)
 
 	go func() {
-		if initialDelay > 0 {
-			time.Sleep(initialDelay)
-		}
+		timer := time.NewTimer(initialDelay)
+		defer timer.Stop()
 		for {
-			runSelfUpdateIfEnabled(contentRoot, command, timeout)
-			time.Sleep(interval)
+			select {
+			case version := <-requests:
+				runSelfUpdate(contentRoot, command, timeout, true, version)
+				pending.Store(false)
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(interval)
+			case <-timer.C:
+				runSelfUpdate(contentRoot, command, timeout, false, "")
+				timer.Reset(interval)
+			}
 		}
 	}()
 }
 
 func runSelfUpdateIfEnabled(contentRoot, command string, timeout time.Duration) {
-	settings, err := site.LoadSettings(contentRoot)
-	if err != nil {
-		log.Printf("self-update settings: %v", err)
-		return
-	}
-	if !settings.AutoUpdate.Enabled {
-		return
+	runSelfUpdate(contentRoot, command, timeout, false, "")
+}
+
+func runSelfUpdate(contentRoot, command string, timeout time.Duration, manual bool, version string) {
+	if !manual {
+		settings, err := site.LoadSettings(contentRoot)
+		if err != nil {
+			log.Printf("self-update settings: %v", err)
+			return
+		}
+		if !settings.AutoUpdate.Enabled {
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -83,6 +145,9 @@ func runSelfUpdateIfEnabled(contentRoot, command string, timeout time.Duration) 
 
 	cmd := exec.CommandContext(ctx, command)
 	cmd.Env = os.Environ()
+	if strings.TrimSpace(version) != "" {
+		cmd.Env = append(cmd.Env, "POSTIZER_RELEASE_VERSION="+strings.TrimSpace(version))
+	}
 	output, err := cmd.CombinedOutput()
 	outputText := strings.TrimSpace(string(output))
 	entries := updateLogEntriesFromOutput(outputText)

@@ -27,6 +27,7 @@
           <div class="plugin-cover-card__body">
             <h3>{{.Title}}</h3>
             {{if .Subtitle}}<p>{{.Subtitle}}</p>{{end}}
+            {{if not .AddedAt.IsZero}}<p class="plugin-cover-card__added"><span>{{msg $ "plugins.card.added_at" "Added"}}</span> <time datetime="{{.AddedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{viewDate $ .AddedAt}}</time></p>{{end}}
             {{if .Badges}}<div class="plugin-cover-card__badges">{{range .Badges}}<span>{{.}}</span>{{end}}</div>{{end}}
           </div>
         {{if .URL}}</a>{{end}}

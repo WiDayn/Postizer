@@ -2,11 +2,34 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"postizer/internal/site"
 )
+
+func TestWriteUpdateRequest(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "nested", "update-request")
+	if err := writeUpdateRequest(filename, " v0.1.11 "); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(body), "v0.1.11\n"; got != want {
+		t.Fatalf("request = %q, want %q", got, want)
+	}
+	info, err := os.Stat(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("mode = %o, want 600", info.Mode().Perm())
+	}
+}
 
 func TestSelfUpdateFailureMessagePrefersReadableOutput(t *testing.T) {
 	output := "POSTIZER_UPDATE_EVENT\t2026-06-02T15:28:00Z\tupdate_failed\t\tStructured message\nCould not find tag_name in GitHub latest release response."

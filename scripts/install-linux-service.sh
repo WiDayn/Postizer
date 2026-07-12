@@ -1150,6 +1150,17 @@ EOF
   echo
 }
 
+ensure_manual_update_env() {
+  if [[ "$INSTALL_UPDATE_TIMER" -ne 1 ]]; then
+    return
+  fi
+  local request_file="$INSTALL_DIR/content/.postizer-update-request"
+  if grep -q '^POSTIZER_UPDATE_REQUEST_FILE=' "$ENV_FILE"; then
+    return
+  fi
+  printf 'POSTIZER_UPDATE_REQUEST_FILE=%s\n' "$(env_quote "$request_file")" >>"$ENV_FILE"
+}
+
 install_files() {
   local runtime_source="$SOURCE_DIR"
   if [[ "$INSTALL_FROM_RELEASE" -eq 1 ]]; then
@@ -1228,15 +1239,30 @@ write_update_timer_files() {
   local updater_path="/usr/local/bin/$SERVICE_NAME-auto-update"
   local update_service_path="/etc/systemd/system/$UPDATE_SERVICE_NAME.service"
   local update_timer_path="/etc/systemd/system/$UPDATE_TIMER_NAME.timer"
+  local update_path_path="/etc/systemd/system/$UPDATE_TIMER_NAME.path"
   local script_path="$INSTALL_DIR/scripts/install-linux-service.sh"
+  local request_file="$INSTALL_DIR/content/.postizer-update-request"
 
   cat >"$updater_path" <<EOF
 #!/usr/bin/env bash
 set -Eeuo pipefail
+release_version=$(printf '%q' "$RELEASE_VERSION_REQUESTED")
+manual_update=0
+if [[ -f $(printf '%q' "$request_file") ]]; then
+  requested_version="\$(tr -d '\\r\\n' < $(printf '%q' "$request_file"))"
+  rm -f $(printf '%q' "$request_file")
+  if [[ "\$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    release_version="\$requested_version"
+    manual_update=1
+  fi
+fi
+if [[ "\$manual_update" -eq 1 ]]; then
+  export POSTIZER_MANUAL_UPDATE=1
+fi
 exec bash $(printf '%q' "$script_path") \\
   --auto-update-run \\
   --repo-url $(printf '%q' "$REPO_URL") \\
-  --release-version $(printf '%q' "$RELEASE_VERSION_REQUESTED") \\
+  --release-version "\$release_version" \\
   --install-dir $(printf '%q' "$INSTALL_DIR") \\
   --service-name $(printf '%q' "$SERVICE_NAME") \\
   --update-service-name $(printf '%q' "$UPDATE_SERVICE_NAME") \\
@@ -1276,6 +1302,18 @@ Unit=$UPDATE_SERVICE_NAME.service
 [Install]
 WantedBy=timers.target
 EOF
+
+  cat >"$update_path_path" <<EOF
+[Unit]
+Description=Apply a requested Postizer update immediately
+
+[Path]
+PathExists=$request_file
+Unit=$UPDATE_SERVICE_NAME.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
 }
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -1298,7 +1336,7 @@ validate_paths
 if needs_dependency_install; then
   install_os_packages
 fi
-if [[ "$AUTO_UPDATE_RUN" -eq 1 ]] && ! auto_update_enabled; then
+if [[ "$AUTO_UPDATE_RUN" -eq 1 && "${POSTIZER_MANUAL_UPDATE:-0}" != "1" ]] && ! auto_update_enabled; then
   echo "Automatic updates are disabled in $INSTALL_DIR/content/settings.json"
   exit 0
 fi
@@ -1328,6 +1366,7 @@ need_command useradd
 ensure_service_identity
 build_or_select_binary
 write_env_file
+ensure_manual_update_env
 install_files
 write_service_file
 write_update_timer_files
@@ -1337,12 +1376,14 @@ if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
   systemctl enable "$SERVICE_NAME.service"
   if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
     systemctl enable "$UPDATE_TIMER_NAME.timer"
+    systemctl enable "$UPDATE_TIMER_NAME.path"
   fi
 fi
 if [[ "$START_SERVICE" -eq 1 ]]; then
   systemctl restart "$SERVICE_NAME.service"
   if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
     systemctl restart "$UPDATE_TIMER_NAME.timer"
+    systemctl restart "$UPDATE_TIMER_NAME.path"
   fi
 fi
 
@@ -1355,6 +1396,7 @@ echo "Service: $SERVICE_NAME.service"
 if [[ "$INSTALL_UPDATE_TIMER" -eq 1 ]]; then
   echo "Auto-update service: $UPDATE_SERVICE_NAME.service"
   echo "Auto-update timer: $UPDATE_TIMER_NAME.timer"
+  echo "Manual-update trigger: $UPDATE_TIMER_NAME.path"
 fi
 echo "Status: systemctl status $SERVICE_NAME.service"
 echo "Logs:   journalctl -u $SERVICE_NAME.service -f"
