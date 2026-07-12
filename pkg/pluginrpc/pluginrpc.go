@@ -3,6 +3,7 @@ package pluginrpc
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
@@ -106,6 +107,7 @@ type ResultCard struct {
 	ImageURL    string       `json:"image_url,omitempty"`
 	URL         string       `json:"url,omitempty"`
 	Badges      []string     `json:"badges,omitempty"`
+	AddedAt     time.Time    `json:"added_at,omitempty"`
 	Actions     []NextAction `json:"actions,omitempty"`
 }
 

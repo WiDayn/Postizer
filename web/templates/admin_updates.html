@@ -18,13 +18,14 @@
     </div>
     <div class="settings-actions settings-actions--wrap">
       <button id="manualUpdateCheckButton" type="button" class="ui-button ui-button--ghost">{{msg . "settings.auto_update.check_now" "Check for updates"}}</button>
+      <button id="manualUpdateApplyButton" type="button" class="ui-button ui-button--primary" hidden>{{msg . "settings.auto_update.apply_now" "Update now"}}</button>
       <span id="manualUpdateCheckResult" class="ui-status" aria-live="polite"></span>
     </div>
     <label class="ui-check">
       <input id="autoUpdateEnabled" name="enabled" type="checkbox" {{if .Store.Settings.AutoUpdate.Enabled}}checked{{end}}>
       <span>{{msg . "settings.auto_update.enabled" "Enable automatic updates"}}</span>
     </label>
-    <p class="settings-form-note">{{msg . "settings.auto_update.note" "Docker images use the writable runtime volume; Linux services use the registered Postizer update timer."}}</p>
+    <p class="settings-form-note">{{msg . "settings.auto_update.note" "Docker images use the writable runtime volume; Linux services use the registered Postizer updater and manual trigger."}}</p>
     <div class="settings-actions">
       <button type="submit" class="ui-button ui-button--primary">{{msg . "settings.auto_update.save" "Save update settings"}}</button>
     </div>
@@ -62,6 +63,6 @@
     {{end}}
   </div>
 </section>
-<script defer src="/static/admin-settings.js?v=47"></script>
+<script defer src="/static/admin-settings.js?v=48"></script>
 {{template "adminEnd" .}}
 {{end}}

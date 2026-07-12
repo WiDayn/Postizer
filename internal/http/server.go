@@ -54,6 +54,7 @@ type Server struct {
 	pluginJobs         map[string]*importJob
 	marketplaceClient  *http.Client
 	updateClient       *http.Client
+	updateTrigger      func(string) error
 	loginAttempts      map[string]loginAttemptState
 	auth               authConfig
 	mu                 sync.RWMutex
@@ -235,9 +236,9 @@ const (
 	pluginPublicUIOutlet     = "site.page"
 )
 
-var AppVersion = "v0.1.10"
+var AppVersion = "v0.1.11"
 
-func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
+func New(store *site.Store, mediaStore *media.Store, contentRoot string, updateTriggers ...func(string) error) (http.Handler, error) {
 	appRoot := env("POSTIZER_APP_ROOT", ".")
 	s := &Server{
 		store:              store,
@@ -256,6 +257,9 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 		updateClient:       &http.Client{Timeout: 20 * time.Second},
 		loginAttempts:      map[string]loginAttemptState{},
 		auth:               newAuthConfig(contentRoot),
+	}
+	if len(updateTriggers) > 0 {
+		s.updateTrigger = updateTriggers[0]
 	}
 	s.pluginHost = pluginhost.New(appRoot, s)
 	s.pluginHost.SetDataRoot(filepath.Join(contentRoot, "plugin-data"))
@@ -328,6 +332,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.Handle("POST /admin/api/settings/auto-update", s.requireAdmin(http.HandlerFunc(s.updateAutoUpdateSettings)))
 	mux.Handle("GET /admin/api/updates/check", s.requireAdmin(http.HandlerFunc(s.checkForUpdates)))
 	mux.Handle("POST /admin/api/settings/updates/check", s.requireAdmin(http.HandlerFunc(s.checkForUpdates)))
+	mux.Handle("POST /admin/api/settings/updates/apply", s.requireAdmin(http.HandlerFunc(s.applyUpdate)))
 	mux.Handle("POST /admin/api/settings/comments", s.requireAdmin(http.HandlerFunc(s.updateCommentSettings)))
 	mux.Handle("POST /admin/api/settings/home-page", s.requireAdmin(http.HandlerFunc(s.updateHomePageSettings)))
 	mux.Handle("POST /admin/api/settings/admin-account", s.requireAdmin(http.HandlerFunc(s.updateAdminAccountSettings)))
@@ -364,6 +369,15 @@ func loadTemplatesFromRoot(activeTheme appearance.Pack, templatesRoot string) (*
 		"date": func(t time.Time) string {
 			if t.IsZero() {
 				return ""
+			}
+			return site.FormatDisplayTime(t)
+		},
+		"viewDate": func(data ViewData, t time.Time) string {
+			if t.IsZero() {
+				return ""
+			}
+			if data.Store != nil {
+				t = t.In(site.TimeLocation(data.Store.Settings))
 			}
 			return site.FormatDisplayTime(t)
 		},

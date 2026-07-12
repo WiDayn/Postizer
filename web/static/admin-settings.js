@@ -44,6 +44,7 @@ const autoUpdateSettingsForm = document.querySelector("#autoUpdateSettingsForm")
 const autoUpdateStatus = document.querySelector("#autoUpdateStatus");
 const autoUpdateEnabled = document.querySelector("#autoUpdateEnabled");
 const manualUpdateCheckButton = document.querySelector("#manualUpdateCheckButton");
+const manualUpdateApplyButton = document.querySelector("#manualUpdateApplyButton");
 const manualUpdateCheckResult = document.querySelector("#manualUpdateCheckResult");
 const commentSettingsForm = document.querySelector("#commentSettingsForm");
 const commentSettingsStatus = document.querySelector("#commentSettingsStatus");
@@ -1239,6 +1240,10 @@ if (autoUpdateSettingsForm && autoUpdateEnabled) {
 if (manualUpdateCheckButton) {
   manualUpdateCheckButton.addEventListener("click", async () => {
     manualUpdateCheckButton.disabled = true;
+    if (manualUpdateApplyButton) {
+      manualUpdateApplyButton.hidden = true;
+      manualUpdateApplyButton.dataset.version = "";
+    }
     setAutoUpdateStatus(tr("settings.auto_update.checking", "Checking"));
     setManualUpdateCheckResult(tr("settings.auto_update.checking_detail", "Contacting GitHub Releases..."));
     try {
@@ -1257,6 +1262,16 @@ if (manualUpdateCheckButton) {
           String(result.release_url || ""),
           tr("settings.auto_update.view_release", "View release")
         );
+        if (manualUpdateApplyButton && result.can_apply) {
+          manualUpdateApplyButton.dataset.version = latest;
+          manualUpdateApplyButton.hidden = false;
+        } else if (!result.can_apply) {
+          setManualUpdateCheckResult(
+            `${formatMessage("settings.auto_update.available", "Update available: {version}", { version: latest })} ${tr("settings.auto_update.apply_unavailable", "Immediate update is not available for this installation.")}`,
+            String(result.release_url || ""),
+            tr("settings.auto_update.view_release", "View release")
+          );
+        }
       } else {
         setManualUpdateCheckResult(
           formatMessage("settings.auto_update.up_to_date", "You are up to date ({version}).", { version: latest })
@@ -1270,6 +1285,57 @@ if (manualUpdateCheckButton) {
       manualUpdateCheckButton.disabled = false;
     }
   });
+}
+
+if (manualUpdateApplyButton) {
+  manualUpdateApplyButton.addEventListener("click", async () => {
+    const version = String(manualUpdateApplyButton.dataset.version || "").trim();
+    if (!version) return;
+    if (!window.confirm(formatMessage("settings.auto_update.apply_confirm", "Update to {version} now? The service will restart.", { version }))) return;
+    manualUpdateApplyButton.disabled = true;
+    manualUpdateCheckButton.disabled = true;
+    setAutoUpdateStatus(tr("settings.auto_update.applying", "Updating"));
+    setManualUpdateCheckResult(formatMessage("settings.auto_update.applying_detail", "Installing {version}; Postizer will restart automatically...", { version }));
+    try {
+      const response = await fetch(apiURL("/admin/api/settings/updates/apply"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version })
+      });
+      if (!response.ok) throw new Error((await response.text()).trim() || response.statusText);
+      waitForAppliedUpdate(version);
+    } catch (error) {
+      setManualUpdateCheckResult(error.message || String(error));
+      setAutoUpdateStatus(tr("settings.auto_update.apply_failed", "Update failed"));
+      manualUpdateApplyButton.disabled = false;
+      manualUpdateCheckButton.disabled = false;
+    }
+  });
+}
+
+function waitForAppliedUpdate(version, attempts = 0) {
+  window.setTimeout(async () => {
+    try {
+      const response = await fetch(apiURL("/admin/api/settings/updates/check"), { method: "POST" });
+      if (response.ok) {
+        const result = await response.json();
+        if (String(result.current_version || "").trim() === version) {
+          window.location.reload();
+          return;
+        }
+      }
+    } catch (_) {
+      // A short connection failure is expected while the service restarts.
+    }
+    if (attempts < 119) {
+      waitForAppliedUpdate(version, attempts + 1);
+      return;
+    }
+    setAutoUpdateStatus(tr("settings.auto_update.apply_failed", "Update failed"));
+    setManualUpdateCheckResult(tr("settings.auto_update.apply_timeout", "The update did not complete before the timeout. Check the update log."));
+    manualUpdateApplyButton.disabled = false;
+    manualUpdateCheckButton.disabled = false;
+  }, 3000);
 }
 
 if (commentSettingsForm && commentsEnabled) {

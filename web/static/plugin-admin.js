@@ -5,6 +5,11 @@
   const pluginID = panel.dataset.pluginId;
   const resultBox = document.querySelector("[data-plugin-action-result]");
 
+  function tr(key, fallback) {
+    if (window.postizerMessage) return window.postizerMessage(key, fallback);
+    return fallback;
+  }
+
   function apiURL(actionID) {
     return `/admin/api/plugins/${encodeURIComponent(pluginID)}/actions/${encodeURIComponent(actionID)}`;
   }
@@ -205,6 +210,18 @@
       const subtitle = document.createElement("p");
       subtitle.textContent = card.subtitle;
       body.appendChild(subtitle);
+    }
+    if (card.added_at && !String(card.added_at).startsWith("0001-")) {
+      const added = document.createElement("p");
+      added.className = "plugin-cover-card__added";
+      const label = document.createElement("span");
+      label.textContent = tr("plugins.card.added_at", "Added");
+      const timestamp = document.createElement("time");
+      timestamp.dateTime = card.added_at;
+      const parsed = new Date(card.added_at);
+      timestamp.textContent = Number.isNaN(parsed.getTime()) ? card.added_at : parsed.toLocaleString();
+      added.append(label, document.createTextNode(" "), timestamp);
+      body.appendChild(added);
     }
     if (card.badges && card.badges.length) {
       const badges = document.createElement("div");

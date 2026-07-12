@@ -80,6 +80,7 @@ func TestPluginPublicTemplateRendersCoverCards(t *testing.T) {
 					Title: "已看",
 					Cards: []pluginrpc.ResultCard{{
 						Title: "黑客帝国", ImageURL: "https://image.tmdb.org/t/p/w500/matrix.jpg", URL: "https://www.themoviedb.org/movie/603",
+						AddedAt: time.Date(2026, 7, 13, 0, 15, 0, 0, time.UTC),
 					}},
 				},
 			},
@@ -89,7 +90,7 @@ func TestPluginPublicTemplateRendersCoverCards(t *testing.T) {
 		t.Fatalf("status = %d", response.Code)
 	}
 	body := response.Body.String()
-	for _, value := range []string{"黑客帝国", "matrix.jpg", "themoviedb.org/movie/603", "plugin-card-grid", "status=watched", "aria-current=\"page\""} {
+	for _, value := range []string{"黑客帝国", "matrix.jpg", "themoviedb.org/movie/603", "plugin-card-grid", "status=watched", "aria-current=\"page\"", "2026-07-13 08:15", "datetime=\"2026-07-13T00:15:00Z\""} {
 		if !strings.Contains(body, value) {
 			t.Fatalf("public plugin page does not contain %q:\n%s", value, body)
 		}
@@ -132,7 +133,7 @@ func TestPluginAdminTemplateRendersInitialValueLoaderAndLengthLimit(t *testing.T
 		t.Fatalf("status = %d", response.Code)
 	}
 	body := response.Body.String()
-	for _, value := range []string{`data-plugin-load-action="get_config"`, `type="text"`, `maxlength="2048"`, `plugin-admin.js?v=7`} {
+	for _, value := range []string{`data-plugin-load-action="get_config"`, `type="text"`, `maxlength="2048"`, `plugin-admin.js?v=8`} {
 		if !strings.Contains(body, value) {
 			t.Fatalf("plugin settings page does not contain %q:\n%s", value, body)
 		}
@@ -742,6 +743,56 @@ func TestUpdateAutoUpdateSettingsSavesToggle(t *testing.T) {
 	}
 	if !settings.AutoUpdate.Enabled {
 		t.Fatal("auto update should be enabled")
+	}
+}
+
+func TestApplyUpdateQueuesNewerRelease(t *testing.T) {
+	previous := AppVersion
+	AppVersion = "v0.1.10"
+	t.Cleanup(func() { AppVersion = previous })
+	t.Setenv("POSTIZER_VERSION", "")
+
+	requested := ""
+	s := &Server{updateTrigger: func(version string) error {
+		requested = version
+		return nil
+	}}
+	request := httptest.NewRequest(http.MethodPost, "/admin/api/settings/updates/apply", bytes.NewBufferString(`{"version":"v0.1.11"}`))
+	response := httptest.NewRecorder()
+
+	s.applyUpdate(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if requested != "v0.1.11" {
+		t.Fatalf("requested version = %q", requested)
+	}
+}
+
+func TestApplyUpdateRejectsUnavailableOrNonNewerRelease(t *testing.T) {
+	previous := AppVersion
+	AppVersion = "v0.1.10"
+	t.Cleanup(func() { AppVersion = previous })
+	t.Setenv("POSTIZER_VERSION", "")
+
+	for _, test := range []struct {
+		name    string
+		server  *Server
+		version string
+		status  int
+	}{
+		{name: "unavailable", server: &Server{}, version: "v0.1.11", status: http.StatusConflict},
+		{name: "same version", server: &Server{updateTrigger: func(string) error { return nil }}, version: "v0.1.10", status: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/admin/api/settings/updates/apply", bytes.NewBufferString(`{"version":"`+test.version+`"}`))
+			response := httptest.NewRecorder()
+			test.server.applyUpdate(response, request)
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, test.status, response.Body.String())
+			}
+		})
 	}
 }
 
