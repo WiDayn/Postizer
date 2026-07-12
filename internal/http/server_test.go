@@ -44,6 +44,47 @@ func TestLoadTemplatesParsesAdminTemplates(t *testing.T) {
 	}
 }
 
+func TestPluginPublicTemplateRendersCoverCards(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	templates, err := loadTemplates(appearance.Pack{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{templates: templates, store: &site.Store{}, appearance: &appearance.Catalog{}}
+	response := httptest.NewRecorder()
+	s.render(response, "plugin_public.html", ViewData{
+		Title:  "电影与电视",
+		Plugin: &appearance.Pack{Manifest: appearance.Manifest{ID: "cover-gallery", Name: "Cover Gallery"}},
+		PluginResult: &pluginrpc.InvokeActionResponse{
+			Title: "电影与电视",
+			Sections: []pluginrpc.ResultSection{{Title: "已看", Cards: []pluginrpc.ResultCard{{
+				Title: "黑客帝国", ImageURL: "https://image.tmdb.org/t/p/w500/matrix.jpg", URL: "https://www.themoviedb.org/movie/603",
+			}}}},
+		},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	body := response.Body.String()
+	for _, value := range []string{"黑客帝国", "matrix.jpg", "themoviedb.org/movie/603", "plugin-card-grid"} {
+		if !strings.Contains(body, value) {
+			t.Fatalf("public plugin page does not contain %q:\n%s", value, body)
+		}
+	}
+}
+
 func TestViewNeedsMathOnlyForMathContentAndEditor(t *testing.T) {
 	if viewNeedsMath("home.html", ViewData{Posts: []*site.Post{{Source: "plain text"}}}) {
 		t.Fatal("plain home content should not need math assets")

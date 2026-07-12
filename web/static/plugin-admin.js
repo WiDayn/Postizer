@@ -135,7 +135,98 @@
       });
       block.appendChild(list);
     }
+    if (section.cards && section.cards.length) {
+      const grid = document.createElement("div");
+      grid.className = "plugin-card-grid plugin-card-grid--admin";
+      section.cards.forEach((card) => grid.appendChild(renderCard(card)));
+      block.appendChild(grid);
+    }
     return block;
+  }
+
+  function renderCard(card) {
+    const article = document.createElement("article");
+    article.className = "plugin-cover-card";
+
+    const poster = document.createElement("div");
+    poster.className = "plugin-cover-card__poster";
+    if (card.image_url) {
+      const image = document.createElement("img");
+      image.src = card.image_url;
+      image.alt = card.title || "";
+      image.loading = "lazy";
+      image.addEventListener("error", () => {
+        poster.classList.add("is-missing");
+        image.remove();
+      });
+      poster.appendChild(image);
+    } else {
+      poster.classList.add("is-missing");
+    }
+
+    const body = document.createElement("div");
+    body.className = "plugin-cover-card__body";
+    const title = document.createElement("h3");
+    title.textContent = card.title || "Untitled";
+    body.appendChild(title);
+    if (card.subtitle) {
+      const subtitle = document.createElement("p");
+      subtitle.textContent = card.subtitle;
+      body.appendChild(subtitle);
+    }
+    if (card.badges && card.badges.length) {
+      const badges = document.createElement("div");
+      badges.className = "plugin-cover-card__badges";
+      card.badges.forEach((label) => {
+        const badge = document.createElement("span");
+        badge.textContent = label;
+        badges.appendChild(badge);
+      });
+      body.appendChild(badges);
+    }
+    if (card.description) {
+      const description = document.createElement("p");
+      description.className = "plugin-cover-card__description";
+      description.textContent = card.description;
+      body.appendChild(description);
+    }
+    if (/^https?:\/\//i.test(card.url || "")) {
+      const details = document.createElement("a");
+      details.className = "plugin-cover-card__details";
+      details.href = card.url;
+      details.target = "_blank";
+      details.rel = "noopener noreferrer";
+      details.textContent = "查看资料";
+      body.appendChild(details);
+    }
+    if (card.actions && card.actions.length) {
+      const actions = document.createElement("div");
+      actions.className = "plugin-cover-card__actions";
+      card.actions.forEach((action) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `ui-button ${action.style === "primary" ? "ui-button--primary" : "ui-button--ghost"}`;
+        button.textContent = action.label || action.id;
+        button.addEventListener("click", async () => {
+          if (action.confirm && !window.confirm(action.confirm)) return;
+          const formData = new FormData();
+          Object.entries(action.fields || {}).forEach(([key, value]) => formData.set(key, value));
+          button.disabled = true;
+          try {
+            renderResult(await invoke(action.id, formData, panel));
+          } catch (error) {
+            renderResult({ title: "Action failed", summary: error.message, level: "error" });
+          } finally {
+            button.disabled = false;
+          }
+        });
+        actions.appendChild(button);
+      });
+      body.appendChild(actions);
+    }
+
+    article.append(poster, body);
+    return article;
   }
 
   function renderRowValue(value, sectionKind) {

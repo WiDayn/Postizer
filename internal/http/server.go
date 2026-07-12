@@ -99,6 +99,7 @@ type ViewData struct {
 	Media         []media.Item
 	Plugin        *appearance.Pack
 	PluginUI      *appearance.PluginUI
+	PluginResult  *pluginrpc.InvokeActionResponse
 	MediaFilters  []MediaTypeFilter
 	MediaFilter   string
 	Home          bool
@@ -230,9 +231,10 @@ const (
 	loginFailureWindow       = 15 * time.Minute
 	loginLockoutDuration     = 15 * time.Minute
 	pluginSettingsUIOutlet   = "admin.plugin"
+	pluginPublicUIOutlet     = "site.page"
 )
 
-var AppVersion = "v0.1.7"
+var AppVersion = "v0.1.8"
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.Handler, error) {
 	appRoot := env("POSTIZER_APP_ROOT", ".")
@@ -254,6 +256,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 		auth:               newAuthConfig(contentRoot),
 	}
 	s.pluginHost = pluginhost.New(appRoot, s)
+	s.pluginHost.SetDataRoot(filepath.Join(contentRoot, "plugin-data"))
 	if err := s.reloadRuntime(); err != nil {
 		return nil, err
 	}
@@ -273,6 +276,7 @@ func New(store *site.Store, mediaStore *media.Store, contentRoot string) (http.H
 	mux.HandleFunc("GET /tags/{slug}", s.tag)
 	mux.HandleFunc("GET /search", s.search)
 	mux.HandleFunc("GET /search-index.json", s.searchIndex)
+	mux.HandleFunc("GET /plugins/{id}", s.publicPluginPage)
 	mux.HandleFunc("GET /feed.xml", s.feed)
 	mux.HandleFunc("GET /sitemap.xml", s.sitemap)
 	mux.HandleFunc("GET /admin/login", s.login)
@@ -407,6 +411,9 @@ func loadTemplatesFromRoot(activeTheme appearance.Pack, templatesRoot string) (*
 		"hasPluginSettings": func(pack appearance.Pack) bool {
 			return hasUIOutlet(pack, pluginSettingsUIOutlet)
 		},
+		"hasPublicPluginPage": func(pack appearance.Pack) bool {
+			return hasUIOutlet(pack, pluginPublicUIOutlet)
+		},
 		"pluginAction": func(ui *appearance.PluginUI, id string) appearance.PluginUIAction {
 			return pluginAction(ui, id)
 		},
@@ -504,6 +511,47 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 func (s *Server) archive(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	s.render(w, "archive.html", ViewData{Title: "Archive", TitleKey: "title.archive", Store: store, Posts: store.Posts, Pages: store.Pages, Tags: store.Tags})
+}
+
+func (s *Server) publicPluginPage(w http.ResponseWriter, r *http.Request) {
+	pack, ok := s.findPlugin(r.PathValue("id"))
+	if !ok || !hasUIOutlet(pack, pluginPublicUIOutlet) {
+		http.NotFound(w, r)
+		return
+	}
+	ui, err := pluginUI(pack, pluginPublicUIOutlet)
+	if err != nil || len(ui.Pages) == 0 || len(ui.Pages[0].Actions) == 0 {
+		if err == nil {
+			err = errors.New("public plugin page does not declare a render action")
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fields := map[string]string{}
+	for key, values := range r.URL.Query() {
+		if len(values) > 0 {
+			fields[key] = values[len(values)-1]
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	result, err := s.pluginHost.InvokeAction(ctx, pack, &pluginrpc.InvokeActionRequest{
+		PluginID: pack.ID,
+		ActionID: ui.Pages[0].Actions[0],
+		Fields:   fields,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	store := s.currentStore()
+	s.render(w, "plugin_public.html", ViewData{
+		Title:        ui.Pages[0].Title,
+		Store:        store,
+		Plugin:       &pack,
+		PluginUI:     ui,
+		PluginResult: result,
+	})
 }
 
 func (s *Server) post(w http.ResponseWriter, r *http.Request) {

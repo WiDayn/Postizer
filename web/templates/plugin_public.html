@@ -1,0 +1,38 @@
+{{define "plugin_public.html"}}
+{{template "chromeStart" .}}
+<article class="plugin-public-page plugin-public-page--{{.Plugin.ID}}">
+  <header class="plugin-public-hero">
+    <p class="kicker">{{.Plugin.Name}}</p>
+    <h1>{{if .PluginResult.Title}}{{.PluginResult.Title}}{{else}}{{.Plugin.Name}}{{end}}</h1>
+    {{if .PluginResult.Summary}}<p>{{.PluginResult.Summary}}</p>{{end}}
+  </header>
+
+  {{range .PluginResult.Sections}}
+  <section class="plugin-public-section{{if .Kind}} plugin-public-section--{{.Kind}}{{end}}">
+    {{if .Title}}<h2>{{.Title}}</h2>{{end}}
+    {{if .Text}}<p class="plugin-public-section__copy">{{.Text}}</p>{{end}}
+    {{if .Cards}}
+    <div class="plugin-card-grid">
+      {{range .Cards}}
+      <article class="plugin-cover-card">
+        {{if .URL}}<a class="plugin-cover-card__link" href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{end}}
+          <div class="plugin-cover-card__poster{{if not .ImageURL}} is-missing{{end}}">
+            {{if .ImageURL}}<img src="{{.ImageURL}}" alt="{{.Title}}" loading="lazy">{{else}}<span aria-hidden="true">▶</span>{{end}}
+          </div>
+          <div class="plugin-cover-card__body">
+            <h3>{{.Title}}</h3>
+            {{if .Subtitle}}<p>{{.Subtitle}}</p>{{end}}
+            {{if .Badges}}<div class="plugin-cover-card__badges">{{range .Badges}}<span>{{.}}</span>{{end}}</div>{{end}}
+          </div>
+        {{if .URL}}</a>{{end}}
+      </article>
+      {{end}}
+    </div>
+    {{else if not .Text}}
+    <p class="plugin-public-empty">{{msg $ "plugins.public.empty" "No items yet."}}</p>
+    {{end}}
+  </section>
+  {{end}}
+</article>
+{{template "chromeEnd" .}}
+{{end}}

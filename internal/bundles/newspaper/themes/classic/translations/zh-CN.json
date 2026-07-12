@@ -41,6 +41,8 @@
   "nav.appearance": "主题包",
   "nav.resource_marketplace": "资源包市场",
   "nav.plugins": "插件包",
+  "plugins.view_public_page": "查看前台页面",
+  "plugins.public.empty": "暂时还没有条目。",
   "nav.settings": "设置",
   "nav.general_settings": "通用设置",
   "nav.permalinks": "\u56fa\u5b9a\u94fe\u63a5",
