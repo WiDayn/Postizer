@@ -63,12 +63,13 @@ type ActionFile struct {
 }
 
 type InvokeActionResponse struct {
-	Title       string          `json:"title,omitempty"`
-	Summary     string          `json:"summary,omitempty"`
-	Level       string          `json:"level,omitempty"`
-	Sections    []ResultSection `json:"sections,omitempty"`
-	NextActions []NextAction    `json:"next_actions,omitempty"`
-	Job         *ImportJob      `json:"job,omitempty"`
+	Title       string            `json:"title,omitempty"`
+	Summary     string            `json:"summary,omitempty"`
+	Level       string            `json:"level,omitempty"`
+	FieldValues map[string]string `json:"field_values,omitempty"`
+	Sections    []ResultSection   `json:"sections,omitempty"`
+	NextActions []NextAction      `json:"next_actions,omitempty"`
+	Job         *ImportJob        `json:"job,omitempty"`
 }
 
 type ResultSection struct {
@@ -76,12 +77,22 @@ type ResultSection struct {
 	Kind  string       `json:"kind,omitempty"`
 	Text  string       `json:"text,omitempty"`
 	Rows  []ResultRow  `json:"rows,omitempty"`
+	Links []ResultLink `json:"links,omitempty"`
 	Cards []ResultCard `json:"cards,omitempty"`
 }
 
 type ResultRow struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
+}
+
+// ResultLink describes a navigational choice rendered by public plugin pages.
+// It is suitable for tabs, filters, pagination, and other GET-based views.
+type ResultLink struct {
+	Label   string `json:"label"`
+	URL     string `json:"url"`
+	Current bool   `json:"current,omitempty"`
+	Count   int    `json:"count,omitempty"`
 }
 
 // ResultCard is a visual plugin result suitable for media, product, book, and

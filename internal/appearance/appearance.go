@@ -156,6 +156,7 @@ type PluginUIPage struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description,omitempty"`
 	Actions     []string `json:"actions,omitempty"`
+	LoadAction  string   `json:"load_action,omitempty"`
 }
 
 type PluginUIAction struct {
@@ -168,12 +169,13 @@ type PluginUIAction struct {
 }
 
 type PluginUIField struct {
-	Name     string `json:"name"`
-	Label    string `json:"label"`
-	Type     string `json:"type"`
-	Accept   string `json:"accept,omitempty"`
-	Required bool   `json:"required,omitempty"`
-	Help     string `json:"help,omitempty"`
+	Name      string `json:"name"`
+	Label     string `json:"label"`
+	Type      string `json:"type"`
+	Accept    string `json:"accept,omitempty"`
+	Required  bool   `json:"required,omitempty"`
+	Help      string `json:"help,omitempty"`
+	MaxLength int    `json:"max_length,omitempty"`
 }
 
 // Manifest 描述一个主题包、插件包或 bundle 资源合集的元信息。

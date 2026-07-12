@@ -34,6 +34,25 @@
     return JSON.parse(text || "{}");
   }
 
+  function applyFieldValues(scope, values) {
+    Object.entries(values || {}).forEach(([name, value]) => {
+      scope.querySelectorAll(`[data-plugin-action-form] [name="${CSS.escape(name)}"]`).forEach((field) => {
+        if (field instanceof HTMLInputElement && field.type !== "file") field.value = String(value ?? "");
+      });
+    });
+  }
+
+  async function loadPageValues(page) {
+    const actionID = page.dataset.pluginLoadAction;
+    if (!actionID) return;
+    try {
+      const result = await invoke(actionID, new FormData(), page);
+      applyFieldValues(page, result.field_values);
+    } catch (error) {
+      renderResult({ title: "加载设置失败", summary: error.message, level: "error" });
+    }
+  }
+
   function renderResult(result) {
     if (!resultBox) return;
     resultBox.innerHTML = "";
@@ -134,6 +153,19 @@
         list.append(dt, dd);
       });
       block.appendChild(list);
+    }
+    if (section.links && section.links.length) {
+      const links = document.createElement("nav");
+      links.className = `plugin-result-links plugin-result-links--${section.kind || "default"}`;
+      section.links.forEach((item) => {
+        const link = document.createElement("a");
+        link.className = `plugin-result-link${item.current ? " is-current" : ""}`;
+        link.href = item.url || "#";
+        link.textContent = item.count > 0 ? `${item.label} ${item.count}` : item.label;
+        if (item.current) link.setAttribute("aria-current", "page");
+        links.appendChild(link);
+      });
+      block.appendChild(links);
     }
     if (section.cards && section.cards.length) {
       const grid = document.createElement("div");
@@ -311,4 +343,6 @@
       }
     });
   });
+
+  document.querySelectorAll("[data-plugin-load-action]").forEach((page) => loadPageValues(page));
 })();

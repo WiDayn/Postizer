@@ -69,18 +69,72 @@ func TestPluginPublicTemplateRendersCoverCards(t *testing.T) {
 		Plugin: &appearance.Pack{Manifest: appearance.Manifest{ID: "cover-gallery", Name: "Cover Gallery"}},
 		PluginResult: &pluginrpc.InvokeActionResponse{
 			Title: "电影与电视",
-			Sections: []pluginrpc.ResultSection{{Title: "已看", Cards: []pluginrpc.ResultCard{{
-				Title: "黑客帝国", ImageURL: "https://image.tmdb.org/t/p/w500/matrix.jpg", URL: "https://www.themoviedb.org/movie/603",
-			}}}},
+			Sections: []pluginrpc.ResultSection{
+				{
+					Kind: "tabs",
+					Links: []pluginrpc.ResultLink{{
+						Label: "已看", URL: "/plugins/cover-gallery?status=watched", Current: true, Count: 1,
+					}},
+				},
+				{
+					Title: "已看",
+					Cards: []pluginrpc.ResultCard{{
+						Title: "黑客帝国", ImageURL: "https://image.tmdb.org/t/p/w500/matrix.jpg", URL: "https://www.themoviedb.org/movie/603",
+					}},
+				},
+			},
 		},
 	})
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d", response.Code)
 	}
 	body := response.Body.String()
-	for _, value := range []string{"黑客帝国", "matrix.jpg", "themoviedb.org/movie/603", "plugin-card-grid"} {
+	for _, value := range []string{"黑客帝国", "matrix.jpg", "themoviedb.org/movie/603", "plugin-card-grid", "status=watched", "aria-current=\"page\""} {
 		if !strings.Contains(body, value) {
 			t.Fatalf("public plugin page does not contain %q:\n%s", value, body)
+		}
+	}
+}
+
+func TestPluginAdminTemplateRendersInitialValueLoaderAndLengthLimit(t *testing.T) {
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Join(previousDir, "..", "..")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	templates, err := loadTemplates(appearance.Pack{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{templates: templates, store: &site.Store{}, appearance: &appearance.Catalog{}}
+	response := httptest.NewRecorder()
+	s.render(response, "admin_plugin_settings.html", ViewData{
+		Title:  "TMDB 设置",
+		Plugin: &appearance.Pack{Manifest: appearance.Manifest{ID: "test-plugin", Name: "Test Plugin", Version: "1.0.0"}},
+		PluginUI: &appearance.PluginUI{
+			Pages: []appearance.PluginUIPage{{ID: "settings", Title: "设置", Actions: []string{"configure"}, LoadAction: "get_config"}},
+			Actions: []appearance.PluginUIAction{{
+				ID: "configure", Label: "保存", Kind: "form", Fields: []appearance.PluginUIField{{
+					Name: "token", Label: "Token", Type: "text", Required: true, MaxLength: 2048,
+				}},
+			}},
+		},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	body := response.Body.String()
+	for _, value := range []string{`data-plugin-load-action="get_config"`, `type="text"`, `maxlength="2048"`, `plugin-admin.js?v=7`} {
+		if !strings.Contains(body, value) {
+			t.Fatalf("plugin settings page does not contain %q:\n%s", value, body)
 		}
 	}
 }
