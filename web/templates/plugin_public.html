@@ -11,6 +11,11 @@
   <section class="plugin-public-section{{if .Kind}} plugin-public-section--{{.Kind}}{{end}}">
     {{if .Title}}<h2>{{.Title}}</h2>{{end}}
     {{if .Text}}<p class="plugin-public-section__copy">{{.Text}}</p>{{end}}
+    {{if .Links}}
+    <nav class="plugin-result-links plugin-result-links--{{.Kind}}" aria-label="{{if .Title}}{{.Title}}{{else}}{{$.Plugin.Name}}{{end}}">
+      {{range .Links}}<a href="{{.URL}}" class="plugin-result-link{{if .Current}} is-current{{end}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}{{if gt .Count 0}} <span>{{.Count}}</span>{{end}}</a>{{end}}
+    </nav>
+    {{end}}
     {{if .Cards}}
     <div class="plugin-card-grid">
       {{range .Cards}}
@@ -28,7 +33,7 @@
       </article>
       {{end}}
     </div>
-    {{else if not .Text}}
+    {{else if and (not .Text) (not .Links)}}
     <p class="plugin-public-empty">{{msg $ "plugins.public.empty" "No items yet."}}</p>
     {{end}}
   </section>

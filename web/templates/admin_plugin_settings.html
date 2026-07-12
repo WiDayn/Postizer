@@ -26,7 +26,7 @@
     {{end}}
 
     {{range .PluginUI.Pages}}
-    <section class="plugin-admin-page">
+    <section class="plugin-admin-page"{{if .LoadAction}} data-plugin-load-action="{{.LoadAction}}"{{end}}>
       <header class="plugin-admin-page__head">
         <div>
           <h3>{{.Title}}</h3>
@@ -55,7 +55,7 @@
               {{else}}
               <label class="ui-field plugin-action-field">
                 <span>{{.Label}}</span>
-                <input class="ui-input" type="{{if .Type}}{{.Type}}{{else}}text{{end}}" name="{{.Name}}" {{if .Required}}required{{end}}>
+                <input class="ui-input" type="{{if .Type}}{{.Type}}{{else}}text{{end}}" name="{{.Name}}" {{if .Required}}required{{end}}{{if gt .MaxLength 0}} maxlength="{{.MaxLength}}"{{end}}>
                 {{if .Help}}<small>{{.Help}}</small>{{end}}
               </label>
               {{end}}
@@ -78,6 +78,6 @@
     </section>
   {{end}}
 </section>
-<script defer src="/static/plugin-admin.js?v=5"></script>
+<script defer src="/static/plugin-admin.js?v=7"></script>
 {{template "adminEnd" .}}
 {{end}}
