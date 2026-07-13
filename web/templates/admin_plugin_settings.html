@@ -43,7 +43,7 @@
               {{if $action.Description}}<p>{{$action.Description}}</p>{{end}}
             </div>
           </div>
-          <form class="plugin-action-form" data-plugin-action-form data-action-id="{{$action.ID}}">
+          <form class="plugin-action-form" data-plugin-action-form data-action-id="{{$action.ID}}"{{if $action.RequiresConfirmation}} data-requires-confirmation="true"{{end}}>
             {{range $action.Fields}}
               {{if eq .Type "file"}}
               <label class="ui-file-drop plugin-file-drop" data-file-drop>
@@ -53,11 +53,19 @@
                 <span class="ui-file-drop__name" data-file-name></span>
               </label>
               {{else}}
+              {{if eq .Type "checkbox"}}
+              <label class="ui-field plugin-action-field plugin-action-field--checkbox">
+                <span>{{.Label}}</span>
+                <input class="ui-input" type="checkbox" name="{{.Name}}" value="true">
+                {{if .Help}}<small>{{.Help}}</small>{{end}}
+              </label>
+              {{else}}
               <label class="ui-field plugin-action-field">
                 <span>{{.Label}}</span>
                 <input class="ui-input" type="{{if .Type}}{{.Type}}{{else}}text{{end}}" name="{{.Name}}" {{if .Required}}required{{end}}{{if gt .MaxLength 0}} maxlength="{{.MaxLength}}"{{end}}{{if ne .Min 0}} min="{{.Min}}"{{end}}{{if ne .Max 0}} max="{{.Max}}"{{end}}>
                 {{if .Help}}<small>{{.Help}}</small>{{end}}
               </label>
+              {{end}}
               {{end}}
             {{end}}
             <footer class="plugin-action-footer">

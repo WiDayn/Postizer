@@ -1,0 +1,111 @@
+{
+  "pages": [
+    {
+      "id": "settings",
+      "title": "WebDAV 备份设置",
+      "description": "备份包含全部文章、页面与媒体。密码仅保存在服务器上的插件私有数据目录中。",
+      "load_action": "get_config",
+      "actions": [
+        "configure"
+      ]
+    },
+    {
+      "id": "operations",
+      "title": "连接与备份",
+      "description": "保存设置后可以测试连接或立即创建一份完整备份。",
+      "actions": [
+        "test_connection",
+        "backup_now",
+        "get_status"
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "configure",
+      "label": "保存设置",
+      "description": "服务器地址可包含 WebDAV 根路径，例如 Nextcloud 的 /remote.php/dav/files/用户名。",
+      "kind": "form",
+      "fields": [
+        {
+          "name": "server_url",
+          "label": "WebDAV 服务器地址",
+          "type": "url",
+          "required": true,
+          "max_length": 2048,
+          "help": "例如：https://cloud.example.com/remote.php/dav/files/alice"
+        },
+        {
+          "name": "remote_path",
+          "label": "远程备份目录",
+          "type": "text",
+          "required": true,
+          "max_length": 512,
+          "help": "相对于服务器地址的目录，例如：Postizer/backups"
+        },
+        {
+          "name": "username",
+          "label": "用户名",
+          "type": "text",
+          "max_length": 512
+        },
+        {
+          "name": "password",
+          "label": "密码或应用密码",
+          "type": "password",
+          "max_length": 2048,
+          "help": "留空表示保留已经保存的密码。建议使用单独的应用密码。"
+        },
+        {
+          "name": "enabled",
+          "label": "启用自动备份",
+          "type": "checkbox",
+          "help": "启用后由后台插件按设定间隔自动运行。"
+        },
+        {
+          "name": "interval_hours",
+          "label": "自动备份间隔（小时）",
+          "type": "number",
+          "required": true,
+          "min": 1,
+          "max": 720,
+          "help": "1–720 小时，默认 24 小时。"
+        },
+        {
+          "name": "retention_count",
+          "label": "保留备份数量",
+          "type": "number",
+          "required": true,
+          "min": 1,
+          "max": 100,
+          "help": "成功上传后删除较旧的 Postizer 备份，默认保留 7 份。"
+        },
+        {
+          "name": "skip_tls_verify",
+          "label": "允许未经验证的 TLS 证书",
+          "type": "checkbox",
+          "help": "仅用于可信内网的自签名证书；互联网服务器不建议开启。"
+        }
+      ]
+    },
+    {
+      "id": "test_connection",
+      "label": "测试 WebDAV 连接",
+      "description": "检查认证并创建尚不存在的远程备份目录。",
+      "kind": "action"
+    },
+    {
+      "id": "backup_now",
+      "label": "立即备份",
+      "description": "生成完整 ZIP 并上传到 WebDAV。大型媒体库可能需要一些时间。",
+      "kind": "action",
+      "requires_confirmation": true
+    },
+    {
+      "id": "get_status",
+      "label": "刷新备份状态",
+      "description": "查看最近一次运行结果和下次自动备份时间。",
+      "kind": "action"
+    }
+  ]
+}

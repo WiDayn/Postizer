@@ -89,6 +89,30 @@ func TestCreateContentExportIncludesPostsPagesAndMedia(t *testing.T) {
 	}
 }
 
+func TestCreateContentExportCanReturnPluginLocalFile(t *testing.T) {
+	s := &Server{contentRoot: t.TempDir(), pluginDownloads: map[string]pluginDownload{}}
+	response, err := s.CreateContentExport(context.Background(), &pluginrpc.CreateContentExportRequest{
+		PluginID:  "webdav-backup",
+		LocalFile: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(response.LocalPath)
+	if response.LocalPath == "" {
+		t.Fatal("local export should return a path")
+	}
+	if response.DownloadURL != "" {
+		t.Fatalf("local export download URL = %q", response.DownloadURL)
+	}
+	if len(s.pluginDownloads) != 0 {
+		t.Fatal("local export should not register an admin download")
+	}
+	if _, err := os.Stat(response.LocalPath); err != nil {
+		t.Fatalf("local export does not exist: %v", err)
+	}
+}
+
 func zipEntryNames(t *testing.T, filename string) map[string]bool {
 	t.Helper()
 	reader, err := zip.OpenReader(filename)

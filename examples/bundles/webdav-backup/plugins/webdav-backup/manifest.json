@@ -1,0 +1,72 @@
+{
+  "id": "webdav-backup",
+  "type": "plugin",
+  "name": "WebDAV Backup",
+  "version": "1.0.0",
+  "description": "Back up all articles, pages, and media as ZIP archives on a WebDAV server.",
+  "runtime": {
+    "kind": "grpc",
+    "background": true,
+    "platforms": [
+      {
+        "goos": "linux",
+        "goarch": "amd64",
+        "command": "bin/webdav-backup-linux-amd64"
+      },
+      {
+        "goos": "linux",
+        "goarch": "arm64",
+        "command": "bin/webdav-backup-linux-arm64"
+      },
+      {
+        "goos": "darwin",
+        "goarch": "amd64",
+        "command": "bin/webdav-backup-darwin-amd64"
+      },
+      {
+        "goos": "darwin",
+        "goarch": "arm64",
+        "command": "bin/webdav-backup-darwin-arm64"
+      },
+      {
+        "goos": "windows",
+        "goarch": "amd64",
+        "command": "bin/webdav-backup-windows-amd64.exe"
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "postizer.plugin.v1.PluginService",
+      "methods": [
+        "Handshake",
+        "InvokeAction",
+        "Shutdown"
+      ]
+    }
+  ],
+  "requires": {
+    "postizer": "v0.1.13",
+    "host_services": [
+      {
+        "name": "postizer.plugin.v1.HostService",
+        "methods": [
+          "CreateContentExport"
+        ]
+      }
+    ]
+  },
+  "ui_entries": [
+    {
+      "id": "settings",
+      "outlet": "admin.plugin",
+      "path": "ui/admin.json"
+    }
+  ],
+  "permissions": [
+    "content.read",
+    "media.read",
+    "network.fetch",
+    "background.run"
+  ]
+}

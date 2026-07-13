@@ -1376,6 +1376,25 @@ func TestDeleteUserPackRejectsInvalidID(t *testing.T) {
 	}
 }
 
+func TestBackgroundRuntimeRequiresPermission(t *testing.T) {
+	manifest := Manifest{
+		ID:   "background-plugin",
+		Type: PluginPack,
+		Runtime: PluginRuntime{
+			Kind:       RuntimeGRPC,
+			Command:    "plugin",
+			Background: true,
+		},
+	}
+	if err := validatePluginRuntime(manifest); err == nil || !strings.Contains(err.Error(), "background.run") {
+		t.Fatalf("validation error = %v", err)
+	}
+	manifest.Permissions = []PluginPermission{"background.run"}
+	if err := validatePluginRuntime(manifest); err != nil {
+		t.Fatalf("valid background runtime was rejected: %v", err)
+	}
+}
+
 func writePackFile(t *testing.T, path string, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
