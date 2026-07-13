@@ -5211,6 +5211,11 @@
   color: var(--ink, #181715);
 }
 
+.plugin-result-links--pagination {
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
 .plugin-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
