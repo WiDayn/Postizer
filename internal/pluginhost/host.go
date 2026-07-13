@@ -94,6 +94,50 @@ func (h *Host) InvokeAction(ctx context.Context, pack appearance.Pack, req *plug
 	return service.InvokeAction(ctx, req)
 }
 
+// ReconcileBackground stops runtimes for disabled plugins and starts enabled
+// plugins that explicitly declare a background runtime. It is safe to call
+// after every catalog reload; already-running plugins are reused.
+func (h *Host) ReconcileBackground(packs []appearance.Pack) {
+	active := make(map[string]appearance.Pack, len(packs))
+	for _, pack := range packs {
+		active[pack.ID] = pack
+	}
+
+	h.mu.Lock()
+	for id, existing := range h.clients {
+		pack, ok := active[id]
+		if ok && existing.pack.Version == pack.Version && existing.pack.RootDir == pack.RootDir {
+			continue
+		}
+		closeClient(existing)
+		delete(h.clients, id)
+	}
+	h.mu.Unlock()
+
+	for _, pack := range packs {
+		if pack.Runtime.Kind != appearance.RuntimeGRPC || !pack.Runtime.Background || !hasPermission(pack, "background.run") {
+			continue
+		}
+		pack := pack
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
+			defer cancel()
+			if _, err := h.client(ctx, pack); err != nil {
+				log.Printf("start background plugin %q: %v", pack.ID, err)
+			}
+		}()
+	}
+}
+
+func hasPermission(pack appearance.Pack, permission appearance.PluginPermission) bool {
+	for _, candidate := range pack.Permissions {
+		if candidate == permission {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Host) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -126,6 +170,12 @@ func (h *Host) client(ctx context.Context, pack appearance.Pack) (pluginrpc.Plug
 	}
 
 	h.mu.Lock()
+	if existing := h.clients[pack.ID]; existing != nil && pluginRunning(existing) {
+		service := existing.service
+		h.mu.Unlock()
+		closeClient(started)
+		return service, nil
+	}
 	h.clients[pack.ID] = started
 	h.mu.Unlock()
 	return started.service, nil

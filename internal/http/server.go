@@ -236,7 +236,7 @@ const (
 	pluginPublicUIOutlet     = "site.page"
 )
 
-var AppVersion = "v0.1.12"
+var AppVersion = "v0.1.13"
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string, updateTriggers ...func(string) error) (http.Handler, error) {
 	appRoot := env("POSTIZER_APP_ROOT", ".")
@@ -3307,6 +3307,9 @@ func (s *Server) reloadRuntime() error {
 		return err
 	}
 	s.replaceRuntime(store, &catalog, templates)
+	if s.pluginHost != nil {
+		s.pluginHost.ReconcileBackground(catalog.ActivePlugins)
+	}
 	return nil
 }
 

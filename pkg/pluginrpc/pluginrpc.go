@@ -198,7 +198,8 @@ type ReloadRuntimeResponse struct {
 }
 
 type CreateContentExportRequest struct {
-	PluginID string `json:"plugin_id"`
+	PluginID  string `json:"plugin_id"`
+	LocalFile bool   `json:"local_file,omitempty"`
 }
 
 type CreateContentExportResponse struct {
@@ -210,6 +211,7 @@ type CreateContentExportResponse struct {
 	Pages       int    `json:"pages"`
 	MediaItems  int    `json:"media_items"`
 	MediaFiles  int    `json:"media_files"`
+	LocalPath   string `json:"local_path,omitempty"`
 }
 
 type ShutdownRequest struct {

@@ -107,12 +107,13 @@ const (
 
 // PluginRuntime describes an optional external process used by a plugin.
 type PluginRuntime struct {
-	Kind      RuntimeKind             `json:"kind"`
-	Command   string                  `json:"command"`
-	Args      []string                `json:"args"`
-	WorkDir   string                  `json:"work_dir"`
-	Env       map[string]string       `json:"env"`
-	Platforms []PluginRuntimePlatform `json:"platforms"`
+	Kind       RuntimeKind             `json:"kind"`
+	Command    string                  `json:"command"`
+	Args       []string                `json:"args"`
+	WorkDir    string                  `json:"work_dir"`
+	Env        map[string]string       `json:"env"`
+	Background bool                    `json:"background,omitempty"`
+	Platforms  []PluginRuntimePlatform `json:"platforms"`
 }
 
 // PluginRuntimePlatform declares a platform-specific executable for a plugin.
@@ -2009,6 +2010,9 @@ func validateManifest(manifest Manifest) error {
 func validatePluginRuntime(manifest Manifest) error {
 	switch manifest.Runtime.Kind {
 	case RuntimeStatic:
+		if manifest.Runtime.Background {
+			return errors.New("runtime.background requires a grpc plugin runtime")
+		}
 		return nil
 	case RuntimeGRPC:
 		if manifest.Type != PluginPack {
@@ -2016,6 +2020,9 @@ func validatePluginRuntime(manifest Manifest) error {
 		}
 		if strings.TrimSpace(manifest.Runtime.Command) == "" && len(manifest.Runtime.Platforms) == 0 {
 			return errors.New("runtime.command or runtime.platforms is required for grpc plugins")
+		}
+		if manifest.Runtime.Background && !manifestRequestsPermission(manifest, "background.run") {
+			return errors.New("runtime.background requires the background.run permission")
 		}
 		seen := map[string]bool{}
 		for index, platform := range manifest.Runtime.Platforms {
@@ -2038,6 +2045,15 @@ func validatePluginRuntime(manifest Manifest) error {
 	default:
 		return fmt.Errorf("invalid runtime kind %q", manifest.Runtime.Kind)
 	}
+}
+
+func manifestRequestsPermission(manifest Manifest, permission PluginPermission) bool {
+	for _, candidate := range manifest.Permissions {
+		if candidate == permission {
+			return true
+		}
+	}
+	return false
 }
 
 func validateManifestRequirements(manifest Manifest) error {

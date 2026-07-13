@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_at": "2026-05-22T00:00:00Z",
+  "updated_at": "2026-07-13T00:00:00Z",
   "items": [
     {
       "id": "content-exporter",
@@ -26,6 +26,32 @@
         "asset": "content-exporter-v1.0.0.zip"
       },
       "min_postizer": "v0.1.4"
+    },
+    {
+      "id": "webdav-backup",
+      "name": "WebDAV Backup",
+      "summary": "Automatically back up posts, pages, and media to a WebDAV server.",
+      "description": "Creates complete Postizer ZIP archives on a schedule, uploads them to WebDAV, and removes older backups according to the configured retention count.",
+      "repo": "https://github.com/WiDayn/Postizer",
+      "tags": [
+        "plugin",
+        "backup",
+        "webdav"
+      ],
+      "themes": [],
+      "plugins": [
+        {
+          "id": "webdav-backup",
+          "name": "WebDAV Backup",
+          "version": "1.0.0",
+          "description": "Back up all posts, pages, and media to WebDAV automatically."
+        }
+      ],
+      "release": {
+        "tag": "v0.1.13",
+        "asset": "webdav-backup-v1.0.0.zip"
+      },
+      "min_postizer": "v0.1.13"
     }
   ]
 }

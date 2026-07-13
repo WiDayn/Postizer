@@ -159,6 +159,7 @@ message ReloadRuntimeResponse {
 
 message CreateContentExportRequest {
   string plugin_id = 1;
+  bool local_file = 2;
 }
 
 message CreateContentExportResponse {
@@ -170,6 +171,7 @@ message CreateContentExportResponse {
   int32 pages = 6;
   int32 media_items = 7;
   int32 media_files = 8;
+  string local_path = 9;
 }
 
 message ShutdownRequest {

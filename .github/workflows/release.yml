@@ -36,11 +36,19 @@ jobs:
       - run: bash scripts/build-release-assets.sh
         env:
           POSTIZER_RELEASE_VERSION: ${{ github.ref_name }}
+      - run: bash scripts/build-webdav-backup-pack.sh
+        env:
+          POSTIZER_PLUGIN_DIST_DIR: dist/release
+          WEBDAV_BACKUP_VERSION: 1.0.0
+      - name: Add plugin checksum to release manifest
+        working-directory: dist/release
+        run: sha256sum webdav-backup-v1.0.0.zip >> SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/release/postizer-${{ github.ref_name }}-linux-amd64.tar.gz
             dist/release/postizer-${{ github.ref_name }}-linux-arm64.tar.gz
+            dist/release/webdav-backup-v1.0.0.zip
             dist/release/SHA256SUMS
 
   docker:

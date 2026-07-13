@@ -34,10 +34,13 @@ type contentExportSummary struct {
 	GeneratedAt time.Time
 }
 
-func (s *Server) CreateContentExport(context.Context, *pluginrpc.CreateContentExportRequest) (*pluginrpc.CreateContentExportResponse, error) {
+func (s *Server) CreateContentExport(_ context.Context, req *pluginrpc.CreateContentExportRequest) (*pluginrpc.CreateContentExportResponse, error) {
 	summary, err := s.createContentExport()
 	if err != nil {
 		return nil, err
+	}
+	if req != nil && req.LocalFile {
+		return contentExportResponse(summary, "", summary.Path), nil
 	}
 	token, err := randomUploadToken()
 	if err != nil {
@@ -50,16 +53,21 @@ func (s *Server) CreateContentExport(context.Context, *pluginrpc.CreateContentEx
 		contentType: summary.ContentType,
 		createdAt:   time.Now(),
 	})
+	return contentExportResponse(summary, "/admin/api/plugin-downloads/"+token, ""), nil
+}
+
+func contentExportResponse(summary contentExportSummary, downloadURL, localPath string) *pluginrpc.CreateContentExportResponse {
 	return &pluginrpc.CreateContentExportResponse{
 		Filename:    summary.Filename,
 		ContentType: summary.ContentType,
-		DownloadURL: "/admin/api/plugin-downloads/" + token,
+		DownloadURL: downloadURL,
 		Bytes:       summary.Bytes,
 		Posts:       summary.Posts,
 		Pages:       summary.Pages,
 		MediaItems:  summary.MediaItems,
 		MediaFiles:  summary.MediaFiles,
-	}, nil
+		LocalPath:   localPath,
+	}
 }
 
 func (s *Server) createContentExport() (contentExportSummary, error) {

@@ -42,7 +42,12 @@
   function applyFieldValues(scope, values) {
     Object.entries(values || {}).forEach(([name, value]) => {
       scope.querySelectorAll(`[data-plugin-action-form] [name="${CSS.escape(name)}"]`).forEach((field) => {
-        if (field instanceof HTMLInputElement && field.type !== "file") field.value = String(value ?? "");
+        if (!(field instanceof HTMLInputElement) || field.type === "file") return;
+        if (field.type === "checkbox") {
+          field.checked = ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
+          return;
+        }
+        field.value = String(value ?? "");
       });
     });
   }
@@ -344,6 +349,7 @@
   document.querySelectorAll("[data-plugin-action-form]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (form.dataset.requiresConfirmation === "true" && !window.confirm(tr("plugins.action.confirm", "Are you sure you want to run this action?"))) return;
       const actionID = form.dataset.actionId;
       const formData = new FormData(form);
       const submitter = form.querySelector("button[type='submit']");
