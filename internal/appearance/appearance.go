@@ -176,6 +176,8 @@ type PluginUIField struct {
 	Required  bool   `json:"required,omitempty"`
 	Help      string `json:"help,omitempty"`
 	MaxLength int    `json:"max_length,omitempty"`
+	Min       int    `json:"min,omitempty"`
+	Max       int    `json:"max,omitempty"`
 }
 
 // Manifest 描述一个主题包、插件包或 bundle 资源合集的元信息。

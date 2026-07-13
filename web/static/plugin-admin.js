@@ -67,6 +67,8 @@
       return;
     }
 
+    applyFieldValues(panel, result.field_values);
+
     const fragment = document.createDocumentFragment();
     if (result.title || result.summary) {
       const header = document.createElement("div");

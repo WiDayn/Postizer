@@ -236,7 +236,7 @@ const (
 	pluginPublicUIOutlet     = "site.page"
 )
 
-var AppVersion = "v0.1.11"
+var AppVersion = "v0.1.12"
 
 func New(store *site.Store, mediaStore *media.Store, contentRoot string, updateTriggers ...func(string) error) (http.Handler, error) {
 	appRoot := env("POSTIZER_APP_ROOT", ".")
@@ -564,12 +564,21 @@ func (s *Server) publicPluginPage(w http.ResponseWriter, r *http.Request) {
 	}
 	store := s.currentStore()
 	s.render(w, "plugin_public.html", ViewData{
-		Title:        ui.Pages[0].Title,
+		Title:        publicPluginPageTitle(ui.Pages[0].Title, result),
 		Store:        store,
 		Plugin:       &pack,
 		PluginUI:     ui,
 		PluginResult: result,
 	})
+}
+
+func publicPluginPageTitle(fallback string, result *pluginrpc.InvokeActionResponse) string {
+	if result != nil {
+		if title := strings.TrimSpace(result.Title); title != "" {
+			return title
+		}
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func (s *Server) post(w http.ResponseWriter, r *http.Request) {

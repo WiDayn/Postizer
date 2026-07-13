@@ -97,6 +97,15 @@ func TestPluginPublicTemplateRendersCoverCards(t *testing.T) {
 	}
 }
 
+func TestPublicPluginPageTitlePrefersPluginResult(t *testing.T) {
+	if got := publicPluginPageTitle("Static title", &pluginrpc.InvokeActionResponse{Title: "Custom title"}); got != "Custom title" {
+		t.Fatalf("title = %q", got)
+	}
+	if got := publicPluginPageTitle(" Static title ", &pluginrpc.InvokeActionResponse{}); got != "Static title" {
+		t.Fatalf("fallback title = %q", got)
+	}
+}
+
 func TestPluginAdminTemplateRendersInitialValueLoaderAndLengthLimit(t *testing.T) {
 	previousDir, err := os.Getwd()
 	if err != nil {
@@ -123,9 +132,10 @@ func TestPluginAdminTemplateRendersInitialValueLoaderAndLengthLimit(t *testing.T
 		PluginUI: &appearance.PluginUI{
 			Pages: []appearance.PluginUIPage{{ID: "settings", Title: "设置", Actions: []string{"configure"}, LoadAction: "get_config"}},
 			Actions: []appearance.PluginUIAction{{
-				ID: "configure", Label: "保存", Kind: "form", Fields: []appearance.PluginUIField{{
-					Name: "token", Label: "Token", Type: "text", Required: true, MaxLength: 2048,
-				}},
+				ID: "configure", Label: "保存", Kind: "form", Fields: []appearance.PluginUIField{
+					{Name: "token", Label: "Token", Type: "text", Required: true, MaxLength: 2048},
+					{Name: "page_size", Label: "Page size", Type: "number", Required: true, Min: 6, Max: 100},
+				},
 			}},
 		},
 	})
@@ -133,7 +143,7 @@ func TestPluginAdminTemplateRendersInitialValueLoaderAndLengthLimit(t *testing.T
 		t.Fatalf("status = %d", response.Code)
 	}
 	body := response.Body.String()
-	for _, value := range []string{`data-plugin-load-action="get_config"`, `type="text"`, `maxlength="2048"`, `plugin-admin.js?v=8`} {
+	for _, value := range []string{`data-plugin-load-action="get_config"`, `type="text"`, `maxlength="2048"`, `type="number"`, `min="6"`, `max="100"`, `plugin-admin.js?v=9`} {
 		if !strings.Contains(body, value) {
 			t.Fatalf("plugin settings page does not contain %q:\n%s", value, body)
 		}
